@@ -269,15 +269,15 @@ const BODEGA_SEED = [
 // ─ Todos los datos se guardan aquí, compartidos entre usuarios
 // ─ Obtén las credenciales en: supabase.com → Settings → API
 // ═══════════════════════════════════════════════════════════════
-const SB_URL = 'TU_SUPABASE_URL';   // ej: https://xxxx.supabase.co
-const SB_KEY = 'TU_SUPABASE_ANON_KEY'; // empieza con eyJ...
+const SB_URL = 'https://qivcmhjlmbgeeajfuxyv.supabase.co';   // ej: https://xxxx.supabase.co
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
 
 // Estado de conexión con Supabase
 let SB_OK = false;
 
 // Helper: llamada a Supabase REST API
 async function sbFetch(table, method='GET', body=null, filters='') {
-  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') return null;
+  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') return null;
   try {
     const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
       method,
@@ -304,7 +304,7 @@ async function sbFetch(table, method='GET', body=null, filters='') {
 
 // ─── CARGAR DATOS DESDE SUPABASE ─────────────────────────────
 async function loadFromSupabase() {
-  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') {
+  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') {
     console.log('Supabase no configurado — usando datos locales');
     return false;
   }
@@ -558,19 +558,9 @@ function hideLoadingBanner() {
   if (el) el.style.display = 'none';
 }
 
-const EMPLEADOS_SEED = [
-  { id:'e1', name:'Carlos Mejía Torres',   cedula:'1.234.567', email:'carlos.mejia@specialcar.com', phone:'+57 310 555 0001', areaId:1,  cargo:'Mecánico General',     empresaId:'emp1', fechaIngreso:'2022-03-15', contratoTipo:'indefinido', salario:2500000, dir:'Calle 10 #23-45', status:'activo', docs:{}, contratos:[], nomina:[], extractos:[] },
-  { id:'e2', name:'Laura Ríos Sánchez',    cedula:'2.345.678', email:'laura.rios@specialcar.com',   phone:'+57 312 555 0002', areaId:2,  cargo:'Asesor Comercial',     empresaId:'emp1', fechaIngreso:'2021-07-01', contratoTipo:'indefinido', salario:3200000, dir:'Carrera 5 #12-34', status:'activo', docs:{}, contratos:[], nomina:[], extractos:[] },
-  { id:'e3', name:'Andrés Felipe Gómez',   cedula:'3.456.789', email:'andres.gomez@specialcar.com', phone:'+57 300 555 0003', areaId:4,  cargo:'Desarrollador Full-Stack',empresaId:'emp2',fechaIngreso:'2023-01-10', contratoTipo:'fijo',       salario:5800000, dir:'Av Caracas 200',  status:'activo', docs:{}, contratos:[], nomina:[], extractos:[] },
-  { id:'e4', name:'Valentina Cruz Ospina', cedula:'4.567.890', email:'valen.cruz@specialcar.com',   phone:'+57 315 555 0004', areaId:6,  cargo:'Coordinador RRHH',     empresaId:'emp1', fechaIngreso:'2020-05-20', contratoTipo:'indefinido', salario:4500000, dir:'Carrera 80 #50-10', status:'activo', docs:{}, contratos:[], nomina:[], extractos:[] },
-  { id:'e5', name:'Miguel Herrera Pinto',  cedula:'5.678.901', email:'miguel.herrera@autogroup.com',phone:'+57 318 555 0005', areaId:12, cargo:'Jefe de Flota',        empresaId:'emp2', fechaIngreso:'2019-11-03', contratoTipo:'indefinido', salario:6200000, dir:'Calle 50 #30-20', status:'activo', docs:{}, contratos:[], nomina:[], extractos:[] },
-];
+const EMPLEADOS_SEED = [];
 
-const CANDIDATOS_SEED = [
-  { id:'c1', name:'Patricia Vargas Suárez', email:'patricia.v@mail.com', phone:'+57 320 111 2222', areaId:3, cargo:'Auxiliar de Logística', empresaId:'emp1', status:'evaluacion', exp:'2 años en bodegas y logística.', date:'10/03/2026', score:65, evaluation:null, notes:'Buena actitud', cvData:null, cvName:null },
-  { id:'c2', name:'Jhon Morales Peña',      email:'jhon.m@mail.com',     phone:'+57 321 222 3333', areaId:2, cargo:'Asesor Comercial',      empresaId:'emp3', status:'aprobado',   exp:'4 años en ventas automotriz. Certificado en CRM Salesforce.', date:'08/03/2026', score:88, evaluation:null, notes:'Excelente perfil', cvData:null, cvName:null },
-  { id:'c3', name:'Camila Suárez Rincón',   email:'camila.s@mail.com',   phone:'+57 322 333 4444', areaId:5, cargo:'Auxiliar Contable',     empresaId:'emp1', status:'pendiente',  exp:'Recién egresada. Manejo de Excel avanzado.', date:'12/03/2026', score:null, evaluation:null, notes:'', cvData:null, cvName:null },
-];
+const CANDIDATOS_SEED = [];
 
 const DEFAULT_CHECKLIST = {
   tecnicas: [
@@ -592,14 +582,9 @@ const DEFAULT_CHECKLIST = {
   ],
 };
 
-const PERMISOS_SEED = [
-  { id:'p1', empId:'e1', tipo:'medico',   inicio:'2026-03-18', fin:'2026-03-18', dias:1, motivo:'Cita de control médico rutinaria.', status:'pendiente', fecha:'2026-03-17' },
-  { id:'p2', empId:'e2', tipo:'personal', inicio:'2026-03-20', fin:'2026-03-21', dias:2, motivo:'Asunto familiar importante.',        status:'aprobado',  fecha:'2026-03-10' },
-];
+const PERMISOS_SEED = [];
 
-const INCAP_SEED = [
-  { id:'i1', empId:'e3', diagnostico:'Gripa severa', dias:5, eps:'Sura', fechaInicio:'2026-03-15', status:'pendiente', fileData:null, fileName:null, fecha:'2026-03-15' },
-];
+const INCAP_SEED = [];
 
 // ─── INIT ─────────────────────────────────────────────────
 async function init() {
@@ -1132,6 +1117,14 @@ function openEditEmpModal(empId) {
   openModal('modal-add-emp');
 }
 window.openEditEmpModal = openEditEmpModal;
+window.filterEmpsByEmpresa = filterEmpsByEmpresa;
+window.renderSiigoMultiempresa = renderSiigoMultiempresa;
+window.saveSiigoEmpresa = saveSiigoEmpresa;
+window.testSiigoEmpresa = testSiigoEmpresa;
+window.openSiigoConfigEmpresa = openSiigoConfigEmpresa;
+window.getSiigoStatus = getSiigoStatus;
+window.siigoEmp = siigoEmp;
+
 window.openSiigoConfig = openSiigoConfig;
 window.saveSiigoConfigModal = saveSiigoConfigModal;
 window.openNovedadesPanel = openNovedadesPanel;
@@ -4073,68 +4066,86 @@ function descargarCert(certId) {
 // ─ Empleados Siigo: GET https://api.siigo.com/v1/employees
 // ═══════════════════════════════════════════════════════════════
 
+// Siigo Portal Multiempresa — cada empresa tiene su propia conexión
+// credentials[empresaId] = { user, password, serial, token, tokenExp, activa }
 const SIIGO_CONFIG = {
-  user:     '',         // Usuario Siigo (email)
-  password: '',         // Contraseña Siigo
-  partner:  'SPECIALCAR_HR',
-  apiUrl:   'https://api.siigo.com',
-  token:    null,
-  tokenExp: null,
-  enabled:  false,
+  partner: 'SPECIALCAR_HR',
+  apiUrl:  'https://api.siigo.com',
+  credentials: {},  // Por empresa: { user, password, serial, token, tokenExp, activa }
+  activeEmpId: null, // Empresa activa en el panel de novedades
 };
 
+// Helper: obtener config de una empresa
+function siigoEmp(empresaId) {
+  return SIIGO_CONFIG.credentials[empresaId] || null;
+}
+
+// Helper: empresa activa en el modal
+function siigoActiveEmp() {
+  const eid = SIIGO_CONFIG.activeEmpId || document.getElementById('nov-empresa')?.value;
+  return eid ? siigoEmp(eid) : null;
+}
+
 // ─── AUTENTICACIÓN ────────────────────────────────────────────
-async function siigoAuth() {
-  if (!SIIGO_CONFIG.user || !SIIGO_CONFIG.password) {
-    showNotif('Configura usuario y contraseña de Siigo primero', 'error');
+async function siigoAuth(empresaId) {
+  if (!empresaId) {
+    showNotif('Selecciona una empresa para conectar con Siigo', 'error');
+    return false;
+  }
+  const cred = SIIGO_CONFIG.credentials[empresaId];
+  if (!cred?.user || !cred?.password) {
+    showNotif('Configura usuario y llave de Siigo para esta empresa', 'error');
+    openSiigoConfigEmpresa(empresaId);
     return false;
   }
   // Reutilizar token si aún es válido
-  if (SIIGO_CONFIG.token && SIIGO_CONFIG.tokenExp && new Date() < SIIGO_CONFIG.tokenExp) {
+  if (cred.token && cred.tokenExp && new Date() < new Date(cred.tokenExp)) {
     return true;
   }
   try {
-    showLoadingBanner('Autenticando con Siigo...');
+    const empresa = SC.empresas.find(e => e.id === empresaId);
+    showLoadingBanner('Autenticando ' + (empresa?.name||'empresa') + ' en Siigo...');
     const res = await fetch(`${SIIGO_CONFIG.apiUrl}/auth`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Partner-Id': SIIGO_CONFIG.partner,
+        'Partner-Id':   SIIGO_CONFIG.partner,
       },
       body: JSON.stringify({
-        username: SIIGO_CONFIG.user,
-        access_key: SIIGO_CONFIG.password,
+        username:   cred.user,
+        access_key: cred.password,
       }),
     });
     hideLoadingBanner();
     if (!res.ok) {
       const err = await res.json().catch(()=>({}));
-      showNotif('Error autenticando con Siigo: ' + (err.message||res.status), 'error');
+      showNotif('Error Siigo (' + (empresa?.name||empresaId) + '): ' + (err.message||res.status), 'error');
       return false;
     }
     const data = await res.json();
-    SIIGO_CONFIG.token   = data.access_token;
-    SIIGO_CONFIG.tokenExp= new Date(Date.now() + (data.expires_in||3600)*1000);
-    SIIGO_CONFIG.enabled = true;
+    SIIGO_CONFIG.credentials[empresaId].token    = data.access_token;
+    SIIGO_CONFIG.credentials[empresaId].tokenExp = new Date(Date.now()+(data.expires_in||3600)*1000).toISOString();
+    SIIGO_CONFIG.credentials[empresaId].activa   = true;
     saveSiigoConfig();
-    showNotif('✅ Conectado a Siigo');
+    showNotif('✅ ' + (empresa?.name||empresaId) + ' conectada a Siigo');
     return true;
   } catch(e) {
     hideLoadingBanner();
-    showNotif('Error de conexión con Siigo: ' + e.message, 'error');
+    showNotif('Error Siigo: ' + e.message, 'error');
     return false;
   }
 }
 
-async function siigoFetch(endpoint, method='GET', body=null) {
-  const authed = await siigoAuth();
+async function siigoFetch(empresaId, endpoint, method='GET', body=null) {
+  const authed = await siigoAuth(empresaId);
   if (!authed) return null;
+  const cred = SIIGO_CONFIG.credentials[empresaId];
   try {
     const res = await fetch(`${SIIGO_CONFIG.apiUrl}/${endpoint}`, {
       method,
       headers: {
         'Content-Type':  'application/json',
-        'Authorization': `Bearer ${SIIGO_CONFIG.token}`,
+        'Authorization': `Bearer ${cred.token}`,
         'Partner-Id':    SIIGO_CONFIG.partner,
       },
       body: body ? JSON.stringify(body) : null,
@@ -4155,10 +4166,12 @@ async function siigoFetch(endpoint, method='GET', body=null) {
 // ─── PERSISTENCIA CONFIG SIIGO ────────────────────────────────
 function saveSiigoConfig() {
   try {
-    localStorage.setItem('sc_siigo', JSON.stringify({
-      user:    SIIGO_CONFIG.user,
-      password:SIIGO_CONFIG.password,
-    }));
+    // Guardar credenciales sin tokens (seguridad)
+    const toSave = {};
+    Object.entries(SIIGO_CONFIG.credentials).forEach(([eid, cred]) => {
+      toSave[eid] = { user: cred.user, password: cred.password, serial: cred.serial||'' };
+    });
+    localStorage.setItem('sc_siigo', JSON.stringify(toSave));
   } catch(e) {}
 }
 
@@ -4167,10 +4180,32 @@ function loadSiigoConfig() {
     const saved = localStorage.getItem('sc_siigo');
     if (!saved) return;
     const cfg = JSON.parse(saved);
-    if (cfg.user)     SIIGO_CONFIG.user     = cfg.user;
-    if (cfg.password) SIIGO_CONFIG.password = cfg.password;
-    if (cfg.user && cfg.password) SIIGO_CONFIG.enabled = true;
+    // Compatibilidad hacia atrás (config vieja de una sola empresa)
+    if (cfg.user) {
+      // Ignorar config vieja de una sola empresa
+      return;
+    }
+    Object.entries(cfg).forEach(([eid, cred]) => {
+      if (cred.user && cred.password) {
+        SIIGO_CONFIG.credentials[eid] = {
+          user: cred.user, password: cred.password,
+          serial: cred.serial||'', token: null, tokenExp: null, activa: false,
+        };
+      }
+    });
   } catch(e) {}
+}
+
+function getSiigoStatus() {
+  const activas = Object.entries(SIIGO_CONFIG.credentials)
+    .filter(([,c]) => c.user && c.password).length;
+  return {
+    totalConfiguradas: activas,
+    totalEmpresas: SC.empresas.length,
+    empresasConConfig: Object.entries(SIIGO_CONFIG.credentials)
+      .filter(([,c]) => c.user && c.password)
+      .map(([eid]) => SC.empresas.find(e=>e.id===eid)?.name||eid),
+  };
 }
 
 // ─── TIPOS DE NOVEDAD DE NÓMINA ──────────────────────────────
@@ -4296,7 +4331,8 @@ function saveNovedad() {
   const valor   = parseInt(String(document.getElementById('nov-valor')?.value||'0').replace(/[^0-9]/g,''))||0;
   const desc    = document.getElementById('nov-desc')?.value.trim()||'';
 
-  if (!empId || !tipo || !periodo) { showNotif('Completa empleado, tipo y período', 'error'); return; }
+  const novEmpresa = document.getElementById('nov-empresa')?.value || emp?.empresaId || '';
+  if (!empId || !tipo || !periodo || !novEmpresa) { showNotif('Completa empleado, empresa, tipo y período', 'error'); return; }
 
   // Si tiene factor (horas extra), calcular valor automáticamente
   const tipoInfo  = TIPOS_NOVEDAD[tipo];
@@ -4318,6 +4354,7 @@ function saveNovedad() {
     descripcion:   desc,
     estado:        'pendiente',
     fechaCreacion: new Date().toLocaleDateString('es-CO'),
+    empresaId:     novEmpresa,
     siigoId:       null,
   });
   saveNovedades();
@@ -4352,10 +4389,11 @@ async function enviarNovedadSiigo(id) {
   initNovedades();
   const nov = SC.novedades.find(n=>n.id===id);
   if (!nov) return;
-  const authed = await siigoAuth();
-  if (!authed) return;
-
   const emp  = SC.empleados.find(e=>e.id===nov.empId);
+  const empresaId = nov.empresaId || emp?.empresaId;
+  if (!empresaId) { showNotif('Novedad sin empresa asignada', 'error'); return; }
+  const authed = await siigoAuth(empresaId);
+  if (!authed) return;
   const tipo = TIPOS_NOVEDAD[nov.tipo];
 
   // Construir payload según API Siigo Nómina Electrónica
@@ -4408,36 +4446,110 @@ async function enviarTodasNovedadesSiigo() {
 }
 
 // ─── PANEL CONFIG SIIGO ───────────────────────────────────────
-function openSiigoConfig() {
-  const elUser = document.getElementById('siigo-user');
-  const elPass = document.getElementById('siigo-pass');
-  if (elUser) elUser.value = SIIGO_CONFIG.user||'';
-  if (elPass) elPass.value = SIIGO_CONFIG.password||'';
-  updateSiigoStatus();
+function openSiigoConfig(empresaId) {
+  renderSiigoMultiempresa();
+  if (empresaId) {
+    // Scroll o highlight de la empresa específica
+    setTimeout(() => {
+      const el = document.getElementById('siigo-row-'+empresaId);
+      if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
+    }, 200);
+  }
   openModal('modal-siigo-config');
 }
 
-function updateSiigoStatus() {
-  const el = document.getElementById('siigo-status');
+function openSiigoConfigEmpresa(empresaId) {
+  openSiigoConfig(empresaId);
+}
+
+function renderSiigoMultiempresa() {
+  const el = document.getElementById('siigo-empresas-list');
   if (!el) return;
-  el.innerHTML = SIIGO_CONFIG.enabled
-    ? '<span style="color:var(--green)">🟢 Conectado a Siigo</span>'
-    : '<span style="color:var(--text-muted)">⚪ Sin conexión — configura credenciales</span>';
+  let html = '';
+  SC.empresas.forEach(emp => {
+    const cred   = SIIGO_CONFIG.credentials[emp.id];
+    const config = cred?.user ? true : false;
+    const activa = config && cred?.activa;
+    html += `
+      <div id="siigo-row-${emp.id}" class="glass-card p-4 mb-3" style="border-left:4px solid ${activa?'var(--green)':config?'var(--amber)':'var(--navy-border)'}">
+        <div class="flex justify-between items-center flex-wrap gap-3 mb-3">
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--navy)">${emp.name}</div>
+            <div class="text-xs text-muted">NIT: ${emp.nit}</div>
+          </div>
+          <div class="flex gap-2 items-center">
+            ${activa
+              ? '<span class="badge badge-green">🟢 Conectada</span>'
+              : config
+              ? '<span class="badge badge-amber">⚙️ Configurada</span>'
+              : '<span class="badge badge-grey">⚪ Sin configurar</span>'}
+            ${config ? `<button class="btn btn-primary btn-sm" onclick="testSiigoEmpresa('${emp.id}')">🔗 Probar</button>` : ''}
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group mb-2">
+            <label class="form-label" style="font-size:11px">Usuario Siigo (Email)</label>
+            <input class="form-input" id="siigo-user-${emp.id}"
+              placeholder="usuario@empresa.com"
+              value="${cred?.user||''}"
+              style="font-size:12px">
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label" style="font-size:11px">Llave de acceso</label>
+            <input class="form-input" id="siigo-pass-${emp.id}"
+              type="password"
+              placeholder="Llave generada en Siigo"
+              value="${cred?.password||''}"
+              style="font-size:12px">
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label" style="font-size:11px">Serial (opcional)</label>
+            <input class="form-input" id="siigo-serial-${emp.id}"
+              placeholder="Ej: 01020325865809"
+              value="${cred?.serial||''}"
+              style="font-size:12px">
+          </div>
+          <div class="form-group mb-2" style="display:flex;align-items:flex-end">
+            <button class="btn btn-ghost btn-sm full-w" onclick="saveSiigoEmpresa('${emp.id}')">
+              💾 Guardar
+            </button>
+          </div>
+        </div>
+      </div>`;
+  });
+  el.innerHTML = html || '<div class="text-muted text-sm p-4">Sin empresas configuradas.</div>';
+}
+
+function saveSiigoEmpresa(empresaId) {
+  const user   = document.getElementById(`siigo-user-${empresaId}`)?.value.trim();
+  const pass   = document.getElementById(`siigo-pass-${empresaId}`)?.value.trim();
+  const serial = document.getElementById(`siigo-serial-${empresaId}`)?.value.trim()||'';
+  if (!user || !pass) { showNotif('Ingresa usuario y llave de acceso', 'error'); return; }
+  SIIGO_CONFIG.credentials[empresaId] = {
+    user, password: pass, serial,
+    token: null, tokenExp: null, activa: false,
+  };
+  saveSiigoConfig();
+  showNotif(`✅ Credenciales guardadas para ${SC.empresas.find(e=>e.id===empresaId)?.name||empresaId}`);
+  renderSiigoMultiempresa();
+}
+
+async function testSiigoEmpresa(empresaId) {
+  const ok = await siigoAuth(empresaId);
+  if (ok) renderSiigoMultiempresa();
+}
+
+function updateSiigoStatus() {
+  const s = getSiigoStatus();
+  const el = document.getElementById('siigo-status');
+  if (el) el.innerHTML = s.totalConfiguradas > 0
+    ? `<span style="color:var(--green)">🟢 ${s.totalConfiguradas}/${s.totalEmpresas} empresas configuradas</span>`
+    : '<span style="color:var(--text-muted)">⚪ Sin empresas configuradas</span>';
 }
 
 async function saveSiigoConfigModal() {
-  const user = document.getElementById('siigo-user')?.value.trim();
-  const pass = document.getElementById('siigo-pass')?.value.trim();
-  if (!user || !pass) { showNotif('Ingresa usuario y contraseña de Siigo', 'error'); return; }
-  SIIGO_CONFIG.user     = user;
-  SIIGO_CONFIG.password = pass;
-  SIIGO_CONFIG.token    = null; // Forzar re-auth
-  saveSiigoConfig();
-  const ok = await siigoAuth();
-  if (ok) {
-    updateSiigoStatus();
-    closeModal('modal-siigo-config');
-  }
+  // En modo multiempresa, el guardado es por empresa desde renderSiigoMultiempresa
+  closeModal('modal-siigo-config');
 }
 
 
@@ -4451,8 +4563,8 @@ async function saveSiigoConfigModal() {
 // ⚠️  REEMPLAZA ESTOS VALORES CON TUS CREDENCIALES REALES
 //     Obtener en: console.cloud.google.com → APIs & Services → Credentials
 const GAPI_CONFIG = {
-  CLIENT_ID:     'TU_CLIENT_ID.apps.googleusercontent.com',   // ← pega aquí
-  API_KEY:       'TU_API_KEY',                                  // ← pega aquí
+  CLIENT_ID:     '538921192245-65qk4e2ro2s5cdlp42j9mvl0ik4peg72.apps.googleusercontent.com',   // ← pega aquí
+  API_KEY:       'AIzaSyBJn7vN_J01OfaX4LUzxR5_BoF0i18KsVU',                                  // ← pega aquí
   DISCOVERY_DOCS:['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
                   'https://sheets.googleapis.com/$discovery/rest?version=v4'],
   SCOPES:        'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
