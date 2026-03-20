@@ -1,16 +1,3 @@
-const GAPI_CONFIG = {
-  CLIENT_ID:     '538921192245-65qk4e2ro2s5cdlp42j9mvl0ik4peg72.apps.googleusercontent.com',   // ← pega aquí
-  API_KEY:       'AIzaSyBJn7vN_J01OfaX4LUzxR5_BoF0i18KsVU',                                  // ← pega aquí
-  DISCOVERY_DOCS:['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-                  'https://sheets.googleapis.com/$discovery/rest?version=v4'],
-  SCOPES:        'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
-  FOLDER_ROOT:   '',   // Se auto-completa al conectar (se guarda en localStorage)
-  SHEET_ID:      '',   // Se auto-completa al conectar (se guarda en localStorage)
-  DRIVE_EMAIL:   '',   // Email Gmail donde se guardarán los archivos
-  connected:     false,
-  tokenClient:   null,
-};
-
 function openVacDetailAdmin(empId) {
   const emp = SC.empleados.find(e => e.id === empId);
   if (!emp) return;
@@ -164,6 +151,46 @@ let USERS = [
 ];
 
 // ─── STATE ────────────────────────────────────────────────
+// ─── GOOGLE API CONFIG (hardcoded — no exponer en UI) ────────
+// ⚠️  REEMPLAZA ESTOS VALORES CON TUS CREDENCIALES REALES
+//     Obtener en: console.cloud.google.com → APIs & Services → Credentials
+const GAPI_CONFIG = {
+  CLIENT_ID:     '538921192245-65qk4e2ro2s5cdlp42j9mvl0ik4peg72.apps.googleusercontent.com',   // ← pega aquí
+  API_KEY:       'AIzaSyBJn7vN_J01OfaX4LUzxR5_BoF0i18KsVU',                                  // ← pega aquí
+  DISCOVERY_DOCS:['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+                  'https://sheets.googleapis.com/$discovery/rest?version=v4'],
+  SCOPES:        'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
+  FOLDER_ROOT:   '15-VqDQLN05gidRkfwuGZPnLGKCFvCxli',
+  SHEET_ID:      '1CB6NiSm8uRka02qXy2fnzAdgtTuXgYbKE2T0CfxF-nc',
+  DRIVE_EMAIL:   'recursoshumanos@specialcar.com.co',
+  connected:     false,
+  tokenClient:   null, 
+};
+
+// Subcarpetas en Drive por módulo
+const DRIVE_FOLDERS = {
+  permisos:       { name:'Permisos',             color:'#4285F4', id:null },
+  incapacidades:  { name:'Incapacidades',         color:'#EA4335', id:null },
+  vacaciones:     { name:'Vacaciones',            color:'#34A853', id:null },
+  bodega:         { name:'Bodega Documental',     color:'#FBBC04', id:null },
+  contratos:      { name:'Contratos',             color:'#0F9D58', id:null },
+  nomina:         { name:'Nómina',                color:'#673AB7', id:null },
+  carpeta_vida:   { name:'Carpeta de Vida',       color:'#FF6D00', id:null },
+  disciplinarios: { name:'Disciplinarios',        color:'#795548', id:null },
+  candidatos:     { name:'Candidatos',            color:'#00ACC1', id:null },
+};
+
+// Pestañas del Spreadsheet
+const SHEETS_TABS = [
+  { name:'Empleados',       fields:['id','nombre','cedula','email','telefono','area','cargo','empresa','fechaIngreso','contratoTipo','salario','status','eps','afp','arl','pctArl','cajaCom','fondoCes','banco','tipoCuenta','numeroCuenta','subsidioTransporte','dotacion','areaFisica','diasVacCausados','diasVacTomados','diasVacDisponibles','disciplinarioActivo'] },
+  { name:'Candidatos',      fields:['id','nombre','email','cargo','area','empresa','estado','score','fecha'] },
+  { name:'Permisos',        fields:['id','empleado','cedula','empresa','tipo','inicio','fin','duracion','horaInicio','horaFin','diasDescontables','diasNoDescontables','tipoDescuento','estado','motivo','fechaSolicitud'] },
+  { name:'Incapacidades',   fields:['id','empleado','diagnostico','dias','eps','fechaInicio','estado','fechaRadicacion'] },
+  { name:'Vacaciones',      fields:['id','empleado','cedula','empresa','inicio','fin','dias','estado','observaciones','fechaSolicitud','totalCausados','totalTomados','disponibles'] },
+  { name:'Disciplinarios',  fields:['id','empleado','cedula','empresa','tipo','fecha','estado','notificado','respondido','diasSuspension','creadoPor','fechaCreacion'] },
+  { name:'Bodega',          fields:['id','nombre','categoria','descripcion','fecha'] },
+];
+
 const SC = {
   user: null,
   areas: [],
@@ -4572,32 +4599,7 @@ async function saveSiigoConfigModal() {
 // ═══════════════════════════════════════════════════════════════
 // INTEGRACIÓN GOOGLE DRIVE & SHEETS
 // ═══════════════════════════════════════════════════════════════
-// ─── GOOGLE API CONFIG (hardcoded — no exponer en UI) ────────
-// ⚠️  REEMPLAZA ESTOS VALORES CON TUS CREDENCIALES REALES
-//     Obtener en: console.cloud.google.com → APIs & Services → Credentials
-// Subcarpetas en Drive por módulo
-const DRIVE_FOLDERS = {
-  permisos:       { name:'Permisos',             color:'#4285F4', id:null },
-  incapacidades:  { name:'Incapacidades',         color:'#EA4335', id:null },
-  vacaciones:     { name:'Vacaciones',            color:'#34A853', id:null },
-  bodega:         { name:'Bodega Documental',     color:'#FBBC04', id:null },
-  contratos:      { name:'Contratos',             color:'#0F9D58', id:null },
-  nomina:         { name:'Nómina',                color:'#673AB7', id:null },
-  carpeta_vida:   { name:'Carpeta de Vida',       color:'#FF6D00', id:null },
-  disciplinarios: { name:'Disciplinarios',        color:'#795548', id:null },
-  candidatos:     { name:'Candidatos',            color:'#00ACC1', id:null },
-};
-
-// Pestañas del Spreadsheet
-const SHEETS_TABS = [
-  { name:'Empleados',       fields:['id','nombre','cedula','email','telefono','area','cargo','empresa','fechaIngreso','contratoTipo','salario','status','eps','afp','arl','pctArl','cajaCom','fondoCes','banco','tipoCuenta','numeroCuenta','subsidioTransporte','dotacion','areaFisica','diasVacCausados','diasVacTomados','diasVacDisponibles','disciplinarioActivo'] },
-  { name:'Candidatos',      fields:['id','nombre','email','cargo','area','empresa','estado','score','fecha'] },
-  { name:'Permisos',        fields:['id','empleado','cedula','empresa','tipo','inicio','fin','duracion','horaInicio','horaFin','diasDescontables','diasNoDescontables','tipoDescuento','estado','motivo','fechaSolicitud'] },
-  { name:'Incapacidades',   fields:['id','empleado','diagnostico','dias','eps','fechaInicio','estado','fechaRadicacion'] },
-  { name:'Vacaciones',      fields:['id','empleado','cedula','empresa','inicio','fin','dias','estado','observaciones','fechaSolicitud','totalCausados','totalTomados','disponibles'] },
-  { name:'Disciplinarios',  fields:['id','empleado','cedula','empresa','tipo','fecha','estado','notificado','respondido','diasSuspension','creadoPor','fechaCreacion'] },
-  { name:'Bodega',          fields:['id','nombre','categoria','descripcion','fecha'] },
-];
+// ─── GOOGLE CONFIG movido al inicio del archivo ───────────
 
 // ─── INIT GAPI ────────────────────────────────────────────
 function initGapi() {
