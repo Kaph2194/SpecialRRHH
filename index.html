@@ -23,7 +23,8 @@
 
       <!-- Logo + nombre -->
       <div class="login-logo">
-          <img src="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">        <div>
+        <img src="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">
+        <div>
           <div class="llogo-name">Special Car</div>
           <div class="llogo-sub">Plataforma de Recursos Humanos</div>
         </div>
@@ -42,6 +43,9 @@
       </div>
       <div id="login-error" class="login-error" style="display:none">Usuario o contraseña incorrectos</div>
       <button class="btn btn-primary full-w" onclick="doLogin()">Ingresar al Sistema</button>
+
+      <div class="login-demo">
+        
       </div>
 
     </div>
@@ -55,7 +59,8 @@
 <nav id="sidebar">
   <div class="sidebar-logo">
     <div class="slogo-mark">
-      <img src="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">    </div>
+      <img src="assets/specialcar.png" style="width:38px;height:38px;object-fit:contain;border-radius:6px">
+    </div>
     <div>
       <div class="slogo-name">Special Car</div>
       <div class="slogo-sub">HR Platform</div>
@@ -1320,6 +1325,155 @@
   </div>
 </div>
 
+
+<!-- Modal Config Siigo — Multiempresa -->
+<div class="modal-overlay" id="modal-siigo-config">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">📊 Siigo — Portal Multiempresa</div>
+        <div class="text-sm text-muted mt-1">Configura las credenciales de Siigo para cada empresa del grupo</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-siigo-config')">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Status global -->
+      <div class="flex items-center justify-between mb-4">
+        <div id="siigo-status" style="font-size:13px">⚪ Cargando...</div>
+        <div class="flex gap-2">
+          <a href="https://app.siigo.com" target="_blank" class="btn btn-ghost btn-sm">
+            🔗 Ir a Siigo
+          </a>
+        </div>
+      </div>
+
+      <!-- Info -->
+      <div class="info-box mb-4" style="font-size:12px">
+        🔐 Para cada empresa, ingresa el <strong>email</strong> y la <strong>llave de acceso</strong> de Siigo.<br>
+        Para obtener la llave: <strong>app.siigo.com → Configuración → Mi empresa → API → Generar llave de acceso</strong>
+      </div>
+
+      <!-- Lista de empresas -->
+      <div id="siigo-empresas-list" style="max-height:520px;overflow-y:auto">
+        <div class="text-muted text-sm p-4 text-center">Cargando empresas...</div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-siigo-config')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Novedades de Nómina -->
+<div class="modal-overlay" id="modal-novedades">
+  <div class="modal" style="max-width:900px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">📋 Novedades de Nómina</div>
+        <div class="text-sm text-muted mt-1">Registra y envía novedades a Siigo para generar la nómina electrónica</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-novedades')">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Tabs -->
+      <div class="tabs mb-4">
+        <div class="tab active" onclick="novTab('registro',this)">➕ Nueva Novedad</div>
+        <div class="tab" onclick="novTab('listado',this)">📋 Listado</div>
+      </div>
+
+      <!-- Tab Registro -->
+      <div id="nov-tab-registro">
+        <div class="glass-card p-4 mb-4" style="border-left:4px solid var(--navy)">
+          <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:14px">Datos de la Novedad</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Empresa *</label>
+              <select class="form-select" id="nov-empresa" onchange="filterEmpsByEmpresa()">
+                <option value="">Seleccionar empresa...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Empleado *</label>
+              <select class="form-select" id="nov-emp" onchange="calcularValorNovedad()">
+                <option value="">Seleccionar empleado...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Período (YYYY-MM) *</label>
+              <input class="form-input" id="nov-periodo" type="month">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tipo de Novedad *</label>
+              <select class="form-select" id="nov-tipo" onchange="onNovTipoChange()">
+                <option value="">Seleccionar tipo...</option>
+                <optgroup label="▲ Devengados">
+                  <option value="horas_extra_diurnas">Horas Extra Diurnas (×1.25)</option>
+                  <option value="horas_extra_nocturnas">Horas Extra Nocturnas (×1.75)</option>
+                  <option value="horas_extra_festivas">Horas Extra Festivas (×2.00)</option>
+                  <option value="recargo_nocturno">Recargo Nocturno (×0.35)</option>
+                  <option value="recargo_festivo">Recargo Festivo Diurno (×1.75)</option>
+                  <option value="bonificacion">Bonificación</option>
+                  <option value="comision">Comisión</option>
+                  <option value="auxilio_movilidad">Auxilio de Movilidad</option>
+                  <option value="otro_devengado">Otro Devengado</option>
+                </optgroup>
+                <optgroup label="▼ Deducciones">
+                  <option value="ausencia">Ausencia / Incapacidad</option>
+                  <option value="permiso_no_remunerado">Permiso No Remunerado</option>
+                  <option value="prestamo">Préstamo / Libranza</option>
+                  <option value="descuento_voluntario">Descuento Voluntario</option>
+                  <option value="otro_descuento">Otro Descuento</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group" id="nov-cantidad-group">
+              <label class="form-label">Cantidad / Horas</label>
+              <input class="form-input" id="nov-cantidad" type="number" min="0" step="0.5"
+                placeholder="Ej: 8" oninput="calcularValorNovedad()">
+              <div class="text-xs text-muted mt-1" id="nov-calculo-info"></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Valor ($) *</label>
+              <input class="form-input" id="nov-valor" placeholder="0">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Descripción / Observación</label>
+            <input class="form-input" id="nov-desc" placeholder="Descripción de la novedad...">
+          </div>
+          <button class="btn btn-primary full-w" onclick="saveNovedad()">💾 Registrar Novedad</button>
+        </div>
+      </div>
+
+      <!-- Tab Listado -->
+      <div id="nov-tab-listado" style="display:none">
+        <div class="flex gap-3 mb-4 flex-wrap">
+          <div class="form-group mb-0" style="flex:1;min-width:160px">
+            <label class="form-label">Período</label>
+            <input class="form-input" type="month" id="nov-filtro-periodo" oninput="renderNovedadesPanel()">
+          </div>
+          <div class="form-group mb-0" style="flex:2;min-width:200px">
+            <label class="form-label">Empleado</label>
+            <select class="form-select" id="nov-filtro-emp" onchange="renderNovedadesPanel()">
+              <option value="">Todos los empleados</option>
+            </select>
+          </div>
+          <div class="form-group mb-0" style="display:flex;align-items:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick="openSiigoConfig()">⚙️ Config Siigo</button>
+          </div>
+        </div>
+        <div id="novedades-content">
+          <div class="text-muted text-sm p-4 text-center">Cargando...</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <!-- NOTIFICATION -->
 <div id="notif">
   <span id="notif-icon">✅</span>
@@ -1348,6 +1502,39 @@ function previewEmpFoto(input) {
     if (prev) prev.innerHTML = `<img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
   };
   reader.readAsDataURL(file);
+}
+
+function novTab(tab, el) {
+  document.querySelectorAll('#modal-novedades .tab').forEach(t=>t.className='tab');
+  if(el) el.className='tab active';
+  document.getElementById('nov-tab-registro').style.display = tab==='registro' ? '' : 'none';
+  document.getElementById('nov-tab-listado').style.display  = tab==='listado'  ? '' : 'none';
+  if (tab==='listado') renderNovedadesPanel();
+}
+function onNovTipoChange() {
+  const tipo = document.getElementById('nov-tipo')?.value;
+  const grp  = document.getElementById('nov-cantidad-group');
+  const info = document.getElementById('nov-calculo-info');
+  if (grp) grp.style.display = ['horas_extra_diurnas','horas_extra_nocturnas','horas_extra_festivas','recargo_nocturno','recargo_festivo'].includes(tipo) ? '' : 'none';
+  if (info) info.textContent = '';
+  calcularValorNovedad();
+}
+function initNovedadesModal() {
+  // Poblar empleados en selects
+  ['nov-emp','nov-filtro-emp'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const isFilter = id.includes('filtro');
+    sel.innerHTML = isFilter ? '<option value="">Todos los empleados</option>' : '<option value="">Seleccionar empleado...</option>';
+    SC.empleados.filter(e=>e.status==='activo').forEach(e => {
+      sel.insertAdjacentHTML('beforeend', `<option value="${e.id}">${e.name} — ${e.cargo}</option>`);
+    });
+  });
+  // Período actual por defecto
+  const hoy = new Date();
+  const mes = hoy.toISOString().slice(0,7);
+  const el = document.getElementById('nov-periodo');
+  if (el && !el.value) el.value = mes;
 }
 
 function togglePermisoHoras() {

@@ -157,7 +157,8 @@ const SC = {
   empresas: [],
   empleados: [],
   candidatos: [],
-  vacantes: [],       // { id, cargo, areaId, empresaId, total, descripcion, fechaApertura, activa }
+  vacantes: [],
+  novedades: [],      // { id, empId, tipo, periodo, cantidad, valor, descripcion, estado, siigoId }
   bodega: [],
   permisos: [],
   incapacidades: [],
@@ -183,7 +184,7 @@ const EMPRESAS_SEED = [
   { id:'emp1', name:'Special Car S.A.S',                           nit:'901.252.081-6', color:'#111f4d', ciudad:'', dir:'', tel:'', rep:'' },
   { id:'emp2', name:'Rodando Express S.A.S',                       nit:'901.393.272-0', color:'#49af2a', ciudad:'', dir:'', tel:'', rep:'' },
   { id:'emp3', name:'Rodando Express Plus S.A.S',                  nit:'901.608.712-5', color:'#2d8c18', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp4', name:'Legality Transport S.A.S.',                   nit:'901.462.195-8', color:'#b8a800', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp4', name:'Legality Transport S.A.S',                              nit:'901.462.195-8', color:'#b8a800', ciudad:'', dir:'', tel:'', rep:'' },
   { id:'emp5', name:'Special Car Premium S.A.S',                   nit:'901.690.846-1', color:'#c49a00', ciudad:'', dir:'', tel:'', rep:'' },
   { id:'emp6', name:'Special Club S.A.S',                          nit:'901.420.914-7', color:'#9b8c04', ciudad:'', dir:'', tel:'', rep:'' },
   { id:'emp7', name:'Special Car Express S.A.S',                   nit:'901.815.327-1', color:'#3a55f1', ciudad:'', dir:'', tel:'', rep:'' },
@@ -192,28 +193,28 @@ const EMPRESAS_SEED = [
 
 const AREAS_SEED = [
   { id:1,  icon:'🔧', name:'Taller & Mecánica',              desc:'Special Pits.',
-    positions:['Mecánico General','Director Postventa','Técnico de Mantenimiento','Jefe de Taller','Auxiliar de Taller','Auxiliar de Lavado','Promotor','Ingeniero Mecanico','Almacenista'],
+    positions:['Mecánico General','Técnico de Diagnóstico','Jefe de Taller','Auxiliar de Taller','Auxiliar de Lavado','Promotor','Ingeniero Mecanico'],
     subareas:['Mecanica','Almacen','Lavado','Datailing','Otro'] },
   { id:2,  icon:'💼', name:'Ventas & Comercial',              desc:'Gestión de ventas y relaciones con clientes.',
     positions:['Asesor Comercial','Director de Ventas','Lider de ventas','Promotor'],
     subareas:['Special nuevos','Special Usados'] },
   { id:3,  icon:'📦', name:'Logística & Transporte',          desc:'Control Documental, Transporte y Logistica VH.',
-    positions:['Director Transporte','Auxiliar administrativo','Coordinador documental','Asistente administrativo'],
+    positions:['Director Transporte','Auxiliar administrativo','Coordinador documental'],
     subareas:[] },
   { id:4,  icon:'💻', name:'Tecnología & Sistemas',           desc:'Infraestructura TI y soporte tecnológico.',
     positions:['Desarrollador Full-Stack','Director TI','Soporte TI'],
     subareas:[] },
   { id:5,  icon:'💰', name:'Finanzas & Contabilidad',         desc:'Gestión financiera y contabilidad.',
-    positions:['Contador','Analista Financiero','Auxiliar Contable','Analista Contable','Coordinador Contable','Gerente Contable'],
+    positions:['Contador','Analista Financiero','Auxiliar Contable'],
     subareas:[] },
   { id:6,  icon:'👥', name:'Recursos Humanos & HSEQ',         desc:'Selección y gestión del talento humano.',
-    positions:['Lider RRHH & HSEQ','Analista RRHH','Abogada Laboral','Lider HSEQ','Analista SST','Coordinador HSEQ'],
+    positions:['Lider RRHH','Analista RRHH','Abogada Laboral','Lider HSEQ'],
     subareas:['RRHH','HSEQ','SIG'] },
   { id:7,  icon:'📣', name:'Marketing & Medios',              desc:'Estrategia de marca y comunicación.',
-    positions:['Director Creativo','Community Manager','Diseñador Gráfico'],
+    positions:['Director de Marketing','Community Manager','Diseñador Gráfico'],
     subareas:[] },
   { id:8,  icon:'🛡️', name:'Financiamiento y Seguros',        desc:'Venta de Seguros y Financiacion.',
-    positions:['Asesor comercial','Gestor de Garantías','Auditor Interno','Director de seguros'],
+    positions:['Asesor comercial','Gestor de Garantías','Auditor Interno'],
     subareas:[] },
   { id:9,  icon:'⚖️', name:'Legal & Cumplimiento',            desc:'Asesoría jurídica y cumplimiento normativo.',
     positions:['Abogado Corporativo','Analista Legal','Oficial de Cumplimiento'],
@@ -228,7 +229,7 @@ const AREAS_SEED = [
     positions:['Director de Operaciones','Coordinador de Operaciones','Lider de Operaciones','Analista de Operaciones','Conductor'],
     subareas:[] },
   { id:13, icon:'📊', name:'Gerencia General',                 desc:'Alta dirección y estrategia corporativa.',
-    positions:['Director Ejecutivo','Gerente General','Asistente administrativo'],
+    positions:['Director Ejecutivo','Gerente General','Asistente de Gerencia'],
     subareas:[] },
 ];
 
@@ -268,15 +269,15 @@ const BODEGA_SEED = [
 // ─ Todos los datos se guardan aquí, compartidos entre usuarios
 // ─ Obtén las credenciales en: supabase.com → Settings → API
 // ═══════════════════════════════════════════════════════════════
-const SB_URL = 'https://qivcmhjlmbgeeajfuxyv.supabase.co';   // ej: https://xxxx.supabase.co
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
+const SB_URL = 'TU_SUPABASE_URL';   // ej: https://xxxx.supabase.co
+const SB_KEY = 'TU_SUPABASE_ANON_KEY'; // empieza con eyJ...
 
 // Estado de conexión con Supabase
 let SB_OK = false;
 
 // Helper: llamada a Supabase REST API
 async function sbFetch(table, method='GET', body=null, filters='') {
-  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') return null;
+  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') return null;
   try {
     const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
       method,
@@ -303,7 +304,7 @@ async function sbFetch(table, method='GET', body=null, filters='') {
 
 // ─── CARGAR DATOS DESDE SUPABASE ─────────────────────────────
 async function loadFromSupabase() {
-  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') {
+  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') {
     console.log('Supabase no configurado — usando datos locales');
     return false;
   }
@@ -605,10 +606,12 @@ async function init() {
   loadSavedGapiConfig();
   loadSavedPasswords();
   loadSavedAdminUsers();
+  loadSiigoConfig();
 
   // Datos estáticos siempre desde seed (no cambian en producción)
   SC.areas    = AREAS_SEED.map(a => ({...a, subareas:[...(a.subareas||[])]}));
   SC.empresas = [...EMPRESAS_SEED];
+  loadSavedEmpresas(); // Sobrescribe seed con datos editados si los hay
   SC.checklists = {};
   SC.vacantes = JSON.parse(localStorage.getItem('sc_vacantes')||'[]');
 
@@ -779,6 +782,7 @@ function buildSidebar() {
     addNavSep(nav, 'SUPERADMIN');
     addNavItem(nav, '🏢', 'Empresas', 'empresas-admin');
     addNavItem(nav, '☁️', 'Drive & Sheets', 'drive-config');
+    addNavItem(nav, '📊', 'Nómina / Siigo', 'siigo');
     addNavItem(nav, '👤', 'Gestión de Usuarios', 'user-mgmt');
   }
 }
@@ -851,6 +855,7 @@ function showView(viewId) {
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
   else if (viewId === 'drive-config') { openDrivePanel(); showView('dashboard'); }
   else if (viewId === 'user-mgmt') { openUserMgmt(); showView('dashboard'); }
+  else if (viewId === 'siigo') { openNovedadesPanel(); showView('dashboard'); }
   else if (viewId === 'empresas-admin') { renderEmpresasTable(); if(can('write')&&SC.user?.role==='superadmin'){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddEmpresaModal()">+ Nueva Empresa</button>';} }
 }
 
@@ -1127,6 +1132,20 @@ function openEditEmpModal(empId) {
   openModal('modal-add-emp');
 }
 window.openEditEmpModal = openEditEmpModal;
+window.openSiigoConfig = openSiigoConfig;
+window.saveSiigoConfigModal = saveSiigoConfigModal;
+window.openNovedadesPanel = openNovedadesPanel;
+window.saveNovedad = saveNovedad;
+window.enviarNovedadSiigo = enviarNovedadSiigo;
+window.enviarTodasNovedadesSiigo = enviarTodasNovedadesSiigo;
+window.eliminarNovedad = eliminarNovedad;
+window.calcularValorNovedad = calcularValorNovedad;
+window.renderNovedadesPanel = renderNovedadesPanel;
+window.loadSiigoConfig = loadSiigoConfig;
+window.persistEmpresasLocally = persistEmpresasLocally;
+window.loadSavedEmpresas = loadSavedEmpresas;
+window.updateSiigoStatus = updateSiigoStatus;
+
 window.updateVacPositions = updateVacPositions;
 window.openVacantesPanel = openVacantesPanel;
 window.saveNuevaVacante = saveNuevaVacante;
@@ -3459,15 +3478,15 @@ function openAddEmpresaModal() {
 
 function saveEmpresa() {
   const name = document.getElementById('emp-edit-name').value.trim();
-  const nit = document.getElementById('emp-edit-nit').value.trim();
+  const nit  = document.getElementById('emp-edit-nit').value.trim();
   if (!name || !nit) { showNotif('Nombre y NIT son obligatorios', 'error'); return; }
   const data = {
     name, nit,
-    color: document.getElementById('emp-edit-color').value,
+    color:  document.getElementById('emp-edit-color').value,
     ciudad: document.getElementById('emp-edit-ciudad').value,
-    dir: document.getElementById('emp-edit-dir').value,
-    tel: document.getElementById('emp-edit-tel').value,
-    rep: document.getElementById('emp-edit-rep').value,
+    dir:    document.getElementById('emp-edit-dir').value,
+    tel:    document.getElementById('emp-edit-tel').value,
+    rep:    document.getElementById('emp-edit-rep').value,
   };
   if (SC.empresaEditId) {
     const idx = SC.empresas.findIndex(e => e.id === SC.empresaEditId);
@@ -3475,11 +3494,31 @@ function saveEmpresa() {
   } else {
     SC.empresas.push({ id: 'emp' + Date.now(), ...data });
   }
+  // Persistir empresas en localStorage para sobrevivir recargas
+  persistEmpresasLocally();
   SC.empresaEditId = null;
   closeModal('modal-edit-empresa');
   showNotif('Empresa guardada ✅');
   renderEmpresasTable();
   populateSelects();
+}
+
+function persistEmpresasLocally() {
+  try {
+    localStorage.setItem('sc_empresas', JSON.stringify(SC.empresas));
+  } catch(e) {}
+}
+
+function loadSavedEmpresas() {
+  try {
+    const saved = localStorage.getItem('sc_empresas');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.length > 0) {
+        SC.empresas = parsed;
+      }
+    }
+  } catch(e) {}
 }
 
 
@@ -4026,29 +4065,381 @@ function descargarCert(certId) {
   showNotif('Descargando certificación... (demo)', 'success');
 }
 
-// ─── SIIGO INTEGRATION (FUTURO) ──────────────────────────
-// Módulo preparado para integración futura con API de Siigo
-// Endpoint destino: https://api.siigo.com/v1/vouchers
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO SIIGO — INTEGRACIÓN NÓMINA
+// ─ Autenticación: POST https://api.siigo.com/auth
+// ─ Novedades: POST https://api.siigo.com/v1/vouchers (tipo nómina)
+// ─ Empleados Siigo: GET https://api.siigo.com/v1/employees
+// ═══════════════════════════════════════════════════════════════
+
 const SIIGO_CONFIG = {
-  enabled: false,   // Se activa cuando se configure API key
-  apiUrl: 'https://api.siigo.com/v1',
-  // Las credenciales se configurarán desde panel de administración
+  user:     '',         // Usuario Siigo (email)
+  password: '',         // Contraseña Siigo
+  partner:  'SPECIALCAR_HR',
+  apiUrl:   'https://api.siigo.com',
+  token:    null,
+  tokenExp: null,
+  enabled:  false,
 };
 
+// ─── AUTENTICACIÓN ────────────────────────────────────────────
+async function siigoAuth() {
+  if (!SIIGO_CONFIG.user || !SIIGO_CONFIG.password) {
+    showNotif('Configura usuario y contraseña de Siigo primero', 'error');
+    return false;
+  }
+  // Reutilizar token si aún es válido
+  if (SIIGO_CONFIG.token && SIIGO_CONFIG.tokenExp && new Date() < SIIGO_CONFIG.tokenExp) {
+    return true;
+  }
+  try {
+    showLoadingBanner('Autenticando con Siigo...');
+    const res = await fetch(`${SIIGO_CONFIG.apiUrl}/auth`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Partner-Id': SIIGO_CONFIG.partner,
+      },
+      body: JSON.stringify({
+        username: SIIGO_CONFIG.user,
+        access_key: SIIGO_CONFIG.password,
+      }),
+    });
+    hideLoadingBanner();
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      showNotif('Error autenticando con Siigo: ' + (err.message||res.status), 'error');
+      return false;
+    }
+    const data = await res.json();
+    SIIGO_CONFIG.token   = data.access_token;
+    SIIGO_CONFIG.tokenExp= new Date(Date.now() + (data.expires_in||3600)*1000);
+    SIIGO_CONFIG.enabled = true;
+    saveSiigoConfig();
+    showNotif('✅ Conectado a Siigo');
+    return true;
+  } catch(e) {
+    hideLoadingBanner();
+    showNotif('Error de conexión con Siigo: ' + e.message, 'error');
+    return false;
+  }
+}
+
+async function siigoFetch(endpoint, method='GET', body=null) {
+  const authed = await siigoAuth();
+  if (!authed) return null;
+  try {
+    const res = await fetch(`${SIIGO_CONFIG.apiUrl}/${endpoint}`, {
+      method,
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SIIGO_CONFIG.token}`,
+        'Partner-Id':    SIIGO_CONFIG.partner,
+      },
+      body: body ? JSON.stringify(body) : null,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      console.error('Siigo error:', res.status, err);
+      showNotif('Error Siigo: ' + (err.message||res.status), 'error');
+      return null;
+    }
+    return res.json();
+  } catch(e) {
+    showNotif('Error Siigo: ' + e.message, 'error');
+    return null;
+  }
+}
+
+// ─── PERSISTENCIA CONFIG SIIGO ────────────────────────────────
+function saveSiigoConfig() {
+  try {
+    localStorage.setItem('sc_siigo', JSON.stringify({
+      user:    SIIGO_CONFIG.user,
+      password:SIIGO_CONFIG.password,
+    }));
+  } catch(e) {}
+}
+
+function loadSiigoConfig() {
+  try {
+    const saved = localStorage.getItem('sc_siigo');
+    if (!saved) return;
+    const cfg = JSON.parse(saved);
+    if (cfg.user)     SIIGO_CONFIG.user     = cfg.user;
+    if (cfg.password) SIIGO_CONFIG.password = cfg.password;
+    if (cfg.user && cfg.password) SIIGO_CONFIG.enabled = true;
+  } catch(e) {}
+}
+
+// ─── TIPOS DE NOVEDAD DE NÓMINA ──────────────────────────────
+const TIPOS_NOVEDAD = {
+  // Devengados
+  horas_extra_diurnas:   { label:'Horas Extra Diurnas',    tipo:'devengado', factor:1.25 },
+  horas_extra_nocturnas: { label:'Horas Extra Nocturnas',  tipo:'devengado', factor:1.75 },
+  horas_extra_festivas:  { label:'Horas Extra Festivas',   tipo:'devengado', factor:2.00 },
+  recargo_nocturno:      { label:'Recargo Nocturno',       tipo:'devengado', factor:0.35 },
+  recargo_festivo:       { label:'Recargo Festivo Diurno', tipo:'devengado', factor:1.75 },
+  bonificacion:          { label:'Bonificación',           tipo:'devengado', factor:null },
+  comision:              { label:'Comisión',               tipo:'devengado', factor:null },
+  auxilio_movilidad:     { label:'Auxilio de Movilidad',   tipo:'devengado', factor:null },
+  otro_devengado:        { label:'Otro Devengado',         tipo:'devengado', factor:null },
+  // Deducciones
+  ausencia:              { label:'Ausencia / Incapacidad', tipo:'deduccion', factor:null },
+  permiso_no_remunerado: { label:'Permiso No Remunerado',  tipo:'deduccion', factor:null },
+  prestamo:              { label:'Préstamo / Libranza',    tipo:'deduccion', factor:null },
+  descuento_voluntario:  { label:'Descuento Voluntario',   tipo:'deduccion', factor:null },
+  otro_descuento:        { label:'Otro Descuento',         tipo:'deduccion', factor:null },
+};
+
+// ─── NOVEDADES DE NÓMINA ──────────────────────────────────────
+// SC.novedades = [{ id, empId, tipo, periodo, cantidad, valor, descripcion, estado, fechaCreacion, siigoId }]
+
+function initNovedades() {
+  if (!SC.novedades) SC.novedades = JSON.parse(localStorage.getItem('sc_novedades')||'[]');
+}
+
+function saveNovedades() {
+  try { localStorage.setItem('sc_novedades', JSON.stringify(SC.novedades)); } catch(e) {}
+}
+
+function openNovedadesPanel() {
+  initNovedades();
+  openModal('modal-novedades');
+  setTimeout(() => {
+    if (typeof initNovedadesModal === 'function') initNovedadesModal();
+    renderNovedadesPanel();
+  }, 100);
+}
+
+function renderNovedadesPanel() {
+  const el = document.getElementById('novedades-content');
+  if (!el) return;
+
+  const periodoFiltro = document.getElementById('nov-filtro-periodo')?.value || '';
+  const empFiltro     = document.getElementById('nov-filtro-emp')?.value     || '';
+
+  let novs = SC.novedades;
+  if (periodoFiltro) novs = novs.filter(n => n.periodo === periodoFiltro);
+  if (empFiltro)     novs = novs.filter(n => n.empId === empFiltro);
+
+  // KPIs
+  const devengados  = novs.filter(n => TIPOS_NOVEDAD[n.tipo]?.tipo==='devengado').reduce((s,n)=>s+(n.valor||0),0);
+  const deducciones = novs.filter(n => TIPOS_NOVEDAD[n.tipo]?.tipo==='deduccion').reduce((s,n)=>s+(n.valor||0),0);
+  const enviadas    = novs.filter(n => n.estado==='enviado').length;
+  const pendientes  = novs.filter(n => n.estado==='pendiente').length;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+      <div class="stat-card" style="padding:12px;border-left:4px solid var(--green)">
+        <div class="stat-label">Total Devengados</div>
+        <div class="stat-value" style="font-size:18px;color:var(--green)">$${devengados.toLocaleString('es-CO')}</div>
+      </div>
+      <div class="stat-card" style="padding:12px;border-left:4px solid var(--red)">
+        <div class="stat-label">Total Deducciones</div>
+        <div class="stat-value" style="font-size:18px;color:var(--red)">$${deducciones.toLocaleString('es-CO')}</div>
+      </div>
+      <div class="stat-card" style="padding:12px;border-left:4px solid var(--blue)">
+        <div class="stat-label">Pendientes envío</div>
+        <div class="stat-value" style="font-size:18px;color:var(--blue)">${pendientes}</div>
+      </div>
+      <div class="stat-card" style="padding:12px;border-left:4px solid var(--navy)">
+        <div class="stat-label">Enviadas a Siigo</div>
+        <div class="stat-value" style="font-size:18px">${enviadas}</div>
+      </div>
+    </div>
+    <div class="table-wrap" style="max-height:320px;overflow-y:auto">
+      <table class="data-table" style="font-size:12px">
+        <thead><tr>
+          <th>Empleado</th><th>Período</th><th>Tipo Novedad</th>
+          <th>Cant/Hrs</th><th>Valor</th><th>Estado</th><th>Acciones</th>
+        </tr></thead>
+        <tbody>
+          ${novs.length ? novs.map(n => {
+            const emp  = SC.empleados.find(e=>e.id===n.empId);
+            const tipo = TIPOS_NOVEDAD[n.tipo]||{label:n.tipo,tipo:'devengado'};
+            const color= tipo.tipo==='devengado'?'var(--green)':'var(--red)';
+            return `<tr>
+              <td><div style="font-weight:500">${emp?.name||'—'}</div><div class="text-xs text-muted">${emp?.cargo||''}</div></td>
+              <td class="text-xs">${n.periodo}</td>
+              <td><span style="color:${color};font-size:11px">${tipo.tipo==='devengado'?'▲':'▼'} ${tipo.label}</span></td>
+              <td class="text-center">${n.cantidad||'—'}</td>
+              <td style="font-weight:600">$${(n.valor||0).toLocaleString('es-CO')}</td>
+              <td>${statusBadge(n.estado||'pendiente')}</td>
+              <td>
+                <div class="flex gap-1">
+                  ${n.estado!=='enviado'?`<button class="btn btn-ghost btn-sm" onclick="enviarNovedadSiigo('${n.id}')">📤 Siigo</button>`:'<span class="text-xs text-muted">✅ Enviado</span>'}
+                  <button class="btn btn-danger btn-sm" onclick="eliminarNovedad('${n.id}')">🗑</button>
+                </div>
+              </td>
+            </tr>`;
+          }).join('') : '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:20px">Sin novedades para el período seleccionado.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    ${pendientes > 0 && SIIGO_CONFIG.enabled ? `
+    <div class="mt-4">
+      <button class="btn btn-primary full-w" onclick="enviarTodasNovedadesSiigo()">
+        📤 Enviar todas las pendientes a Siigo (${pendientes})
+      </button>
+    </div>` : ''}
+  `;
+}
+
+function saveNovedad() {
+  initNovedades();
+  const empId   = document.getElementById('nov-emp')?.value;
+  const tipo    = document.getElementById('nov-tipo')?.value;
+  const periodo = document.getElementById('nov-periodo')?.value;
+  const cantidad= parseFloat(document.getElementById('nov-cantidad')?.value)||0;
+  const valor   = parseInt(String(document.getElementById('nov-valor')?.value||'0').replace(/[^0-9]/g,''))||0;
+  const desc    = document.getElementById('nov-desc')?.value.trim()||'';
+
+  if (!empId || !tipo || !periodo) { showNotif('Completa empleado, tipo y período', 'error'); return; }
+
+  // Si tiene factor (horas extra), calcular valor automáticamente
+  const tipoInfo  = TIPOS_NOVEDAD[tipo];
+  const emp       = SC.empleados.find(e=>e.id===empId);
+  let valorFinal  = valor;
+  if (tipoInfo?.factor && cantidad > 0 && emp?.salario) {
+    const valorHora = emp.salario / 240; // 30 días × 8 horas
+    valorFinal = Math.round(valorHora * cantidad * tipoInfo.factor);
+    // Mostrar el valor calculado
+    const elValor = document.getElementById('nov-valor');
+    if (elValor) elValor.value = valorFinal.toLocaleString('es-CO');
+  }
+
+  SC.novedades.push({
+    id:            'nov' + Date.now(),
+    empId, tipo, periodo,
+    cantidad:      cantidad||null,
+    valor:         valorFinal,
+    descripcion:   desc,
+    estado:        'pendiente',
+    fechaCreacion: new Date().toLocaleDateString('es-CO'),
+    siigoId:       null,
+  });
+  saveNovedades();
+  showNotif('Novedad registrada ✅');
+  // Limpiar form
+  ['nov-cantidad','nov-valor','nov-desc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  renderNovedadesPanel();
+}
+
+function calcularValorNovedad() {
+  const tipo    = document.getElementById('nov-tipo')?.value;
+  const empId   = document.getElementById('nov-emp')?.value;
+  const cantidad= parseFloat(document.getElementById('nov-cantidad')?.value)||0;
+  const tipoInfo= TIPOS_NOVEDAD[tipo];
+  const emp     = SC.empleados.find(e=>e.id===empId);
+  if (!tipoInfo?.factor || !cantidad || !emp?.salario) return;
+  const valorHora = emp.salario / 240;
+  const calculado = Math.round(valorHora * cantidad * tipoInfo.factor);
+  const elValor   = document.getElementById('nov-valor');
+  if (elValor) elValor.value = calculado.toLocaleString('es-CO');
+  const elInfo    = document.getElementById('nov-calculo-info');
+  if (elInfo) elInfo.textContent = `Valor hora: $${Math.round(valorHora).toLocaleString('es-CO')} × ${cantidad}h × ${tipoInfo.factor} = $${calculado.toLocaleString('es-CO')}`;
+}
+
+function eliminarNovedad(id) {
+  SC.novedades = SC.novedades.filter(n=>n.id!==id);
+  saveNovedades(); renderNovedadesPanel();
+}
+
+// ─── ENVÍO A SIIGO ────────────────────────────────────────────
+async function enviarNovedadSiigo(id) {
+  initNovedades();
+  const nov = SC.novedades.find(n=>n.id===id);
+  if (!nov) return;
+  const authed = await siigoAuth();
+  if (!authed) return;
+
+  const emp  = SC.empleados.find(e=>e.id===nov.empId);
+  const tipo = TIPOS_NOVEDAD[nov.tipo];
+
+  // Construir payload según API Siigo Nómina Electrónica
+  const payload = {
+    document: { id: 9999 }, // ID documento nómina en Siigo (configurable)
+    employee: {
+      id:            emp?.siigoEmpId || null,
+      identification: emp?.cedula?.replace(/[^0-9]/g,''),
+      name:           [emp?.name||''],
+      surname:        [''],
+    },
+    period: {
+      start: nov.periodo + '-01',
+      end:   nov.periodo + '-' + new Date(nov.periodo+'-01').toLocaleDateString('es-CO', {day:'2-digit'}),
+    },
+    [tipo?.tipo === 'devengado' ? 'earned' : 'deductions']: [
+      {
+        concept: { id: 9001 }, // ID concepto en Siigo (configurable por tipo)
+        quantity: nov.cantidad||null,
+        amount:   nov.valor,
+        description: nov.descripcion || tipo?.label || '',
+      }
+    ],
+  };
+
+  showLoadingBanner('Enviando novedad a Siigo...');
+  const res = await siigoFetch('v1/nomina-electronica', 'POST', payload);
+  hideLoadingBanner();
+
+  if (res) {
+    nov.estado  = 'enviado';
+    nov.siigoId = res.id || res.number || null;
+    saveNovedades();
+    showNotif(`✅ Novedad enviada a Siigo${nov.siigoId ? ' — #'+nov.siigoId : ''}`);
+    renderNovedadesPanel();
+  }
+}
+
+async function enviarTodasNovedadesSiigo() {
+  initNovedades();
+  const pendientes = SC.novedades.filter(n=>n.estado==='pendiente');
+  if (!pendientes.length) { showNotif('Sin novedades pendientes', 'error'); return; }
+  showNotif(`Enviando ${pendientes.length} novedades a Siigo...`);
+  let ok = 0;
+  for (const n of pendientes) {
+    await enviarNovedadSiigo(n.id);
+    ok++;
+  }
+  showNotif(`✅ ${ok} novedades enviadas a Siigo`);
+}
+
+// ─── PANEL CONFIG SIIGO ───────────────────────────────────────
 function openSiigoConfig() {
-  if (SC.user?.role !== 'superadmin') { showNotif('Solo Superadmin puede configurar Siigo', 'error'); return; }
+  const elUser = document.getElementById('siigo-user');
+  const elPass = document.getElementById('siigo-pass');
+  if (elUser) elUser.value = SIIGO_CONFIG.user||'';
+  if (elPass) elPass.value = SIIGO_CONFIG.password||'';
+  updateSiigoStatus();
   openModal('modal-siigo-config');
 }
 
-async function syncComprobantesNomina(empId) {
-  if (!SIIGO_CONFIG.enabled) {
-    showNotif('⚠️ Integración Siigo pendiente de configuración', 'error');
-    return;
-  }
-  // Future: fetch from Siigo API
-  // GET /v1/vouchers?employee_id={empId}&type=payroll
-  showNotif('Sincronizando con Siigo...', 'success');
+function updateSiigoStatus() {
+  const el = document.getElementById('siigo-status');
+  if (!el) return;
+  el.innerHTML = SIIGO_CONFIG.enabled
+    ? '<span style="color:var(--green)">🟢 Conectado a Siigo</span>'
+    : '<span style="color:var(--text-muted)">⚪ Sin conexión — configura credenciales</span>';
 }
+
+async function saveSiigoConfigModal() {
+  const user = document.getElementById('siigo-user')?.value.trim();
+  const pass = document.getElementById('siigo-pass')?.value.trim();
+  if (!user || !pass) { showNotif('Ingresa usuario y contraseña de Siigo', 'error'); return; }
+  SIIGO_CONFIG.user     = user;
+  SIIGO_CONFIG.password = pass;
+  SIIGO_CONFIG.token    = null; // Forzar re-auth
+  saveSiigoConfig();
+  const ok = await siigoAuth();
+  if (ok) {
+    updateSiigoStatus();
+    closeModal('modal-siigo-config');
+  }
+}
+
 
 // ─── START ────────────────────────────────────────────────
 
@@ -4060,8 +4451,8 @@ async function syncComprobantesNomina(empId) {
 // ⚠️  REEMPLAZA ESTOS VALORES CON TUS CREDENCIALES REALES
 //     Obtener en: console.cloud.google.com → APIs & Services → Credentials
 const GAPI_CONFIG = {
-  CLIENT_ID:     '538921192245-65qk4e2ro2s5cdlp42j9mvl0ik4peg72.apps.googleusercontent.com',   // ← pega aquí
-  API_KEY:       'AIzaSyBJn7vN_J01OfaX4LUzxR5_BoF0i18KsVU',                                  // ← pega aquí
+  CLIENT_ID:     'TU_CLIENT_ID.apps.googleusercontent.com',   // ← pega aquí
+  API_KEY:       'TU_API_KEY',                                  // ← pega aquí
   DISCOVERY_DOCS:['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
                   'https://sheets.googleapis.com/$discovery/rest?version=v4'],
   SCOPES:        'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
