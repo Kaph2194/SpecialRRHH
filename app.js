@@ -356,6 +356,21 @@ function dbToEmp(r) {
     nomina: r.nomina||[], extractos: r.extractos||[],
     fechaRetiro: r.fecha_retiro||null,
     fotoData: r.foto_data||null,
+    // Seguridad Social
+    eps:             r.eps||'',
+    afp:             r.afp||'',
+    arl:             r.arl||'',
+    cajaCom:         r.caja_com||'',
+    fondoCes:        r.fondo_ces||'',
+    pctArl:          r.pct_arl||'',
+    // Información Bancaria
+    banco:           r.banco||'',
+    numeroCuenta:    r.numero_cuenta||'',
+    tipoCuenta:      r.tipo_cuenta||'',
+    // Beneficios
+    subsidioTransporte: r.subsidio_transporte ?? true,
+    dotacion:        r.dotacion ?? true,
+    areaFisica:      r.area_fisica||'',
   };
 }
 function dbToPerm(r) {
@@ -428,6 +443,21 @@ async function sbSaveEmpleado(emp) {
     nomina: emp.nomina||[], extractos: emp.extractos||[],
     fecha_retiro: emp.fechaRetiro||null,
     foto_data: emp.fotoData||null,
+    // Seguridad social
+    eps:          emp.eps||null,
+    afp:          emp.afp||null,
+    arl:          emp.arl||null,
+    caja_com:     emp.cajaCom||null,
+    fondo_ces:    emp.fondoCes||null,
+    pct_arl:      emp.pctArl||null,
+    // Bancario
+    banco:        emp.banco||null,
+    numero_cuenta:emp.numeroCuenta||null,
+    tipo_cuenta:  emp.tipoCuenta||null,
+    // Beneficios
+    subsidio_transporte: emp.subsidioTransporte ?? true,
+    dotacion:            emp.dotacion ?? true,
+    area_fisica:         emp.areaFisica||null,
   };
   const exists = await sbFetch('empleados','GET',null,`?id=eq.${emp.id}`);
   if (exists && exists.length > 0) {
@@ -1074,6 +1104,22 @@ function openEditEmpModal(empId) {
   if (prevFoto) prevFoto.innerHTML = emp.fotoData
     ? `<img src="${emp.fotoData}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
     : '📷';
+  // Cargar campos seguridad social y bancarios
+  const campos = {
+    'em-eps': emp.eps, 'em-afp': emp.afp, 'em-arl': emp.arl,
+    'em-caja': emp.cajaCom, 'em-fondo-ces': emp.fondoCes,
+    'em-pct-arl': emp.pctArl, 'em-banco': emp.banco,
+    'em-num-cuenta': emp.numeroCuenta, 'em-tipo-cuenta': emp.tipoCuenta,
+    'em-area-fisica': emp.areaFisica,
+  };
+  Object.entries(campos).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val||'';
+  });
+  const chkSubsidio = document.getElementById('em-subsidio');
+  if (chkSubsidio) chkSubsidio.checked = emp.subsidioTransporte ?? true;
+  const chkDotacion = document.getElementById('em-dotacion');
+  if (chkDotacion) chkDotacion.checked = emp.dotacion ?? true;
   // Show status field
   const stGroup = document.getElementById('em-status-group');
   if (stGroup) { stGroup.style.display=''; document.getElementById('em-status').value = emp.status||'activo'; }
@@ -1161,6 +1207,19 @@ function saveEmpleado() {
       emp.contratoTipo = document.getElementById('em-contrato-tipo').value;
       emp.salario = parseInt(document.getElementById('em-salario').value)||0;
       if (SC._pendingEmpFoto) { emp.fotoData = SC._pendingEmpFoto; SC._pendingEmpFoto = null; }
+      // Seguridad Social
+      emp.eps       = document.getElementById('em-eps')?.value||emp.eps||'';
+      emp.afp       = document.getElementById('em-afp')?.value||emp.afp||'';
+      emp.arl       = document.getElementById('em-arl')?.value||emp.arl||'';
+      emp.cajaCom   = document.getElementById('em-caja')?.value||emp.cajaCom||'';
+      emp.fondoCes  = document.getElementById('em-fondo-ces')?.value||emp.fondoCes||'';
+      emp.pctArl    = document.getElementById('em-pct-arl')?.value||emp.pctArl||'';
+      emp.banco     = document.getElementById('em-banco')?.value||emp.banco||'';
+      emp.numeroCuenta  = document.getElementById('em-num-cuenta')?.value||emp.numeroCuenta||'';
+      emp.tipoCuenta    = document.getElementById('em-tipo-cuenta')?.value||emp.tipoCuenta||'';
+      emp.subsidioTransporte = document.getElementById('em-subsidio')?.checked ?? emp.subsidioTransporte ?? true;
+      emp.dotacion  = document.getElementById('em-dotacion')?.checked ?? emp.dotacion ?? true;
+      emp.areaFisica= document.getElementById('em-area-fisica')?.value||emp.areaFisica||'';
       const prevStatus = emp.status;
       emp.status = statusVal;
       if (statusVal === 'retirado' && !emp.fechaRetiro) {
@@ -1189,6 +1248,21 @@ function saveEmpleado() {
       dir: document.getElementById('em-dir').value,
       status: 'activo', docs:{}, contratos:[], nomina:[], extractos:[],
       fotoData: empFoto,
+      // Seguridad Social
+      eps:       document.getElementById('em-eps')?.value||'',
+      afp:       document.getElementById('em-afp')?.value||'',
+      arl:       document.getElementById('em-arl')?.value||'',
+      cajaCom:   document.getElementById('em-caja')?.value||'',
+      fondoCes:  document.getElementById('em-fondo-ces')?.value||'',
+      pctArl:    document.getElementById('em-pct-arl')?.value||'',
+      // Bancario
+      banco:         document.getElementById('em-banco')?.value||'',
+      numeroCuenta:  document.getElementById('em-num-cuenta')?.value||'',
+      tipoCuenta:    document.getElementById('em-tipo-cuenta')?.value||'',
+      // Beneficios
+      subsidioTransporte: document.getElementById('em-subsidio')?.checked ?? true,
+      dotacion:           document.getElementById('em-dotacion')?.checked ?? true,
+      areaFisica:         document.getElementById('em-area-fisica')?.value||'',
     });
     // Crear usuario automáticamente
     const existeUser = USERS.find(u => u.user === userLogin);
@@ -1288,11 +1362,40 @@ function renderEmpTab(tab) {
       <div class="two-col mb-4">
         <div class="glass-card p-5">
           <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:14px">Información Personal</div>
-          ${infoRow('Nombre', emp.name)}${infoRow('Cédula', emp.cedula)}${infoRow('Email', emp.email)}${infoRow('Teléfono', emp.phone)}${infoRow('Dirección', emp.dir)}
+          ${infoRow('Nombre', emp.name)}
+          ${infoRow('Cédula', emp.cedula)}
+          ${infoRow('Email', emp.email||'—')}
+          ${infoRow('Teléfono', emp.phone||'—')}
+          ${infoRow('Dirección', emp.dir||'—')}
         </div>
         <div class="glass-card p-5">
           <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:14px">Información Laboral</div>
-          ${infoRow('Cargo', emp.cargo)}${infoRow('Empresa', empresa?.name||'—')}${infoRow('Fecha Ingreso', emp.fechaIngreso)}${infoRow('Antigüedad', vacI.años+'a '+vacI.meses+'m')}${infoRow('Tipo Contrato', emp.contratoTipo)}${infoRow('Salario Base', '$ ' + (emp.salario||0).toLocaleString('es-CO'))}
+          ${infoRow('Cargo', emp.cargo)}
+          ${infoRow('Área Física', emp.areaFisica||'—')}
+          ${infoRow('Empresa', empresa?.name||'—')}
+          ${infoRow('Fecha Ingreso', emp.fechaIngreso)}
+          ${infoRow('Antigüedad', vacI.años+'a '+vacI.meses+'m')}
+          ${infoRow('Tipo Contrato', emp.contratoTipo)}
+          ${infoRow('Salario Base', '$ ' + (emp.salario||0).toLocaleString('es-CO'))}
+          ${infoRow('Subsidio de Transporte', emp.subsidioTransporte ? '<span style="color:var(--green)">✅ Aplica</span>' : '<span style="color:var(--text-muted)">No aplica</span>')}
+          ${infoRow('Dotación', emp.dotacion ? '<span style="color:var(--green)">✅ Aplica</span>' : '<span style="color:var(--text-muted)">No aplica</span>')}
+        </div>
+      </div>
+      <div class="two-col mb-4">
+        <div class="glass-card p-5">
+          <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:14px">🏥 Seguridad Social</div>
+          ${infoRow('EPS', emp.eps||'—')}
+          ${infoRow('AFP / Pensión', emp.afp||'—')}
+          ${infoRow('ARL', emp.arl||'—')}
+          ${infoRow('% ARL', emp.pctArl ? emp.pctArl+'%' : '—')}
+          ${infoRow('Caja de Compensación', emp.cajaCom||'—')}
+          ${infoRow('Fondo de Cesantías', emp.fondoCes||'—')}
+        </div>
+        <div class="glass-card p-5">
+          <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:14px">🏦 Información Bancaria</div>
+          ${infoRow('Banco', emp.banco||'—')}
+          ${infoRow('Tipo de Cuenta', emp.tipoCuenta||'—')}
+          ${infoRow('Número de Cuenta', emp.numeroCuenta ? '<span style="font-family:monospace;letter-spacing:1px">'+emp.numeroCuenta+'</span>' : '—')}
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
@@ -3927,7 +4030,7 @@ const DRIVE_FOLDERS = {
 
 // Pestañas del Spreadsheet
 const SHEETS_TABS = [
-  { name:'Empleados',       fields:['id','nombre','cedula','email','telefono','area','cargo','empresa','fechaIngreso','contratoTipo','salario','status','diasVacCausados','diasVacTomados','diasVacDisponibles','disciplinarioActivo'] },
+  { name:'Empleados',       fields:['id','nombre','cedula','email','telefono','area','cargo','empresa','fechaIngreso','contratoTipo','salario','status','eps','afp','arl','pctArl','cajaCom','fondoCes','banco','tipoCuenta','numeroCuenta','subsidioTransporte','dotacion','areaFisica','diasVacCausados','diasVacTomados','diasVacDisponibles','disciplinarioActivo'] },
   { name:'Candidatos',      fields:['id','nombre','email','cargo','area','empresa','estado','score','fecha'] },
   { name:'Permisos',        fields:['id','empleado','cedula','empresa','tipo','inicio','fin','duracion','horaInicio','horaFin','diasDescontables','diasNoDescontables','tipoDescuento','estado','motivo','fechaSolicitud'] },
   { name:'Incapacidades',   fields:['id','empleado','diagnostico','dias','eps','fechaInicio','estado','fechaRadicacion'] },
@@ -4201,6 +4304,12 @@ function buildEmpleadosSheet() {
       e.id, e.name, e.cedula, e.email, e.phone,
       area?.name||'', e.cargo, emp?.name||'',
       e.fechaIngreso, e.contratoTipo, e.salario, e.status,
+      e.eps||'', e.afp||'', e.arl||'', e.pctArl||'',
+      e.cajaCom||'', e.fondoCes||'',
+      e.banco||'', e.tipoCuenta||'', e.numeroCuenta||'',
+      e.subsidioTransporte ? 'Sí' : 'No',
+      e.dotacion ? 'Sí' : 'No',
+      e.areaFisica||'',
       vacI.diasCausados, vacI.diasTomados, vacI.diasDisponibles,
       discs > 0 ? 'Sí' : 'No',
     ];
