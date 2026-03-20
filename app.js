@@ -310,7 +310,7 @@ const BODEGA_SEED = [
 // ─ Obtén las credenciales en: supabase.com → Settings → API
 // ═══════════════════════════════════════════════════════════════
 const SB_URL = 'https://qivcmhjlmbgeeajfuxyv.supabase.co';   // ej: https://xxxx.supabase.co
-const SB_KEY = 'TeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
 
 // Estado de conexión con Supabase
 let SB_OK = false;
@@ -1165,6 +1165,18 @@ function openEditEmpModal(empId) {
   SC._editEmpId = empId;
   openModal('modal-add-emp');
 }
+
+function filterEmpsByEmpresa() {
+  const empresaId = document.getElementById('nov-empresa')?.value;
+  const sel = document.getElementById('nov-emp');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Seleccionar empleado...</option>';
+  SC.empleados
+    .filter(e => e.status === 'activo' && (!empresaId || e.empresaId === empresaId))
+    .forEach(e => sel.insertAdjacentHTML('beforeend',
+      `<option value="${e.id}">${e.name} — ${e.cargo}</option>`));
+}
+
 window.openEditEmpModal = openEditEmpModal;
 window.filterEmpsByEmpresa = filterEmpsByEmpresa;
 window.renderSiigoMultiempresa = renderSiigoMultiempresa;
@@ -3990,7 +4002,7 @@ function closeModal(id) { document.getElementById(id)?.classList.remove('open');
 document.addEventListener('click', e => { if (e.target.classList.contains('modal-overlay')) closeModal(e.target.id); });
 
 // ─── NOTIFICATIONS ────────────────────────────────────────
-let notifTimer;
+var notifTimer;
 function showNotif(msg, type='success') {
   const el = document.getElementById('notif');
   document.getElementById('notif-icon').textContent = type==='error'?'❌':'✅';
