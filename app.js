@@ -179,30 +179,56 @@ const SC = {
 
 // ─── SEED DATA ────────────────────────────────────────────
 const EMPRESAS_SEED = [
-  { id:'emp1', name:'Special Car S.A.S',           nit:'900.123.456-1', color:'#111f4d' },
-  { id:'emp2', name:'AutoGroup Colombia',          nit:'900.234.567-2', color:'#1a3a7a' },
-  { id:'emp3', name:'Motores del Valle S.A',       nit:'800.345.678-3', color:'#2044a0' },
-  { id:'emp4', name:'CentroAuto Ltda',             nit:'800.456.789-4', color:'#1e56b0' },
-  { id:'emp5', name:'Repuestos Express S.A.S',     nit:'900.567.890-5', color:'#2c6fad' },
-  { id:'emp6', name:'TallerTech Colombia',         nit:'900.678.901-6', color:'#3478a8' },
-  { id:'emp7', name:'Flota Nacional S.A',          nit:'800.789.012-7', color:'#1a5276' },
-  { id:'emp8', name:'Servicios Integral Auto',     nit:'900.890.123-8', color:'#0e3460' },
+  { id:'emp1', name:'Special Car S.A.S',                           nit:'901.252.081-6', color:'#111f4d', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp2', name:'Rodando Express S.A.S',                       nit:'901.393.272-0', color:'#49af2a', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp3', name:'Rodando Express Plus S.A.S',                  nit:'901.608.712-5', color:'#2d8c18', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp4', name:'Legality S.A.S',                              nit:'901.462.195-8', color:'#b8a800', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp5', name:'Special Car Premium S.A.S',                   nit:'901.690.846-1', color:'#c49a00', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp6', name:'Special Club S.A.S',                          nit:'901.420.914-7', color:'#9b8c04', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp7', name:'Special Car Express S.A.S',                   nit:'901.815.327-1', color:'#3a55f1', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp8', name:'Special Car Financiacion y Seguros LTDA',     nit:'901.922.287-1', color:'#0c67ce', ciudad:'', dir:'', tel:'', rep:'' },
 ];
 
 const AREAS_SEED = [
-  { id:1, icon:'🔧', name:'Taller & Mecánica',       desc:'Mantenimiento y reparación de vehículos.',          positions:['Mecánico General','Técnico de Diagnóstico','Jefe de Taller','Auxiliar de Taller'], subareas:[] },
-  { id:2, icon:'💼', name:'Ventas & Comercial',       desc:'Gestión de ventas y relaciones con clientes.',      positions:['Asesor Comercial','Gerente de Ventas','Ejecutivo de Cuenta'], subareas:[] },
-  { id:3, icon:'📦', name:'Logística & Repuestos',    desc:'Inventario, repuestos y cadena de suministro.',     positions:['Jefe de Bodega','Auxiliar de Logística','Coordinador de Repuestos'], subareas:[] },
-  { id:4, icon:'💻', name:'Tecnología & Sistemas',    desc:'Infraestructura TI y soporte tecnológico.',         positions:['Desarrollador Full-Stack','Analista de Sistemas','Soporte TI'], subareas:[] },
-  { id:5, icon:'💰', name:'Finanzas & Contabilidad',  desc:'Gestión financiera y contabilidad.',                positions:['Contador','Analista Financiero','Auxiliar Contable'], subareas:[] },
-  { id:6, icon:'👥', name:'Recursos Humanos',         desc:'Selección y gestión del talento humano.',           positions:['Coordinador RRHH','Psicólogo Organizacional','Analista de Nómina'], subareas:[] },
-  { id:7, icon:'📣', name:'Marketing & Publicidad',   desc:'Estrategia de marca y comunicación.',               positions:['Director de Marketing','Community Manager','Diseñador Gráfico'], subareas:[] },
-  { id:8, icon:'🛡️', name:'Calidad & Garantías',      desc:'Control de calidad y gestión de garantías.',        positions:['Inspector de Calidad','Gestor de Garantías','Auditor Interno'], subareas:[] },
-  { id:9, icon:'⚖️', name:'Legal & Cumplimiento',     desc:'Asesoría jurídica y cumplimiento normativo.',       positions:['Abogado Corporativo','Analista Legal','Compliance Officer'], subareas:[] },
-  { id:10,icon:'🏗️', name:'Infraestructura',          desc:'Mantenimiento de instalaciones y activos.',         positions:['Jefe de Mantenimiento','Técnico de Instalaciones'], subareas:[] },
-  { id:11,icon:'🎓', name:'Formación & Capacitación', desc:'Desarrollo de competencias y entrenamiento.',       positions:['Coordinador de Capacitación','Instructor Técnico'], subareas:[] },
-  { id:12,icon:'🚗', name:'Gestión de Flota',         desc:'Administración del parque automotriz.',             positions:['Jefe de Flota','Coordinador de Movilidad','Conductor Profesional'], subareas:[] },
-  { id:13,icon:'📊', name:'Gerencia General',         desc:'Alta dirección y estrategia corporativa.',          positions:['Director Ejecutivo','Gerente General','Asistente de Gerencia'], subareas:[] },
+  { id:1,  icon:'🔧', name:'Taller & Mecánica',              desc:'Special Pits.',
+    positions:['Mecánico General','Técnico de Diagnóstico','Jefe de Taller','Auxiliar de Taller','Auxiliar de Lavado','Promotor','Ingeniero Mecanico'],
+    subareas:['Mecanica','Almacen','Lavado','Datailing','Otro'] },
+  { id:2,  icon:'💼', name:'Ventas & Comercial',              desc:'Gestión de ventas y relaciones con clientes.',
+    positions:['Asesor Comercial','Director de Ventas','Lider de ventas','Promotor'],
+    subareas:['Special nuevos','Special Usados'] },
+  { id:3,  icon:'📦', name:'Logística & Transporte',          desc:'Control Documental, Transporte y Logistica VH.',
+    positions:['Director Transporte','Auxiliar administrativo','Coordinador documental'],
+    subareas:[] },
+  { id:4,  icon:'💻', name:'Tecnología & Sistemas',           desc:'Infraestructura TI y soporte tecnológico.',
+    positions:['Desarrollador Full-Stack','Director TI','Soporte TI'],
+    subareas:[] },
+  { id:5,  icon:'💰', name:'Finanzas & Contabilidad',         desc:'Gestión financiera y contabilidad.',
+    positions:['Contador','Analista Financiero','Auxiliar Contable'],
+    subareas:[] },
+  { id:6,  icon:'👥', name:'Recursos Humanos & HSEQ',         desc:'Selección y gestión del talento humano.',
+    positions:['Lider RRHH','Analista RRHH','Abogada Laboral','Lider HSEQ'],
+    subareas:['RRHH','HSEQ','SIG'] },
+  { id:7,  icon:'📣', name:'Marketing & Medios',              desc:'Estrategia de marca y comunicación.',
+    positions:['Director de Marketing','Community Manager','Diseñador Gráfico'],
+    subareas:[] },
+  { id:8,  icon:'🛡️', name:'Financiamiento y Seguros',        desc:'Venta de Seguros y Financiacion.',
+    positions:['Asesor comercial','Gestor de Garantías','Auditor Interno'],
+    subareas:[] },
+  { id:9,  icon:'⚖️', name:'Legal & Cumplimiento',            desc:'Asesoría jurídica y cumplimiento normativo.',
+    positions:['Abogado Corporativo','Analista Legal','Oficial de Cumplimiento'],
+    subareas:[] },
+  { id:10, icon:'🏗️', name:'Infraestructura',                 desc:'Mantenimiento de instalaciones y activos.',
+    positions:['Jefe de Mantenimiento','Técnico de Instalaciones','Auxiliar de servicios administrativos'],
+    subareas:[] },
+  { id:11, icon:'🎓', name:'Academy',                          desc:'Desarrollo de competencias y entrenamiento.',
+    positions:['Director de Academia','Instructor Técnico','Capacitador'],
+    subareas:[] },
+  { id:12, icon:'🚗', name:'Operaciones',                      desc:'Administración del parque automotriz.',
+    positions:['Director de Operaciones','Coordinador de Operaciones','Lider de Operaciones','Analista de Operaciones','Conductor'],
+    subareas:[] },
+  { id:13, icon:'📊', name:'Gerencia General',                 desc:'Alta dirección y estrategia corporativa.',
+    positions:['Director Ejecutivo','Gerente General','Asistente de Gerencia'],
+    subareas:[] },
 ];
 
 const TIPOS_DOC_EMPLEADO = [
@@ -234,6 +260,267 @@ const BODEGA_SEED = [
   { id:'b9', name:'Política de Vacaciones',         cat:'politicas', desc:'Circular RH-2024-05', fecha:'2024-03-10', fileData:null, fileName:null },
   { id:'b10',name:'Formato Acta de Descargo',       cat:'formatos', desc:'Formato FO-RH-010', fecha:'2024-04-01', fileData:null, fileName:null },
 ];
+
+
+// ═══════════════════════════════════════════════════════════════
+// SUPABASE — BASE DE DATOS EN LA NUBE
+// ─ Todos los datos se guardan aquí, compartidos entre usuarios
+// ─ Obtén las credenciales en: supabase.com → Settings → API
+// ═══════════════════════════════════════════════════════════════
+const SB_URL = 'https://qivcmhjlmbgeeajfuxyv.supabase.co';   // ej: https://xxxx.supabase.co
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
+
+// Estado de conexión con Supabase
+let SB_OK = false;
+
+// Helper: llamada a Supabase REST API
+async function sbFetch(table, method='GET', body=null, filters='') {
+  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') return null;
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
+      method,
+      headers: {
+        'apikey':        SB_KEY,
+        'Authorization': `Bearer ${SB_KEY}`,
+        'Content-Type':  'application/json',
+        'Prefer':        method === 'POST' ? 'return=representation' : 'return=minimal',
+      },
+      body: body ? JSON.stringify(body) : null,
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn('Supabase error:', res.status, err);
+      return null;
+    }
+    const text = await res.text();
+    return text ? JSON.parse(text) : [];
+  } catch(e) {
+    console.warn('Supabase fetch error:', e.message);
+    return null;
+  }
+}
+
+// ─── CARGAR DATOS DESDE SUPABASE ─────────────────────────────
+async function loadFromSupabase() {
+  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') {
+    console.log('Supabase no configurado — usando datos locales');
+    return false;
+  }
+
+  showLoadingBanner('Cargando datos desde la base de datos...');
+
+  try {
+    const [emps, perms, incaps, vacs, discs, cands, bodega] = await Promise.all([
+      sbFetch('empleados', 'GET', null, '?select=*&order=created_at.asc'),
+      sbFetch('permisos',  'GET', null, '?select=*&order=created_at.asc'),
+      sbFetch('incapacidades','GET',null,'?select=*&order=created_at.asc'),
+      sbFetch('vacaciones','GET', null, '?select=*&order=created_at.asc'),
+      sbFetch('disciplinarios','GET',null,'?select=*&order=created_at.asc'),
+      sbFetch('candidatos','GET', null, '?select=*&order=created_at.asc'),
+      sbFetch('bodega',    'GET', null, '?select=*&order=created_at.asc'),
+    ]);
+
+    if (emps !== null) {
+      SC.empleados      = emps.map(dbToEmp);
+      SC.permisos       = (perms||[]).map(dbToPerm);
+      SC.incapacidades  = (incaps||[]).map(dbToIncap);
+      SC.vacaciones     = (vacs||[]).map(dbToVac);
+      SC.disciplinarios = (discs||[]).map(dbToDisc);
+      SC.candidatos     = (cands||[]).map(dbToCand);
+      SC.bodega         = (bodega||[]).map(dbToBodega);
+      SB_OK = true;
+      hideLoadingBanner();
+      console.log('✅ Datos cargados desde Supabase:', emps.length, 'empleados');
+      return true;
+    }
+  } catch(e) {
+    console.warn('Error cargando Supabase:', e);
+  }
+
+  hideLoadingBanner();
+  return false;
+}
+
+// ─── MAPEADORES DB → SC ───────────────────────────────────────
+function dbToEmp(r) {
+  return {
+    id: r.id, name: r.name, cedula: r.cedula, email: r.email||'',
+    phone: r.phone||'', areaId: r.area_id, cargo: r.cargo||'',
+    empresaId: r.empresa_id, fechaIngreso: r.fecha_ingreso||'',
+    contratoTipo: r.contrato_tipo||'indefinido', salario: r.salario||0,
+    dir: r.dir||'', status: r.status||'activo',
+    docs: r.docs||{}, contratos: r.contratos||[],
+    nomina: r.nomina||[], extractos: r.extractos||[],
+    fechaRetiro: r.fecha_retiro||null,
+  };
+}
+function dbToPerm(r) {
+  return {
+    id: r.id, empId: r.emp_id, tipo: r.tipo||'personal',
+    esPorHoras: r.es_por_horas||false,
+    inicio: r.inicio||'', fin: r.fin||'', dias: r.dias||0,
+    horaInicio: r.hora_inicio||null, horaFin: r.hora_fin||null,
+    diasDescontables: r.dias_descontables, diasNoDescontables: r.dias_no_descontables,
+    descontable: r.descontable||'pendiente',
+    motivo: r.motivo||'', status: r.status||'pendiente',
+    fileName: r.file_name||null, fileData: null,
+    fecha: r.fecha||'', fechaHora: r.fecha_hora||'',
+  };
+}
+function dbToIncap(r) {
+  return {
+    id: r.id, empId: r.emp_id, diagnostico: r.diagnostico||'',
+    dias: r.dias||0, eps: r.eps||'', fechaInicio: r.fecha_inicio||'',
+    status: r.status||'pendiente', requiereEpicrisis: r.requiere_epicrisis||false,
+    fileName: r.file_name||null, epicrisisName: r.epicrisis_name||null,
+    fileData: null, epicrisisData: null, fecha: r.fecha||'',
+  };
+}
+function dbToVac(r) {
+  return {
+    id: r.id, empId: r.emp_id, inicio: r.inicio||'',
+    fin: r.fin||'', dias: r.dias||0, obs: r.obs||'',
+    estado: r.estado||'pendiente', fechaSolicitud: r.fecha_solicitud||'',
+  };
+}
+function dbToDisc(r) {
+  return {
+    id: r.id, empId: r.emp_id, tipo: r.tipo||'llamado_atencion',
+    fecha: r.fecha||'', descripcion: r.descripcion||'', obs: r.obs||'',
+    diasSuspension: r.dias_suspension||null, estado: r.estado||'en_proceso',
+    notificado: r.notificado||false, respuestaEmp: r.respuesta_emp||'',
+    creadoPor: r.creado_por||'', fechaCreacion: r.fecha_creacion||'',
+    archivos: [],
+  };
+}
+function dbToCand(r) {
+  return {
+    id: r.id, name: r.name||'', email: r.email||'', phone: r.phone||'',
+    areaId: r.area_id, cargo: r.cargo||'', empresaId: r.empresa_id||'',
+    status: r.status||'pendiente', exp: r.exp||'', score: r.score||null,
+    notes: r.notes||'', date: r.fecha||'',
+    evaluation: null, cvData: null, cvName: null,
+  };
+}
+function dbToBodega(r) {
+  return {
+    id: r.id, name: r.name||'', cat: r.cat||'otros',
+    desc: r.descripcion||'', fecha: r.fecha||'',
+    fileData: null, fileName: r.file_name||null,
+  };
+}
+
+// ─── GUARDAR EN SUPABASE ──────────────────────────────────────
+async function sbSaveEmpleado(emp) {
+  if (!SB_OK) return;
+  const row = {
+    id: emp.id, name: emp.name, cedula: emp.cedula,
+    email: emp.email||'', phone: emp.phone||'',
+    area_id: emp.areaId||null, cargo: emp.cargo||'',
+    empresa_id: emp.empresaId||null, fecha_ingreso: emp.fechaIngreso||'',
+    contrato_tipo: emp.contratoTipo||'indefinido', salario: emp.salario||0,
+    dir: emp.dir||'', status: emp.status||'activo',
+    docs: emp.docs||{}, contratos: emp.contratos||[],
+    nomina: emp.nomina||[], extractos: emp.extractos||[],
+    fecha_retiro: emp.fechaRetiro||null,
+  };
+  const exists = await sbFetch('empleados','GET',null,`?id=eq.${emp.id}`);
+  if (exists && exists.length > 0) {
+    await sbFetch('empleados','PATCH',row,`?id=eq.${emp.id}`);
+  } else {
+    await sbFetch('empleados','POST',row);
+  }
+}
+async function sbSavePermiso(p) {
+  if (!SB_OK) return;
+  const row = {
+    id:p.id, emp_id:p.empId, tipo:p.tipo, es_por_horas:p.esPorHoras||false,
+    inicio:p.inicio, fin:p.fin, dias:p.dias,
+    hora_inicio:p.horaInicio||null, hora_fin:p.horaFin||null,
+    dias_descontables:p.diasDescontables??null, dias_no_descontables:p.diasNoDescontables??null,
+    descontable:p.descontable||'pendiente', motivo:p.motivo||'',
+    status:p.status||'pendiente', file_name:p.fileName||null,
+    fecha:p.fecha||'', fecha_hora:p.fechaHora||'',
+  };
+  const exists = await sbFetch('permisos','GET',null,`?id=eq.${p.id}`);
+  if (exists && exists.length > 0) await sbFetch('permisos','PATCH',row,`?id=eq.${p.id}`);
+  else await sbFetch('permisos','POST',row);
+}
+async function sbSaveIncap(i) {
+  if (!SB_OK) return;
+  const row = {
+    id:i.id, emp_id:i.empId, diagnostico:i.diagnostico,
+    dias:i.dias, eps:i.eps, fecha_inicio:i.fechaInicio,
+    status:i.status||'pendiente', requiere_epicrisis:i.requiereEpicrisis||false,
+    file_name:i.fileName||null, epicrisis_name:i.epicrisisName||null, fecha:i.fecha||'',
+  };
+  const exists = await sbFetch('incapacidades','GET',null,`?id=eq.${i.id}`);
+  if (exists && exists.length > 0) await sbFetch('incapacidades','PATCH',row,`?id=eq.${i.id}`);
+  else await sbFetch('incapacidades','POST',row);
+}
+async function sbSaveVac(v) {
+  if (!SB_OK) return;
+  const row = {
+    id:v.id, emp_id:v.empId, inicio:v.inicio, fin:v.fin,
+    dias:v.dias, obs:v.obs||'', estado:v.estado||'pendiente',
+    fecha_solicitud:v.fechaSolicitud||'',
+  };
+  const exists = await sbFetch('vacaciones','GET',null,`?id=eq.${v.id}`);
+  if (exists && exists.length > 0) await sbFetch('vacaciones','PATCH',row,`?id=eq.${v.id}`);
+  else await sbFetch('vacaciones','POST',row);
+}
+async function sbSaveDisc(d) {
+  if (!SB_OK) return;
+  const row = {
+    id:d.id, emp_id:d.empId, tipo:d.tipo, fecha:d.fecha,
+    descripcion:d.descripcion, obs:d.obs||'',
+    dias_suspension:d.diasSuspension||null, estado:d.estado||'en_proceso',
+    notificado:d.notificado||false, respuesta_emp:d.respuestaEmp||'',
+    creado_por:d.creadoPor||'', fecha_creacion:d.fechaCreacion||'',
+  };
+  const exists = await sbFetch('disciplinarios','GET',null,`?id=eq.${d.id}`);
+  if (exists && exists.length > 0) await sbFetch('disciplinarios','PATCH',row,`?id=eq.${d.id}`);
+  else await sbFetch('disciplinarios','POST',row);
+}
+async function sbSaveCand(c) {
+  if (!SB_OK) return;
+  const row = {
+    id:c.id, name:c.name, email:c.email||'', phone:c.phone||'',
+    area_id:c.areaId||null, cargo:c.cargo||'', empresa_id:c.empresaId||null,
+    status:c.status||'pendiente', exp:c.exp||'', score:c.score||null,
+    notes:c.notes||'', fecha:c.date||'',
+  };
+  const exists = await sbFetch('candidatos','GET',null,`?id=eq.${c.id}`);
+  if (exists && exists.length > 0) await sbFetch('candidatos','PATCH',row,`?id=eq.${c.id}`);
+  else await sbFetch('candidatos','POST',row);
+}
+async function sbSaveBodega(b) {
+  if (!SB_OK) return;
+  const row = {
+    id:b.id, name:b.name, cat:b.cat, descripcion:b.desc||'',
+    fecha:b.fecha||'', file_name:b.fileName||null,
+  };
+  const exists = await sbFetch('bodega','GET',null,`?id=eq.${b.id}`);
+  if (exists && exists.length > 0) await sbFetch('bodega','PATCH',row,`?id=eq.${b.id}`);
+  else await sbFetch('bodega','POST',row);
+}
+
+// ─── BANNERS DE ESTADO ────────────────────────────────────────
+function showLoadingBanner(msg) {
+  let el = document.getElementById('sb-loading-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sb-loading-banner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#111f4d;color:#fff;text-align:center;padding:10px;font-size:13px;font-family:Outfit,sans-serif';
+    document.body.appendChild(el);
+  }
+  el.textContent = '⏳ ' + msg;
+  el.style.display = 'block';
+}
+function hideLoadingBanner() {
+  const el = document.getElementById('sb-loading-banner');
+  if (el) el.style.display = 'none';
+}
 
 const EMPLEADOS_SEED = [
   { id:'e1', name:'Carlos Mejía Torres',   cedula:'1.234.567', email:'carlos.mejia@specialcar.com', phone:'+57 310 555 0001', areaId:1,  cargo:'Mecánico General',     empresaId:'emp1', fechaIngreso:'2022-03-15', contratoTipo:'indefinido', salario:2500000, dir:'Calle 10 #23-45', status:'activo', docs:{}, contratos:[], nomina:[], extractos:[] },
@@ -279,32 +566,40 @@ const INCAP_SEED = [
 ];
 
 // ─── INIT ─────────────────────────────────────────────────
-function init() {
+async function init() {
   loadSavedGapiConfig();
   loadSavedPasswords();
   loadSavedAdminUsers();
-  SC.areas = AREAS_SEED.map(a => ({...a, subareas:[...(a.subareas||[])]}));
-  SC.empresas = [...EMPRESAS_SEED];
-  SC.empleados = EMPLEADOS_SEED.map(e => ({...e, docs:{...e.docs}, contratos:[...e.contratos], nomina:[...e.nomina], extractos:[...e.extractos]}));
-  SC.candidatos = [...CANDIDATOS_SEED];
-  SC.bodega = [...BODEGA_SEED];
-  SC.permisos = [...PERMISOS_SEED];
-  SC.incapacidades = [...INCAP_SEED];
-  SC.checklists = {};
-  SC.disciplinarios = [
-    { id:'d1', empId:'e3', tipo:'llamado_atencion', fecha:'2026-01-15', descripcion:'Incumplimiento de horario de forma reiterada.', estado:'cerrado', notificado:true, respuestaEmp:'Situación de transporte que fue solucionada.', archivos:[], creadoPor:'analista.rh', fechaCreacion:'2026-01-15' },
-    { id:'d2', empId:'e5', tipo:'suspension', fecha:'2026-02-20', descripcion:'Uso indebido de vehículo de la empresa para fines personales.', estado:'en_proceso', notificado:true, respuestaEmp:'', archivos:[], creadoPor:'analista.rh', fechaCreacion:'2026-02-20', diasSuspension:3 },
-  ];
-  SC.vacaciones = [
-    { id:'v1', empId:'e2', inicio:'2026-01-01', fin:'2026-01-15', dias:15, obs:'Vacaciones anuales 2025', estado:'disfrutado', fechaSolicitud:'2025-12-01' },
-    { id:'v2', empId:'e1', inicio:'2026-06-01', fin:'2026-06-15', dias:15, obs:'Vacaciones primer semestre', estado:'aprobado', fechaSolicitud:'2026-03-10' },
-  ];
 
-  // Check saved session (no hay persistencia real, solo demo)
+  // Datos estáticos siempre desde seed (no cambian en producción)
+  SC.areas    = AREAS_SEED.map(a => ({...a, subareas:[...(a.subareas||[])]}));
+  SC.empresas = [...EMPRESAS_SEED];
+  SC.checklists = {};
+
+  // Intentar cargar datos dinámicos desde Supabase
+  const sbLoaded = await loadFromSupabase();
+
+  if (!sbLoaded) {
+    // Fallback: datos demo locales
+    console.log('Usando datos demo locales (Supabase no disponible)');
+    SC.empleados     = EMPLEADOS_SEED.map(e => ({...e, docs:{...e.docs}, contratos:[...e.contratos], nomina:[...e.nomina], extractos:[...e.extractos]}));
+    SC.candidatos    = [...CANDIDATOS_SEED];
+    SC.bodega        = [...BODEGA_SEED];
+    SC.permisos      = [...PERMISOS_SEED];
+    SC.incapacidades = [...INCAP_SEED];
+    SC.disciplinarios = [];
+    SC.vacaciones    = [];
+  }
+
+  // Restaurar sesión activa
   const saved = sessionStorage.getItem('sc_user');
   if (saved) {
-    SC.user = JSON.parse(saved);
-    startApp();
+    try {
+      SC.user = JSON.parse(saved);
+      startApp();
+    } catch(e) {
+      sessionStorage.removeItem('sc_user');
+    }
   }
 }
 
@@ -765,6 +1060,15 @@ function openEditEmpModal(empId) {
   openModal('modal-add-emp');
 }
 window.openEditEmpModal = openEditEmpModal;
+window.loadFromSupabase = loadFromSupabase;
+window.sbSaveEmpleado = sbSaveEmpleado;
+window.sbSavePermiso = sbSavePermiso;
+window.sbSaveIncap = sbSaveIncap;
+window.sbSaveVac = sbSaveVac;
+window.sbSaveDisc = sbSaveDisc;
+window.sbSaveCand = sbSaveCand;
+window.sbSaveBodega = sbSaveBodega;
+
 window.openUserMgmt = openUserMgmt;
 window.saveUserAdmin = saveUserAdmin;
 window.loadSavedAdminUsers = loadSavedAdminUsers;
@@ -827,6 +1131,7 @@ function saveEmpleado() {
         emp.fechaRetiro = new Date().toLocaleDateString('es-CO');
       }
       showNotif(`Empleado "${name}" actualizado ✅`);
+      sbSaveEmpleado(emp);
     }
     SC._editEmpId = null;
   } else {
@@ -1253,6 +1558,8 @@ function saveVacaciones() {
   });
   SC.currentDocContext = null;
   closeModal('modal-vacaciones');
+  const lastVac = SC.vacaciones[SC.vacaciones.length-1];
+  sbSaveVac(lastVac);
   showNotif('Período de vacaciones registrado ✅');
   syncToSheets('vacaciones');
   if (SC.currentView === 'empleado-detail') renderEmpTab('vacaciones');
@@ -1261,7 +1568,12 @@ function saveVacaciones() {
 
 function cambiarEstadoVac(id, estado) {
   const v = SC.vacaciones.find(x => x.id === id);
-  if (v) { v.estado = estado; showNotif('Estado actualizado ✅'); }
+  if (v) {
+    v.estado = estado;
+    sbSaveVac(v);
+    syncToSheets('vacaciones');
+    showNotif('Estado actualizado ✅');
+  }
   renderEmpTab('vacaciones');
 }
 
@@ -1327,6 +1639,7 @@ function saveDocEmpleado() {
   if (ctx.tipo === 'carpeta') {
     emp.docs[tipoId] = { fecha, obs, fileData, fileName };
     if(fileData) uploadToDrive(fileData, fileName||tipoId+'.pdf', 'carpeta_vida', emp.name);
+    sbSaveEmpleado(emp);
   } else {
     const list = emp[ctx.tipo] = emp[ctx.tipo]||[];
     const tipoName = TIPOS_DOC_EMPLEADO.find(t=>t.id===tipoId)?.name || ctx.tipo;
@@ -1611,6 +1924,8 @@ function saveCandidato() {
   SC.pendingFile = null;
   document.getElementById('cv-lbl').textContent = 'Arrastra el PDF aquí o haz clic';
   closeModal('modal-add-cand');
+  const lastCand = SC.candidatos[SC.candidatos.length-1];
+  sbSaveCand(lastCand);
   showNotif(`Candidato "${name}" registrado ✅`);
   syncToSheets('candidatos');
   renderCandidatos();
@@ -1850,6 +2165,8 @@ function saveBodegaDoc() {
   SC.pendingFile = null;
   document.getElementById('bd-lbl').textContent = 'Arrastra el archivo aquí';
   closeModal('modal-add-doc-bodega');
+  const lastBod = SC.bodega[SC.bodega.length-1];
+  sbSaveBodega(lastBod);
   showNotif('Documento subido a Bodega ✅');
   syncToSheets('bodega');
   renderBodega();
@@ -2144,6 +2461,8 @@ function savePermiso() {
   SC.pendingFile = null;
   SC.currentDocContext = null;
   closeModal('modal-permiso');
+  const lastPerm = SC.permisos[SC.permisos.length-1];
+  sbSavePermiso(lastPerm);
   showNotif('Permiso solicitado ✅');
   syncToSheets('permisos');
   if (SC.currentView === 'permisos-admin') renderPermisosAdmin();
@@ -2292,6 +2611,8 @@ function saveIncapacidad() {
   SC.pendingFiles = {};
   SC.currentDocContext = null;
   closeModal('modal-incap');
+  const lastIncap = SC.incapacidades[SC.incapacidades.length-1];
+  sbSaveIncap(lastIncap);
   showNotif('Incapacidad radicada ✅');
   syncToSheets('incapacidades');
   if (SC.currentView === 'incapacidades-admin') renderIncapAdmin();
@@ -2966,6 +3287,8 @@ function saveDiscipinario() {
   };
   SC.disciplinarios.push(disc);
   closeModal('modal-add-disc');
+  const lastDisc = SC.disciplinarios[SC.disciplinarios.length-1];
+  sbSaveDisc(lastDisc);
   showNotif('Proceso disciplinario creado ✅');
   syncToSheets('disciplinarios');
   renderDisciplinarios();
@@ -3014,12 +3337,12 @@ function openDiscDetail(id) {
 
 function notificarDisc(id) {
   const d = SC.disciplinarios.find(x=>x.id===id);
-  if(d){ d.notificado=true; showNotif('Empleado notificado ✅'); openDiscDetail(id); renderDisciplinarios(); }
+  if(d){ d.notificado=true; sbSaveDisc(d); syncToSheets('disciplinarios'); showNotif('Empleado notificado ✅'); openDiscDetail(id); renderDisciplinarios(); }
 }
 
 function cerrarDisc(id) {
   const d = SC.disciplinarios.find(x=>x.id===id);
-  if(d){ d.estado='cerrado'; showNotif('Proceso cerrado ✅'); renderDisciplinarios(); }
+  if(d){ d.estado='cerrado'; sbSaveDisc(d); syncToSheets('disciplinarios'); showNotif('Proceso cerrado ✅'); renderDisciplinarios(); }
 }
 
 function cerrarDiscModal(id) {
