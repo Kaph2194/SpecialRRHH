@@ -1,3 +1,16 @@
+const GAPI_CONFIG = {
+  CLIENT_ID:     '538921192245-65qk4e2ro2s5cdlp42j9mvl0ik4peg72.apps.googleusercontent.com',   // ← pega aquí
+  API_KEY:       'AIzaSyBJn7vN_J01OfaX4LUzxR5_BoF0i18KsVU',                                  // ← pega aquí
+  DISCOVERY_DOCS:['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+                  'https://sheets.googleapis.com/$discovery/rest?version=v4'],
+  SCOPES:        'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
+  FOLDER_ROOT:   '',   // Se auto-completa al conectar (se guarda en localStorage)
+  SHEET_ID:      '',   // Se auto-completa al conectar (se guarda en localStorage)
+  DRIVE_EMAIL:   '',   // Email Gmail donde se guardarán los archivos
+  connected:     false,
+  tokenClient:   null,
+};
+
 function openVacDetailAdmin(empId) {
   const emp = SC.empleados.find(e => e.id === empId);
   if (!emp) return;
@@ -4562,19 +4575,6 @@ async function saveSiigoConfigModal() {
 // ─── GOOGLE API CONFIG (hardcoded — no exponer en UI) ────────
 // ⚠️  REEMPLAZA ESTOS VALORES CON TUS CREDENCIALES REALES
 //     Obtener en: console.cloud.google.com → APIs & Services → Credentials
-const GAPI_CONFIG = {
-  CLIENT_ID:     '538921192245-65qk4e2ro2s5cdlp42j9mvl0ik4peg72.apps.googleusercontent.com',   // ← pega aquí
-  API_KEY:       'AIzaSyBJn7vN_J01OfaX4LUzxR5_BoF0i18KsVU',                                  // ← pega aquí
-  DISCOVERY_DOCS:['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
-                  'https://sheets.googleapis.com/$discovery/rest?version=v4'],
-  SCOPES:        'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
-  FOLDER_ROOT:   '',   // Se auto-completa al conectar (se guarda en localStorage)
-  SHEET_ID:      '',   // Se auto-completa al conectar (se guarda en localStorage)
-  DRIVE_EMAIL:   '',   // Email Gmail donde se guardarán los archivos
-  connected:     false,
-  tokenClient:   null,
-};
-
 // Subcarpetas en Drive por módulo
 const DRIVE_FOLDERS = {
   permisos:       { name:'Permisos',             color:'#4285F4', id:null },
