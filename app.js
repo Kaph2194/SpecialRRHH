@@ -1855,18 +1855,34 @@ function empAvatarHtml(emp, size=48, fontSize=18) {
 
 // ─── IMPORTACIÓN MASIVA DE EMPLEADOS ─────────────────────
 const IMPORT_COLUMNS = {
+  // Datos básicos
   'nombre':'name','nombre completo':'name','name':'name',
-  'cedula':'cedula','documento':'cedula','cc':'cedula',
-  'email':'email','correo':'email',
-  'telefono':'phone','celular':'phone','tel':'phone',
+  'cedula':'cedula','documento':'cedula','cc':'cedula','nro documento':'cedula',
+  'email':'email','correo':'email','correo electronico':'email',
+  'telefono':'phone','celular':'phone','tel':'phone','movil':'phone',
   'area':'areaName','área':'areaName',
-  'cargo':'cargo','puesto':'cargo',
+  'cargo':'cargo','puesto':'cargo','posicion':'cargo',
   'empresa':'empresaName','empresa contratante':'empresaName',
-  'fecha ingreso':'fechaIngreso','fecha_ingreso':'fechaIngreso','ingreso':'fechaIngreso',
-  'contrato':'contratoTipo','tipo contrato':'contratoTipo','tipo_contrato':'contratoTipo',
-  'salario':'salario','salario base':'salario','sueldo':'salario',
-  'direccion':'dir','dirección':'dir','address':'dir',
+  'fecha ingreso':'fechaIngreso','fecha_ingreso':'fechaIngreso','ingreso':'fechaIngreso','fecha de ingreso':'fechaIngreso',
+  'contrato':'contratoTipo','tipo contrato':'contratoTipo','tipo_contrato':'contratoTipo','tipo de contrato':'contratoTipo',
+  'salario':'salario','salario base':'salario','sueldo':'salario','remuneracion':'salario',
+  'direccion':'dir','dirección':'dir','address':'dir','domicilio':'dir',
   'estado':'status',
+  // Seguridad Social
+  'eps':'eps',
+  'afp':'afp','pension':'afp','pensión':'afp','fondo de pension':'afp','fondo de pensión':'afp',
+  'arl':'arl',
+  'porcentaje arl':'pctArl','% arl':'pctArl','nivel riesgo':'pctArl','pct arl':'pctArl',
+  'caja de compensacion':'cajaCom','caja compensacion':'cajaCom','caja':'cajaCom','caja de compensación':'cajaCom',
+  'fondo de cesantias':'fondoCes','fondo cesantias':'fondoCes','cesantias':'fondoCes','fondo de cesantías':'fondoCes',
+  // Bancario
+  'banco':'banco',
+  'numero de cuenta':'numeroCuenta','num cuenta':'numeroCuenta','cuenta':'numeroCuenta','número de cuenta':'numeroCuenta',
+  'tipo de cuenta':'tipoCuenta','tipo cuenta':'tipoCuenta',
+  // Beneficios
+  'subsidio transporte':'subsidioTransporte','subsidio de transporte':'subsidioTransporte','subsidio':'subsidioTransporte',
+  'dotacion':'dotacion','dotación':'dotacion',
+  'area fisica':'areaFisica','área física':'areaFisica','sede':'areaFisica','lugar de trabajo':'areaFisica',
 };
 
 function openImportModal() {
@@ -1972,6 +1988,19 @@ function processImportRows(rows, fileName) {
     emp.contratoTipo = cmap[(emp.contratoTipo||'').toLowerCase()]||'indefinido';
     const smap={activo:'activo',retirado:'retirado',sancionado:'sancionado'};
     emp.status = smap[(emp.status||'').toLowerCase()]||'activo';
+    // Normalizar tipo de cuenta
+    const tcmap={ahorros:'ahorros',corriente:'corriente',nequi:'nequi',daviplata:'nequi'};
+    if(emp.tipoCuenta) emp.tipoCuenta = tcmap[emp.tipoCuenta.toLowerCase()]||emp.tipoCuenta;
+    // Normalizar subsidio y dotación (acepta si/no/true/false/1/0)
+    const boolVal = v => ['si','sí','yes','true','1','x'].includes(String(v||'').toLowerCase().trim());
+    if(emp.subsidioTransporte !== undefined) emp.subsidioTransporte = boolVal(emp.subsidioTransporte);
+    if(emp.dotacion !== undefined) emp.dotacion = boolVal(emp.dotacion);
+    // Normalizar % ARL — si viene como "I", "II", etc., convertir
+    const arlMap={'i':'0.522','ii':'1.044','iii':'2.436','iv':'4.350','v':'6.960',
+                  '1':'0.522','2':'1.044','3':'2.436','4':'4.350','5':'6.960'};
+    if(emp.pctArl && arlMap[emp.pctArl.trim().toLowerCase()]) {
+      emp.pctArl = arlMap[emp.pctArl.trim().toLowerCase()];
+    }
     if(SC.empleados.find(e=>e.cedula===emp.cedula)) emp._warnings.push('Cédula ya existe — se actualizará');
     return emp;
   });
@@ -2023,14 +2052,25 @@ function confirmImport() {
   let nuevos=0, actualizados=0;
   validos.forEach(e=>{
     const dup = SC.empleados.find(x=>x.cedula===e.cedula);
-    const data={name:e.name,cedula:e.cedula,email:e.email||'',phone:e.phone||'',
-      areaId:e.areaId||null,cargo:e.cargo||'',empresaId:e.empresaId||null,
-      fechaIngreso:e.fechaIngreso||'',contratoTipo:e.contratoTipo,
-      salario:e.salario||0,dir:e.dir||'',status:e.status};
+    const data={
+      name:e.name, cedula:e.cedula, email:e.email||'', phone:e.phone||'',
+      areaId:e.areaId||null, cargo:e.cargo||'', empresaId:e.empresaId||null,
+      fechaIngreso:e.fechaIngreso||'', contratoTipo:e.contratoTipo,
+      salario:e.salario||0, dir:e.dir||'', status:e.status,
+      // Seguridad Social
+      eps:e.eps||'', afp:e.afp||'', arl:e.arl||'',
+      pctArl:e.pctArl||'', cajaCom:e.cajaCom||'', fondoCes:e.fondoCes||'',
+      // Bancario
+      banco:e.banco||'', numeroCuenta:e.numeroCuenta||'', tipoCuenta:e.tipoCuenta||'',
+      // Beneficios
+      subsidioTransporte: e.subsidioTransporte !== undefined ? e.subsidioTransporte : true,
+      dotacion:           e.dotacion           !== undefined ? e.dotacion           : true,
+      areaFisica:         e.areaFisica||'',
+    };
     if(dup){Object.assign(dup,data);actualizados++;}
     else{
       const newId = 'e'+Date.now()+(Math.random()*1000|0);
-      SC.empleados.push({id:newId,...data,docs:{},contratos:[],nomina:[],extractos:[]});
+      SC.empleados.push({id:newId,...data,docs:{},contratos:[],nomina:[],extractos:[],fotoData:null});
       // Crear usuario con cédula como contraseña
       const uLogin = e.cedula.replace(/[^a-zA-Z0-9]/g,'');
       if(!USERS.find(u=>u.user===uLogin)) {
@@ -2047,15 +2087,32 @@ function confirmImport() {
 }
 
 function downloadPlantillaCSV() {
-  const header='nombre completo,cedula,email,telefono,area,cargo,empresa,fecha ingreso,tipo contrato,salario,direccion,estado';
-  const ex1='Carlos Pérez García,1234567890,carlos@empresa.com,3001234567,Taller & Mecánica,Mecánico General,Special Car S.A.S,2024-01-15,indefinido,2500000,Calle 10 #20-30,activo';
-  const ex2='Laura Rodríguez,9876543210,laura@empresa.com,3109876543,Ventas & Comercial,Asesor Comercial,AutoGroup Colombia,2023-06-01,fijo,3200000,Carrera 5 #12-34,activo';
-  const csv=[header,ex1,ex2].join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='plantilla_empleados_specialcar.csv';a.click();
-  URL.revokeObjectURL(url);
-  showNotif('Plantilla descargada ✅');
+  const cols = [
+    'nombre completo','cedula','email','telefono',
+    'area','cargo','empresa','fecha ingreso','tipo contrato','salario','direccion','estado',
+    'eps','afp','arl','porcentaje arl','caja de compensacion','fondo de cesantias',
+    'banco','tipo de cuenta','numero de cuenta',
+    'subsidio transporte','dotacion','area fisica',
+  ];
+  const ex1 = [
+    'Carlos Pérez García','1234567890','carlos@specialcar.com','3001234567',
+    'Taller & Mecánica','Mecánico General','Special Car S.A.S','2024-01-15','indefinido','2500000','Calle 10 #20-30','activo',
+    'Sura','Porvenir','Sura','III','Compensar','Porvenir',
+    'Bancolombia','ahorros','12345678901','si','si','Sede Principal',
+  ];
+  const ex2 = [
+    'Laura Rodríguez','9876543210','laura@specialcar.com','3109876543',
+    'Ventas & Comercial','Asesor Comercial','Rodando Express S.A.S','2023-06-01','fijo','3200000','Carrera 5 #12-34','activo',
+    'Nueva EPS','Protección','Positiva','II','Cafam','Protección',
+    'Davivienda','corriente','98765432101','si','no','Sede Comercial',
+  ];
+  const csv = [cols, ex1, ex2].map(r => r.join(',')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'plantilla_empleados_specialcar.csv';
+  a.click(); URL.revokeObjectURL(url);
+  showNotif('Plantilla descargada ✅ — '+cols.length+' columnas');
 }
 
 // ─── CANDIDATOS ───────────────────────────────────────────
@@ -2168,7 +2225,7 @@ function openEvaluacion(candId) {
           const v = getVacante(c.cargo, c.areaId);
           const activos = SC.empleados.filter(e=>e.cargo===c.cargo&&e.empresaId===c.empresaId&&e.status==='activo').length;
           if (v && (v.total - activos) <= 0) return '';
-          return '<button class="btn btn-primary btn-sm full-w" onclick="abrirVincularEmpleado(''+c.id+'')">👤 Vincular como Empleado</button>';
+          return '<button class="btn btn-primary btn-sm full-w" onclick="abrirVincularEmpleado(\'' + c.id + '\')" >👤 Vincular como Empleado</button>';
         })()}
       </div>` : ''}
     </div>
