@@ -157,6 +157,7 @@ const SC = {
   empresas: [],
   empleados: [],
   candidatos: [],
+  vacantes: [],       // { id, cargo, areaId, empresaId, total, descripcion, fechaApertura, activa }
   bodega: [],
   permisos: [],
   incapacidades: [],
@@ -275,7 +276,7 @@ let SB_OK = false;
 
 // Helper: llamada a Supabase REST API
 async function sbFetch(table, method='GET', body=null, filters='') {
-  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') return null;
+  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') return null;
   try {
     const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
       method,
@@ -302,7 +303,7 @@ async function sbFetch(table, method='GET', body=null, filters='') {
 
 // ─── CARGAR DATOS DESDE SUPABASE ─────────────────────────────
 async function loadFromSupabase() {
-  if (!SB_URL || SB_URL === 'TU_SUPABASE_URL') {
+  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') {
     console.log('Supabase no configurado — usando datos locales');
     return false;
   }
@@ -331,6 +332,8 @@ async function loadFromSupabase() {
       SB_OK = true;
       hideLoadingBanner();
       console.log('✅ Datos cargados desde Supabase:', emps.length, 'empleados');
+      // Sincronizar todo a Google Sheets después de cargar
+      setTimeout(() => { if(GAPI_CONFIG.connected) syncAllToSheets(); }, 2000);
       return true;
     }
   } catch(e) {
@@ -352,6 +355,7 @@ function dbToEmp(r) {
     docs: r.docs||{}, contratos: r.contratos||[],
     nomina: r.nomina||[], extractos: r.extractos||[],
     fechaRetiro: r.fecha_retiro||null,
+    fotoData: r.foto_data||null,
   };
 }
 function dbToPerm(r) {
@@ -423,6 +427,7 @@ async function sbSaveEmpleado(emp) {
     docs: emp.docs||{}, contratos: emp.contratos||[],
     nomina: emp.nomina||[], extractos: emp.extractos||[],
     fecha_retiro: emp.fechaRetiro||null,
+    foto_data: emp.fotoData||null,
   };
   const exists = await sbFetch('empleados','GET',null,`?id=eq.${emp.id}`);
   if (exists && exists.length > 0) {
@@ -575,6 +580,7 @@ async function init() {
   SC.areas    = AREAS_SEED.map(a => ({...a, subareas:[...(a.subareas||[])]}));
   SC.empresas = [...EMPRESAS_SEED];
   SC.checklists = {};
+  SC.vacantes = JSON.parse(localStorage.getItem('sc_vacantes')||'[]');
 
   // Intentar cargar datos dinámicos desde Supabase
   const sbLoaded = await loadFromSupabase();
@@ -727,6 +733,7 @@ function buildSidebar() {
   addNavSep(nav, 'GESTIÓN');
   addNavItem(nav, '👤', 'Empleados', 'empleados');
   addNavItem(nav, '🔍', 'Candidatos', 'candidatos');
+  addNavItem(nav, '📋', 'Vacantes', 'vacantes');
   addNavSep(nav, 'DOCUMENTOS');
   addNavItem(nav, '🗄', 'Bodega Documental', 'bodega');
   addNavSep(nav, 'NÓMINA & GESTIÓN');
@@ -803,6 +810,7 @@ function showView(viewId) {
   if (viewId === 'dashboard') { renderDashboard(); }
   else if (viewId === 'empleados') { renderEmpleados(); setupEmpActions(actions); }
   else if (viewId === 'candidatos') { renderCandidatos(); setupCandActions(actions); }
+  else if (viewId === 'vacantes') { openVacantesPanel(); showView('candidatos'); }
   else if (viewId === 'bodega') { renderBodega(); setupBodegaActions(actions); }
   else if (viewId === 'permisos-admin') { renderPermisosAdmin(); setupPermActions(actions); }
   else if (viewId === 'incapacidades-admin') { renderIncapAdmin(); setupIncapActions(actions); }
@@ -988,17 +996,21 @@ function renderEmpleados() {
     const reqCount = TIPOS_DOC_EMPLEADO.filter(t=>t.req).length;
     const pct = Math.round(docCount/reqCount*100);
 
-    const vacInfo = calcVacInfo(e);
+    const vacInfo  = calcVacInfo(e);
+    const empStatus = getEmpStatus(e);
+    const fotoEl    = e.fotoData
+      ? `<img src="${e.fotoData}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:3px solid var(--navy-border);flex-shrink:0">`
+      : `<div class="emp-avatar" style="width:48px;height:48px;font-size:18px;flex-shrink:0">${e.name[0]}</div>`;
     const card = document.createElement('div');
     card.className = 'emp-card';
     card.innerHTML = `
       <div class="flex items-center gap-3 mb-3">
-        <div class="emp-avatar">${e.name[0]}</div>
+        ${fotoEl}
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:14px;color:var(--navy)">${e.name}</div>
           <div class="text-sm text-muted">${e.cargo}</div>
         </div>
-        <span class="badge badge-green">Activo</span>
+        ${statusBadge(empStatus)}
       </div>
       <div class="text-sm text-muted mb-1">${area?.icon||''} ${area?.name||'—'} &nbsp;·&nbsp; ${empresa?.name||'—'}</div>
       <div class="text-xs text-muted mb-2">📅 Ingreso: ${e.fechaIngreso}</div>
@@ -1022,6 +1034,9 @@ function renderEmpleados() {
 
 function openAddEmpModal() {
   SC._editEmpId = null;
+  SC._pendingEmpFoto = null;
+  const prev = document.getElementById('em-foto-preview');
+  if(prev) prev.innerHTML = '📷';
   document.getElementById('modal-emp-title').textContent = 'Registrar Empleado';
   const stGroup = document.getElementById('em-status-group'); if(stGroup) stGroup.style.display='none';
   ['em-name','em-cedula','em-email','em-phone','em-dir'].forEach(id => document.getElementById(id).value='');
@@ -1053,6 +1068,12 @@ function openEditEmpModal(empId) {
   updateEmpPositions();
   setTimeout(() => { document.getElementById('em-cargo').value = emp.cargo||''; }, 50);
   document.getElementById('em-empresa').value = emp.empresaId||'';
+  // Cargar foto existente
+  SC._pendingEmpFoto = null;
+  const prevFoto = document.getElementById('em-foto-preview');
+  if (prevFoto) prevFoto.innerHTML = emp.fotoData
+    ? `<img src="${emp.fotoData}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+    : '📷';
   // Show status field
   const stGroup = document.getElementById('em-status-group');
   if (stGroup) { stGroup.style.display=''; document.getElementById('em-status').value = emp.status||'activo'; }
@@ -1060,6 +1081,20 @@ function openEditEmpModal(empId) {
   openModal('modal-add-emp');
 }
 window.openEditEmpModal = openEditEmpModal;
+window.updateVacPositions = updateVacPositions;
+window.openVacantesPanel = openVacantesPanel;
+window.saveNuevaVacante = saveNuevaVacante;
+window.cerrarVacante = cerrarVacante;
+window.getVacanteBadge = getVacanteBadge;
+window.verificarCupoYArchivar = verificarCupoYArchivar;
+window.renderVacantesList = renderVacantesList;
+window.getVacante = getVacante;
+
+window.getEmpStatus = getEmpStatus;
+window.empAvatarHtml = empAvatarHtml;
+window.updateCandStatus = updateCandStatus;
+window.abrirVincularEmpleado = abrirVincularEmpleado;
+
 window.loadFromSupabase = loadFromSupabase;
 window.sbSaveEmpleado = sbSaveEmpleado;
 window.sbSavePermiso = sbSavePermiso;
@@ -1125,6 +1160,7 @@ function saveEmpleado() {
       emp.fechaIngreso = document.getElementById('em-fecha').value;
       emp.contratoTipo = document.getElementById('em-contrato-tipo').value;
       emp.salario = parseInt(document.getElementById('em-salario').value)||0;
+      if (SC._pendingEmpFoto) { emp.fotoData = SC._pendingEmpFoto; SC._pendingEmpFoto = null; }
       const prevStatus = emp.status;
       emp.status = statusVal;
       if (statusVal === 'retirado' && !emp.fechaRetiro) {
@@ -1139,6 +1175,9 @@ function saveEmpleado() {
     const newEmpId = 'e' + Date.now();
     // Usuario: cédula limpia (solo números y letras, sin puntos ni espacios)
     const userLogin = cedula.replace(/[^a-zA-Z0-9]/g,'');
+    // Guardar foto si se subió
+    const empFoto = SC._pendingEmpFoto || null;
+    SC._pendingEmpFoto = null;
     SC.empleados.push({
       id: newEmpId, name, cedula,
       email: document.getElementById('em-email').value,
@@ -1149,6 +1188,7 @@ function saveEmpleado() {
       salario: parseInt(document.getElementById('em-salario').value)||0,
       dir: document.getElementById('em-dir').value,
       status: 'activo', docs:{}, contratos:[], nomina:[], extractos:[],
+      fotoData: empFoto,
     });
     // Crear usuario automáticamente
     const existeUser = USERS.find(u => u.user === userLogin);
@@ -1165,8 +1205,21 @@ function saveEmpleado() {
       });
     }
     showNotif(`Empleado "${name}" registrado ✅ · Usuario: ${userLogin} · Contraseña: ${userLogin}`);
-    // Mostrar credenciales en modal de confirmación
     showCredsModal(name, userLogin);
+    // Si venía de un candidato, archivarlo y verificar cupo
+    if (SC._fromCandId) {
+      const cand = SC.candidatos.find(x => x.id === SC._fromCandId);
+      if (cand) {
+        cand.status = 'archivado';
+        cand._motivoArchivo = 'Vinculado como empleado';
+        sbSaveCand(cand);
+        syncToSheets('candidatos');
+        const newEmp = SC.empleados[SC.empleados.length - 1];
+        if (newEmp) newEmp._desdeCandidato = true;
+        verificarCupoYArchivar(cand.cargo, cand.areaId);
+      }
+      SC._fromCandId = null;
+    }
   }
   closeModal('modal-add-emp');
   syncToSheets('empleados');
@@ -1666,6 +1719,37 @@ function viewDocFromList(empId, tipo, idx) {
 }
 
 
+
+// ─── ESTADO REAL DEL EMPLEADO ─────────────────────────────
+// Calcula el estado real teniendo en cuenta si está en vacaciones
+function getEmpStatus(emp) {
+  if (!emp) return 'activo';
+  if (emp.status === 'retirado' || emp.status === 'sancionado') return emp.status;
+  // Verificar si hoy cae dentro de un período de vacaciones aprobado
+  const hoy = new Date();
+  hoy.setHours(0,0,0,0);
+  const enVac = SC.vacaciones.some(v => {
+    if (v.empId !== emp.id) return false;
+    if (v.estado !== 'aprobado' && v.estado !== 'disfrutado') return false;
+    const ini = new Date(v.inicio); ini.setHours(0,0,0,0);
+    const fin = new Date(v.fin);    fin.setHours(23,59,59,0);
+    return hoy >= ini && hoy <= fin;
+  });
+  if (enVac) return 'en_vacaciones';
+  return emp.status || 'activo';
+}
+
+
+// ─── AVATAR HELPER ───────────────────────────────────────
+// Retorna img con foto o div con inicial según tenga foto
+function empAvatarHtml(emp, size=48, fontSize=18) {
+  if (!emp) return `<div class="emp-avatar" style="width:${size}px;height:${size}px;font-size:${fontSize}px">?</div>`;
+  if (emp.fotoData) {
+    return `<img src="${emp.fotoData}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;border:3px solid var(--navy-border);flex-shrink:0">`;
+  }
+  return `<div class="emp-avatar" style="width:${size}px;height:${size}px;font-size:${fontSize}px;flex-shrink:0">${(emp.name||'?')[0]}</div>`;
+}
+
 // ─── IMPORTACIÓN MASIVA DE EMPLEADOS ─────────────────────
 const IMPORT_COLUMNS = {
   'nombre':'name','nombre completo':'name','name':'name',
@@ -1873,8 +1957,12 @@ function downloadPlantillaCSV() {
 
 // ─── CANDIDATOS ───────────────────────────────────────────
 function renderCandidatos() {
-  const q = (document.getElementById('search-cand')?.value||'').toLowerCase();
-  const filtered = SC.candidatos.filter(c => !q || c.name.toLowerCase().includes(q) || c.cargo.toLowerCase().includes(q));
+  const q        = (document.getElementById('search-cand')?.value||'').toLowerCase();
+  const filtroArch = document.getElementById('cand-mostrar-archivados')?.checked;
+  const filtered = SC.candidatos.filter(c => {
+    if (!filtroArch && c.status === 'archivado') return false;
+    return !q || c.name.toLowerCase().includes(q) || c.cargo.toLowerCase().includes(q);
+  });
   const tb = document.getElementById('cand-tbody');
   if (!filtered.length) { tb.innerHTML = '<tr><td colspan="9" class="text-muted text-sm" style="text-align:center;padding:24px">No hay candidatos.</td></tr>'; return; }
 
@@ -1893,6 +1981,7 @@ function renderCandidatos() {
         <td style="min-width:140px">${scoreH}</td>
         <td>${statusBadge(c.status)}</td>
         <td class="text-xs text-muted">${c.date}</td>
+        <td>${getVacanteBadge(c.cargo, c.areaId)}</td>
         <td>
           <div class="flex gap-2">
             <button class="btn btn-ghost btn-sm" onclick="openEvaluacion('${c.id}')">📋 Evaluar</button>
@@ -1952,12 +2041,33 @@ function openEvaluacion(candId) {
     </div>
     <div class="form-group mb-2">
       <label class="form-label">Estado del Candidato</label>
-      <select class="form-select" id="eval-status" onchange="SC.candidatos.find(x=>x.id==='${c.id}').status=this.value" ${!can('write')?'disabled':''}>
-        <option value="pendiente" ${c.status==='pendiente'?'selected':''}>Pendiente</option>
-        <option value="evaluacion" ${c.status==='evaluacion'?'selected':''}>En Evaluación</option>
-        <option value="aprobado" ${c.status==='aprobado'?'selected':''}>Aprobado</option>
-        <option value="rechazado" ${c.status==='rechazado'?'selected':''}>Rechazado</option>
+      <select class="form-select" id="eval-status"
+        onchange="updateCandStatus('${c.id}', this.value)"
+        ${!can('write')?'disabled':''}>
+        <option value="pendiente"  ${c.status==='pendiente' ?'selected':''}>⏳ Pendiente de Evaluación</option>
+        <option value="evaluacion" ${c.status==='evaluacion'?'selected':''}>📋 En Evaluación</option>
+        <option value="apto"       ${c.status==='apto'      ?'selected':''}>✅ Apto</option>
+        <option value="no_apto"    ${c.status==='no_apto'   ?'selected':''}>❌ No Apto</option>
+        <option value="archivado"  ${c.status==='archivado' ?'selected':''}>🗄 Archivado</option>
       </select>
+      ${c.status==='apto' && can('write') ? `
+      <div class="info-box mt-3" style="border-color:rgba(22,163,74,.3);background:var(--green-bg)">
+        <div style="font-weight:600;color:var(--green);margin-bottom:6px">✅ Candidato Apto — En lista de elegibles</div>
+        ${(()=>{
+          const v = getVacante(c.cargo, c.areaId);
+          if (!v) return '<div style="font-size:12px;color:var(--amber)">⚠️ No hay vacante configurada para este cargo. El candidato permanece apto hasta que se cree una vacante.</div>';
+          const activos = SC.empleados.filter(e=>e.cargo===c.cargo&&e.empresaId===c.empresaId&&e.status==='activo').length;
+          const libres  = v.total - activos;
+          if (libres <= 0) return '<div style="font-size:12px;color:var(--red)">🔴 Cupo lleno ('+activos+'/'+v.total+'). Este candidato quedará archivado automáticamente.</div>';
+          return '<div style="font-size:12px;margin-bottom:10px">Cupos disponibles: <strong>'+libres+' de '+v.total+'</strong>. Puedes vincularlo como empleado ahora.</div>';
+        })()}
+        ${(()=>{
+          const v = getVacante(c.cargo, c.areaId);
+          const activos = SC.empleados.filter(e=>e.cargo===c.cargo&&e.empresaId===c.empresaId&&e.status==='activo').length;
+          if (v && (v.total - activos) <= 0) return '';
+          return '<button class="btn btn-primary btn-sm full-w" onclick="abrirVincularEmpleado(''+c.id+'')">👤 Vincular como Empleado</button>';
+        })()}
+      </div>` : ''}
     </div>
     <div class="text-sm text-muted"><strong>Experiencia:</strong> ${c.exp||'No registrada'}</div>`;
 
@@ -2228,7 +2338,7 @@ function openPermisoDetail(id) {
 
   el.innerHTML = `
     <div class="emp-detail-header-inner mb-4">
-      <div class="emp-detail-avatar" style="width:48px;height:48px;font-size:18px">${emp?.name?.[0]||'?'}</div>
+      ${empAvatarHtml(emp, 48, 18)}
       <div style="flex:1">
         <div style="font-weight:700;font-size:16px;color:var(--navy)">${emp?.name||'—'}</div>
         <div class="text-sm text-muted">${emp?.cargo||''} · ${emp?.empresaId ? SC.empresas.find(x=>x.id===emp.empresaId)?.name||'' : ''}</div>
@@ -2638,9 +2748,7 @@ function renderPortal(tab) {
     if (!emp) { content.innerHTML = '<div class="text-muted text-sm p-4">No se encontró la información del empleado.</div>'; return; }
     const area = SC.areas.find(a => a.id === emp.areaId);
     const empresa = SC.empresas.find(em => em.id === emp.empresaId);
-    const fotoHtml = emp.fotoData
-      ? `<img src="${emp.fotoData}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid var(--navy-border)">`
-      : `<div class="emp-detail-avatar" style="width:72px;height:72px;font-size:28px">${emp.name[0]}</div>`;
+    const fotoHtml = empAvatarHtml(emp, 72, 28);
     content.innerHTML = `
       <div class="section-header mb-4">
         <div></div>
@@ -3413,6 +3521,71 @@ function openDiscParaEmp(empId) {
   setTimeout(()=>{ const sel=document.getElementById('disc-emp'); if(sel) sel.value=empId; },50);
 }
 
+
+// ─── VINCULAR CANDIDATO → EMPLEADO ───────────────────────
+function updateCandStatus(candId, newStatus) {
+  const c = SC.candidatos.find(x => x.id === candId);
+  if (!c) return;
+  c.status = newStatus;
+  sbSaveCand(c);
+  syncToSheets('candidatos');
+  // Refrescar el panel de evaluación
+  openEvaluacion(candId);
+}
+
+function abrirVincularEmpleado(candId) {
+  const c = SC.candidatos.find(x => x.id === candId);
+  if (!c) return;
+  SC._editEmpId  = null;
+  SC._fromCandId = candId;
+  document.getElementById('modal-emp-title').textContent = '👤 Vincular Candidato como Empleado';
+
+  // Pre-llenar con datos del candidato
+  document.getElementById('em-name').value   = c.name;
+  document.getElementById('em-cedula').value = c.cedula||'';
+  document.getElementById('em-email').value  = c.email||'';
+  document.getElementById('em-phone').value  = c.phone||'';
+  document.getElementById('em-dir').value    = '';
+  document.getElementById('em-salario').value= '';
+  document.getElementById('em-fecha').value  = new Date().toISOString().split('T')[0];
+  document.getElementById('em-contrato-tipo').value = 'indefinido';
+
+  // Área y cargo del candidato (no editable)
+  document.getElementById('em-area').value = c.areaId||'';
+  updateEmpPositions();
+  setTimeout(() => { document.getElementById('em-cargo').value = c.cargo||''; }, 50);
+
+  // EMPRESA: dejar vacío para que RRHH seleccione la empresa contratante
+  //          ya que el mismo candidato puede ir a cualquier empresa del grupo
+  document.getElementById('em-empresa').value = '';
+
+  // Mostrar aviso en el modal
+  SC._vinculandoCandNombre = c.name;
+  SC._vinculandoCandCargo  = c.cargo;
+
+  const stGroup = document.getElementById('em-status-group');
+  if (stGroup) stGroup.style.display = 'none';
+  closeModal('modal-evaluacion');
+  openModal('modal-add-emp');
+
+  // Mostrar banner informativo
+  setTimeout(() => {
+    const titulo = document.getElementById('modal-emp-title');
+    if (titulo) {
+      const vacante = getVacante(c.cargo, c.areaId);
+      const ocupados = getCuposOcupados(c.cargo, c.areaId);
+      const libres   = vacante ? (vacante.total - ocupados) : '?';
+      titulo.insertAdjacentHTML('afterend',
+        `<div class="info-box mt-2" style="font-size:12px">
+          📋 Vinculando candidato <strong>${c.name}</strong> — ${c.cargo}<br>
+          ${vacante ? `🟢 Cupos disponibles: <strong>${libres} de ${vacante.total}</strong>` : '⚠️ Sin vacante configurada'}
+          <br><strong style="color:var(--navy)">Selecciona la empresa contratante para este cargo</strong>
+        </div>`
+      );
+    }
+  }, 100);
+}
+
 // ─── ÁREAS ────────────────────────────────────────────────
 function renderAreas() {
   const tb = document.getElementById('areas-tbody');
@@ -3589,8 +3762,8 @@ function scoreBarHtml(score) {
 }
 
 function statusBadge(s) {
-  const map = { pendiente:'badge-grey', evaluacion:'badge-amber', aprobado:'badge-green', rechazado:'badge-red', activo:'badge-green', inactivo:'badge-red', retirado:'badge-red', sancionado:'badge-amber', cerrado:'badge-grey', en_proceso:'badge-amber', archivado:'badge-grey' };
-  const labels = { pendiente:'Pendiente', evaluacion:'Evaluación', aprobado:'Aprobado', rechazado:'Rechazado', activo:'Activo', inactivo:'Inactivo', retirado:'Retirado', sancionado:'Sancionado', cerrado:'Cerrado', en_proceso:'En Proceso', archivado:'Archivado', disfrutado:'Disfrutado' };
+  const map = { pendiente:'badge-grey', evaluacion:'badge-amber', aprobado:'badge-green', rechazado:'badge-red', activo:'badge-green', inactivo:'badge-red', retirado:'badge-red', sancionado:'badge-amber', cerrado:'badge-grey', en_proceso:'badge-amber', archivado:'badge-grey', apto:'badge-green', no_apto:'badge-red', en_vacaciones:'badge-blue' };
+  const labels = { pendiente:'Pendiente', evaluacion:'Evaluación', aprobado:'Aprobado', rechazado:'Rechazado', activo:'Activo', inactivo:'Inactivo', retirado:'Retirado', sancionado:'Sancionado', cerrado:'Cerrado', en_proceso:'En Proceso', archivado:'Archivado', disfrutado:'Disfrutado', apto:'Apto', no_apto:'No Apto', en_vacaciones:'En Vacaciones' };
   return `<span class="badge ${map[s]||'badge-grey'}">${labels[s]||s}</span>`;
 }
 
@@ -3754,12 +3927,12 @@ const DRIVE_FOLDERS = {
 
 // Pestañas del Spreadsheet
 const SHEETS_TABS = [
-  { name:'Empleados',       fields:['id','nombre','cedula','email','telefono','area','cargo','empresa','fechaIngreso','contratoTipo','salario','status'] },
+  { name:'Empleados',       fields:['id','nombre','cedula','email','telefono','area','cargo','empresa','fechaIngreso','contratoTipo','salario','status','diasVacCausados','diasVacTomados','diasVacDisponibles','disciplinarioActivo'] },
   { name:'Candidatos',      fields:['id','nombre','email','cargo','area','empresa','estado','score','fecha'] },
-  { name:'Permisos',        fields:['id','empleado','tipo','inicio','fin','horas','diasDescontables','diasNoDescontables','estado','motivo','solicitado'] },
+  { name:'Permisos',        fields:['id','empleado','cedula','empresa','tipo','inicio','fin','duracion','horaInicio','horaFin','diasDescontables','diasNoDescontables','tipoDescuento','estado','motivo','fechaSolicitud'] },
   { name:'Incapacidades',   fields:['id','empleado','diagnostico','dias','eps','fechaInicio','estado','fechaRadicacion'] },
-  { name:'Vacaciones',      fields:['id','empleado','inicio','fin','dias','estado','solicitado'] },
-  { name:'Disciplinarios',  fields:['id','empleado','tipo','fecha','estado','notificado','creadoPor'] },
+  { name:'Vacaciones',      fields:['id','empleado','cedula','empresa','inicio','fin','dias','estado','observaciones','fechaSolicitud','totalCausados','totalTomados','disponibles'] },
+  { name:'Disciplinarios',  fields:['id','empleado','cedula','empresa','tipo','fecha','estado','notificado','respondido','diasSuspension','creadoPor','fechaCreacion'] },
   { name:'Bodega',          fields:['id','nombre','categoria','descripcion','fecha'] },
 ];
 
@@ -4020,9 +4193,17 @@ async function syncAllToSheets() {
 // ─── BUILDERS DE DATOS POR PESTAÑA ───────────────────────
 function buildEmpleadosSheet() {
   const rows = SC.empleados.map(e => {
-    const area = SC.areas.find(a=>a.id===e.areaId);
-    const emp  = SC.empresas.find(em=>em.id===e.empresaId);
-    return [e.id,e.name,e.cedula,e.email,e.phone,area?.name||'',e.cargo,emp?.name||'',e.fechaIngreso,e.contratoTipo,e.salario,e.status];
+    const area   = SC.areas.find(a=>a.id===e.areaId);
+    const emp    = SC.empresas.find(em=>em.id===e.empresaId);
+    const vacI   = calcVacInfo(e);
+    const discs  = SC.disciplinarios.filter(d=>d.empId===e.id&&d.estado==='en_proceso').length;
+    return [
+      e.id, e.name, e.cedula, e.email, e.phone,
+      area?.name||'', e.cargo, emp?.name||'',
+      e.fechaIngreso, e.contratoTipo, e.salario, e.status,
+      vacI.diasCausados, vacI.diasTomados, vacI.diasDisponibles,
+      discs > 0 ? 'Sí' : 'No',
+    ];
   });
   return { sheetName:'Empleados', rows };
 }
@@ -4036,8 +4217,16 @@ function buildCandidatosSheet() {
 }
 function buildPermisosSheet() {
   const rows = SC.permisos.map(p => {
-    const e=SC.empleados.find(x=>x.id===p.empId);
-    return [p.id,e?.name||'',tipoPermisoLabel(p.tipo),p.inicio,p.fin||'',p.dias,p.diasDescontables??'',p.diasNoDescontables??'',p.status,p.motivo,p.fecha];
+    const e   = SC.empleados.find(x=>x.id===p.empId);
+    const emp = SC.empresas.find(x=>x.id===e?.empresaId);
+    return [
+      p.id, e?.name||'', e?.cedula||'', emp?.name||'',
+      tipoPermisoLabel(p.tipo),
+      p.inicio, p.fin||'', p.dias,
+      p.horaInicio||'', p.horaFin||'',
+      p.diasDescontables??'', p.diasNoDescontables??'',
+      p.descontable||'', p.status, p.motivo, p.fecha,
+    ];
   });
   return { sheetName:'Permisos', rows };
 }
@@ -4050,15 +4239,31 @@ function buildIncapSheet() {
 }
 function buildVacacionesSheet() {
   const rows = SC.vacaciones.map(v => {
-    const e=SC.empleados.find(x=>x.id===v.empId);
-    return [v.id,e?.name||'',v.inicio,v.fin,v.dias,v.estado,v.fechaSolicitud];
+    const e   = SC.empleados.find(x=>x.id===v.empId);
+    const emp = SC.empresas.find(x=>x.id===e?.empresaId);
+    const vi  = calcVacInfo(e||{});
+    return [
+      v.id, e?.name||'', e?.cedula||'', emp?.name||'',
+      v.inicio, v.fin, v.dias, v.estado,
+      v.obs||'', v.fechaSolicitud,
+      vi.diasCausados||'', vi.diasTomados||'', vi.diasDisponibles||'',
+    ];
   });
   return { sheetName:'Vacaciones', rows };
 }
 function buildDiscSheet() {
   const rows = SC.disciplinarios.map(d => {
-    const e=SC.empleados.find(x=>x.id===d.empId);
-    return [d.id,e?.name||'',TIPOS_DISCIPLINARIO[d.tipo]?.label||d.tipo,d.fecha,d.estado,d.notificado?'Sí':'No',d.creadoPor];
+    const e   = SC.empleados.find(x=>x.id===d.empId);
+    const emp = SC.empresas.find(x=>x.id===e?.empresaId);
+    return [
+      d.id, e?.name||'', e?.cedula||'', emp?.name||'',
+      TIPOS_DISCIPLINARIO[d.tipo]?.label||d.tipo,
+      d.fecha, d.estado,
+      d.notificado?'Sí':'No',
+      d.respuestaEmp?'Sí':'No',
+      d.diasSuspension||'',
+      d.creadoPor, d.fechaCreacion,
+    ];
   });
   return { sheetName:'Disciplinarios', rows };
 }
@@ -4424,6 +4629,220 @@ function loadSavedAdminUsers() {
       if (s.name) u.name = s.name;
     });
   } catch(e) {}
+}
+
+
+
+function updateVacPositions() {
+  const areaId = parseInt(document.getElementById('vac-area')?.value);
+  const area   = SC.areas.find(a => a.id === areaId);
+  const sel    = document.getElementById('vac-cargo');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Seleccionar cargo...</option>';
+  (area?.positions||[]).forEach(p => sel.insertAdjacentHTML('beforeend', `<option value="${p}">${p}</option>`));
+}
+
+// ─── MÓDULO VACANTES ──────────────────────────────────────────
+// Una vacante define cuántos cupos hay para un cargo específico.
+// Al llenar todos los cupos con candidatos vinculados → candidatos
+// apto restantes para ese cargo quedan archivados automáticamente.
+
+function getVacante(cargo, areaId) {
+  return SC.vacantes.find(v =>
+    v.cargo === cargo &&
+    (areaId ? v.areaId === areaId : true) &&
+    v.activa
+  );
+}
+
+function getCuposOcupados(cargo, areaId) {
+  // Contar empleados activos con ese cargo/área sin importar empresa
+  return SC.empleados.filter(e =>
+    e.cargo === cargo &&
+    (areaId ? e.areaId === areaId : true) &&
+    (e.status === 'activo' || e.status === 'en_vacaciones')
+  ).length;
+}
+
+function getCandidatosAptosParaCargo(cargo, areaId) {
+  return SC.candidatos.filter(c =>
+    c.cargo === cargo &&
+    (areaId ? c.areaId === areaId : true) &&
+    c.status === 'apto'
+  );
+}
+
+function saveVacantes() {
+  try { localStorage.setItem('sc_vacantes', JSON.stringify(SC.vacantes)); } catch(e) {}
+}
+
+// Al vincular un candidato como empleado, verificar si se llenó el cupo
+// y archivar automáticamente los candidatos apto restantes del mismo cargo
+function verificarCupoYArchivar(cargo, areaId) {
+  const vacante = getVacante(cargo, areaId);
+  if (!vacante) return;
+
+  const ocupados = getCuposOcupados(cargo, areaId);
+
+  if (ocupados >= vacante.total) {
+    // Cupo lleno → archivar todos los candidatos apto del mismo cargo/área
+    let archivados = 0;
+    SC.candidatos.forEach(c => {
+      if (c.cargo === cargo &&
+          (areaId ? c.areaId === areaId : true) &&
+          c.status === 'apto') {
+        c.status = 'archivado';
+        c._motivoArchivo = `Cupo lleno — ${vacante.total} puesto(s) cubierto(s) para "${cargo}"`;
+        sbSaveCand(c);
+        archivados++;
+      }
+    });
+    if (archivados > 0) {
+      showNotif(`✅ Cupo completo para "${cargo}". ${archivados} candidato(s) archivados automáticamente.`);
+      syncToSheets('candidatos');
+      renderCandidatos();
+    }
+    // Cerrar la vacante
+    vacante.activa = false;
+    vacante.fechaCierre = new Date().toLocaleDateString('es-CO');
+    saveVacantes();
+  }
+}
+
+// ─── CRUD VACANTES ────────────────────────────────────────────
+function openVacantesPanel() {
+  const el = document.getElementById('vacantes-list');
+  if (!el) return;
+  // Poblar áreas
+  const selArea = document.getElementById('vac-area');
+  if (selArea) {
+    selArea.innerHTML = '<option value="">Seleccionar área...</option>';
+    SC.areas.forEach(a => selArea.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.icon} ${a.name}</option>`));
+  }
+  // Poblar empresas
+  const selEmp = document.getElementById('vac-empresa');
+  if (selEmp) {
+    selEmp.innerHTML = '<option value="">Seleccionar empresa...</option>';
+    SC.empresas.forEach(e => selEmp.insertAdjacentHTML('beforeend', `<option value="${e.id}">${e.name}</option>`));
+  }
+  renderVacantesList();
+  openModal('modal-vacantes');
+}
+
+function renderVacantesList() {
+  const el = document.getElementById('vacantes-list');
+  if (!el) return;
+
+  const activas   = SC.vacantes.filter(v => v.activa);
+  const cubiertas = SC.vacantes.filter(v => !v.activa);
+
+  let html = '';
+
+  if (!SC.vacantes.length) {
+    html = '<div class="text-muted text-sm p-4 text-center">No hay vacantes registradas.<br>Crea una para controlar los cupos por cargo.</div>';
+  } else {
+    // Activas
+    if (activas.length) {
+      html += `<div class="section-title mb-3" style="font-size:13px">🟢 Vacantes Activas (${activas.length})</div>`;
+      activas.forEach(v => {
+        const area    = SC.areas.find(a => a.id === v.areaId);
+        const ocupados = getCuposOcupados(v.cargo, v.areaId);
+        const aptos    = getCandidatosAptosParaCargo(v.cargo, v.areaId).length;
+        const pct     = v.total > 0 ? Math.round(activos / v.total * 100) : 0;
+        html += `<div class="glass-card p-4 mb-3" style="border-left:4px solid var(--green)">
+          <div class="flex justify-between items-start flex-wrap gap-2 mb-2">
+            <div>
+              <div style="font-weight:700;font-size:14px;color:var(--navy)">${v.cargo}</div>
+              <div class="text-xs text-muted">${area?.icon||''} ${area?.name||'—'} · Aplica a todas las empresas del grupo</div>
+              <div class="text-xs text-muted">Abierta: ${v.fechaApertura}</div>
+            </div>
+            <div class="flex gap-2 items-center">
+              <span class="badge badge-green">${ocupados}/${v.total} cubiertos</span>
+              ${aptos > 0 ? `<span class="badge badge-amber">${aptos} apto(s)</span>` : ''}
+              ${can('write') ? `<button class="btn btn-danger btn-sm" onclick="cerrarVacante('${v.id}')">Cerrar</button>` : ''}
+            </div>
+          </div>
+          <div style="height:6px;background:var(--surface);border-radius:99px;overflow:hidden">
+            <div style="height:100%;width:${Math.min(pct,100)}%;background:${pct>=100?'var(--green)':'var(--blue)'};border-radius:99px;transition:width .6s"></div>
+          </div>
+          ${v.descripcion ? `<div class="text-xs text-muted mt-2">${v.descripcion}</div>` : ''}
+        </div>`;
+      });
+    }
+    // Cubiertas
+    if (cubiertas.length) {
+      html += `<div class="section-title mb-3 mt-4" style="font-size:13px">🔴 Vacantes Cerradas (${cubiertas.length})</div>`;
+      cubiertas.forEach(v => {
+        const empresa = SC.empresas.find(e => e.id === v.empresaId);
+        html += `<div class="glass-card p-3 mb-2" style="opacity:.6">
+          <div style="font-weight:600;font-size:13px">${v.cargo} <span class="text-muted">— ${empresa?.name||'—'}</span></div>
+          <div class="text-xs text-muted">Cerrada: ${v.fechaCierre||'—'} · ${v.total} cupo(s)</div>
+        </div>`;
+      });
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function saveNuevaVacante() {
+  const areaId = parseInt(document.getElementById('vac-area')?.value);
+  const cargo  = document.getElementById('vac-cargo')?.value.trim() ||
+                 document.getElementById('vac-cargo-text')?.value.trim();
+  const total  = parseInt(document.getElementById('vac-total')?.value);
+  const desc   = document.getElementById('vac-desc')?.value.trim()||'';
+
+  if (!cargo || !areaId || !total || total < 1) {
+    showNotif('Completa los campos: área, cargo y número de vacantes', 'error'); return;
+  }
+
+  // Verificar si ya existe vacante activa para ese cargo+área
+  const existe = SC.vacantes.find(v =>
+    v.cargo === cargo && v.areaId === areaId && v.activa
+  );
+  if (existe) {
+    existe.total       = total;
+    existe.descripcion = desc;
+    saveVacantes();
+    showNotif(`Vacante "${cargo}" actualizada — ${total} cupo(s) ✅`);
+  } else {
+    SC.vacantes.push({
+      id:            'vac' + Date.now(),
+      cargo, areaId,
+      total,
+      descripcion:   desc,
+      activa:        true,
+      fechaApertura: new Date().toLocaleDateString('es-CO'),
+      fechaCierre:   null,
+      // Sin empresaId — la empresa se asigna al vincular el candidato
+    });
+    saveVacantes();
+    showNotif(`Vacante "${cargo}" creada — ${total} cupo(s) ✅`);
+  }
+
+  ['vac-total','vac-desc'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  renderVacantesList();
+  renderCandidatos();
+}
+
+function cerrarVacante(id) {
+  const v = SC.vacantes.find(x => x.id === id);
+  if (!v) return;
+  v.activa = false;
+  v.fechaCierre = new Date().toLocaleDateString('es-CO');
+  saveVacantes();
+  showNotif('Vacante cerrada ✅');
+  renderVacantesList();
+}
+
+// ─── BADGE DE VACANTE en candidatos ──────────────────────────
+function getVacanteBadge(cargo, areaId) {
+  const v = getVacante(cargo, areaId);
+  if (!v) return '<span class="text-xs text-muted">Sin vacante</span>';
+  const ocupados = getCuposOcupados(cargo, areaId);
+  const libres   = v.total - ocupados;
+  if (libres <= 0) return `<span class="badge badge-red">🔴 Cupo lleno (${ocupados}/${v.total})</span>`;
+  return `<span class="badge badge-green">🟢 ${libres}/${v.total} disponibles</span>`;
 }
 
 // ─── WINDOW ALIASES (for dynamic HTML onclick) ───────────
