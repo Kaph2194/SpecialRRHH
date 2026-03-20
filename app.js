@@ -164,7 +164,7 @@ const GAPI_CONFIG = {
   SHEET_ID:      '1CB6NiSm8uRka02qXy2fnzAdgtTuXgYbKE2T0CfxF-nc',
   DRIVE_EMAIL:   'recursoshumanos@specialcar.com.co',
   connected:     false,
-  tokenClient:   null, 
+  tokenClient:   null,
 };
 
 // Subcarpetas en Drive por módulo
@@ -221,14 +221,14 @@ const SC = {
 
 // ─── SEED DATA ────────────────────────────────────────────
 const EMPRESAS_SEED = [
-  { id:'emp1', name:'Special Car S.A.S',                           nit:'901.252.081-6', color:'#111f4d', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp2', name:'Rodando Express S.A.S',                       nit:'901.393.272-0', color:'#49af2a', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp3', name:'Rodando Express Plus S.A.S',                  nit:'901.608.712-5', color:'#2d8c18', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp4', name:'Legality Transport S.A.S',                              nit:'901.462.195-8', color:'#b8a800', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp5', name:'Special Car Premium S.A.S',                   nit:'901.690.846-1', color:'#c49a00', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp6', name:'Special Club S.A.S',                          nit:'901.420.914-7', color:'#9b8c04', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp7', name:'Special Car Express S.A.S',                   nit:'901.815.327-1', color:'#3a55f1', ciudad:'', dir:'', tel:'', rep:'' },
-  { id:'emp8', name:'Special Car Financiacion y Seguros LTDA',     nit:'901.922.287-1', color:'#0c67ce', ciudad:'', dir:'', tel:'', rep:'' },
+  { id:'emp1', name:'Special Car S.A.S',                       nit:'901.252.081-6', color:'#111f4d', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
+  { id:'emp2', name:'Rodando Express S.A.S',                   nit:'901.393.272-0', color:'#49af2a', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
+  { id:'emp3', name:'Rodando Express Plus S.A.S',              nit:'901.608.712-5', color:'#2d8c18', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
+  { id:'emp4', name:'Legality Transport S.A.S',                nit:'901.462.195-8', color:'#b8a800', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
+  { id:'emp5', name:'Special Car Premium S.A.S',               nit:'901.690.846-1', color:'#c49a00', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
+  { id:'emp6', name:'Special Club S.A.S',                      nit:'901.420.914-7', color:'#9b8c04', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
+  { id:'emp7', name:'Special Car Express S.A.S',               nit:'901.815.327-1', color:'#3a55f1', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
+  { id:'emp8', name:'Special Car Financiacion y Seguros LTDA', nit:'901.922.287-1', color:'#0c67ce', ciudad:'Bogotá D.C.', dir:'CRA 45 144-21', tel:'324 2649603', rep:'' },
 ];
 
 const AREAS_SEED = [
@@ -310,7 +310,7 @@ const BODEGA_SEED = [
 // ─ Obtén las credenciales en: supabase.com → Settings → API
 // ═══════════════════════════════════════════════════════════════
 const SB_URL = 'https://qivcmhjlmbgeeajfuxyv.supabase.co';   // ej: https://xxxx.supabase.co
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
+const SB_KEY = 'TeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
 
 // Estado de conexión con Supabase
 let SB_OK = false;
@@ -636,7 +636,16 @@ async function init() {
   // Datos estáticos siempre desde seed (no cambian en producción)
   SC.areas    = AREAS_SEED.map(a => ({...a, subareas:[...(a.subareas||[])]}));
   SC.empresas = [...EMPRESAS_SEED];
-  loadSavedEmpresas(); // Sobrescribe seed con datos editados si los hay
+  // Limpiar localStorage si tiene formato viejo de empresas (con name/nit completo)
+  try {
+    const oldEmp = localStorage.getItem('sc_empresas');
+    if (oldEmp) {
+      const parsed = JSON.parse(oldEmp);
+      // Si tiene 'name' guardado es formato viejo → limpiar
+      if (parsed?.[0]?.name) localStorage.removeItem('sc_empresas');
+    }
+  } catch(e) {}
+  loadSavedEmpresas(); // Restaura solo representante legal
   SC.checklists = {};
   SC.vacantes = JSON.parse(localStorage.getItem('sc_vacantes')||'[]');
 
@@ -3537,20 +3546,25 @@ function saveEmpresa() {
 }
 
 function persistEmpresasLocally() {
+  // Solo guardamos el representante legal (el resto viene siempre del seed)
   try {
-    localStorage.setItem('sc_empresas', JSON.stringify(SC.empresas));
+    const minimal = SC.empresas.map(e => ({ id: e.id, rep: e.rep||'' }));
+    localStorage.setItem('sc_empresas', JSON.stringify(minimal));
   } catch(e) {}
 }
 
 function loadSavedEmpresas() {
+  // Las empresas vienen del seed (datos oficiales hardcodeados).
+  // Del localStorage solo restauramos el representante legal (único campo manual).
   try {
     const saved = localStorage.getItem('sc_empresas');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed && parsed.length > 0) {
-        SC.empresas = parsed;
-      }
-    }
+    if (!saved) return;
+    const parsed = JSON.parse(saved);
+    if (!parsed || !parsed.length) return;
+    SC.empresas.forEach(emp => {
+      const guardada = parsed.find(p => p.id === emp.id);
+      if (guardada?.rep) emp.rep = guardada.rep; // Solo restaurar representante
+    });
   } catch(e) {}
 }
 
