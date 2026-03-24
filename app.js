@@ -346,7 +346,7 @@ const BODEGA_SEED = [
 // ─ Todos los datos se guardan aquí, compartidos entre usuarios
 // ─ Obtén las credenciales en: supabase.com → Settings → API
 // ═══════════════════════════════════════════════════════════════
-const SB_URL = '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';   // ej: https://xxxx.supabase.co
+const SB_URL = 'https://qivcmhjlmbgeeajfuxyv.supabase.co';   // ej: https://xxxx.supabase.co
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
 
 // Estado de conexión con Supabase
@@ -354,7 +354,7 @@ let SB_OK = false;
 
 // Helper: llamada a Supabase REST API
 async function sbFetch(table, method='GET', body=null, filters='', extraHeaders={}) {
-  if (!SB_URL || SB_URL === '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') return null;
+  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') return null;
   try {
     const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
       method,
@@ -382,7 +382,7 @@ async function sbFetch(table, method='GET', body=null, filters='', extraHeaders=
 
 // ─── CARGAR DATOS DESDE SUPABASE ─────────────────────────────
 async function loadFromSupabase() {
-  if (!SB_URL || SB_URL === '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') {
+  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') {
     console.log('Supabase no configurado — usando datos locales');
     return false;
   }
