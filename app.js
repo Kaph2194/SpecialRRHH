@@ -31,7 +31,12 @@ function rechazarDoc(empId, tipoId) {
   if (!emp || !emp.docs[tipoId]) return;
   emp.docs[tipoId].rechazado = true;
   emp.docs[tipoId].pendienteRevision = false;
-  showNotif('Documento marcado como rechazado — el empleado deberá subir uno nuevo');
+  emp.docs[tipoId].driveFileId = null;
+  emp.docs[tipoId].driveUrl    = null;
+  emp.docs[tipoId].fileData    = null;
+  sbSaveEmpleado(emp);
+  syncToSheets('empleados');
+  showNotif('Documento rechazado — el empleado deberá subir uno nuevo');
   renderEmpTab('carpeta');
 }
 
@@ -39,19 +44,51 @@ function handlePortalDocUpload(e, tipoId) {
   const file = e.target.files[0];
   if (!file) return;
   const empId = SC.user?.empId;
-  const emp = SC.empleados.find(x => x.id === empId);
+  const emp   = SC.empleados.find(x => x.id === empId);
   if (!emp) return;
+
+  // Validar tamaño máx 15MB
+  if (file.size > 15 * 1024 * 1024) {
+    showNotif('El archivo supera los 15MB permitidos', 'error'); return;
+  }
+
+  showNotif('⏳ Subiendo documento...');
   const reader = new FileReader();
   reader.onload = ev => {
+    const fileData = ev.target.result;
+    // Guardar metadatos inmediatamente, base64 temporal solo para visualizar antes de Drive
     emp.docs[tipoId] = {
-      fecha: new Date().toLocaleDateString('es-CO'),
-      fileData: ev.target.result,
-      fileName: file.name,
-      rechazado: false,
+      fecha:             new Date().toLocaleDateString('es-CO'),
+      fileName:          file.name,
+      fileData:          null,       // No guardamos base64 en Supabase
+      driveFileId:       null,
+      rechazado:         false,
       pendienteRevision: true,
     };
-    showNotif('Documento subido ✅ — Pendiente de revisión por RRHH');
-    renderPortal('docs');
+    // Subir a Drive → carpeta del empleado
+    if (GAPI_CONFIG.connected) {
+      uploadToDrive(fileData, file.name, 'carpeta_vida', emp.name)
+        .then(fid => {
+          if (fid) {
+            emp.docs[tipoId].driveFileId = fid;
+            emp.docs[tipoId].driveUrl    = driveViewUrl(fid);
+          }
+          sbSaveEmpleado(emp);
+          renderPortal('docs');
+          showNotif('📁 Documento subido a Drive ✅ — Pendiente de revisión por RRHH');
+        })
+        .catch(() => {
+          sbSaveEmpleado(emp);
+          renderPortal('docs');
+          showNotif('Documento guardado ✅ — Pendiente de revisión por RRHH');
+        });
+    } else {
+      // Sin Drive: guardar temporalmente con base64 para que RRHH pueda verlo
+      emp.docs[tipoId].fileData = fileData;
+      sbSaveEmpleado(emp);
+      renderPortal('docs');
+      showNotif('Documento subido ✅ — Pendiente de revisión por RRHH (conecta Drive para guardar en la nube)');
+    }
   };
   reader.readAsDataURL(file);
 }
@@ -309,15 +346,15 @@ const BODEGA_SEED = [
 // ─ Todos los datos se guardan aquí, compartidos entre usuarios
 // ─ Obtén las credenciales en: supabase.com → Settings → API
 // ═══════════════════════════════════════════════════════════════
-const SB_URL = 'https://qivcmhjlmbgeeajfuxyv.supabase.co';   // ej: https://xxxx.supabase.co
+const SB_URL = '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';   // ej: https://xxxx.supabase.co
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpdmNtaGpsbWJnZWVhamZ1eHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NjAxNzEsImV4cCI6MjA4OTUzNjE3MX0.O0rm90VmVbU3ycLbCrFT1kMZCiUzv9cd3cfs-WDJqps'; // empieza con eyJ...
 
 // Estado de conexión con Supabase
 let SB_OK = false;
 
 // Helper: llamada a Supabase REST API
-async function sbFetch(table, method='GET', body=null, filters='') {
-  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') return null;
+async function sbFetch(table, method='GET', body=null, filters='', extraHeaders={}) {
+  if (!SB_URL || SB_URL === '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') return null;
   try {
     const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
       method,
@@ -326,6 +363,7 @@ async function sbFetch(table, method='GET', body=null, filters='') {
         'Authorization': `Bearer ${SB_KEY}`,
         'Content-Type':  'application/json',
         'Prefer':        method === 'POST' ? 'return=representation' : 'return=minimal',
+        ...extraHeaders,
       },
       body: body ? JSON.stringify(body) : null,
     });
@@ -344,7 +382,7 @@ async function sbFetch(table, method='GET', body=null, filters='') {
 
 // ─── CARGAR DATOS DESDE SUPABASE ─────────────────────────────
 async function loadFromSupabase() {
-  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') {
+  if (!SB_URL || SB_URL === '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') {
     console.log('Supabase no configurado — usando datos locales');
     return false;
   }
@@ -373,8 +411,10 @@ async function loadFromSupabase() {
       SB_OK = true;
       hideLoadingBanner();
       console.log('✅ Datos cargados desde Supabase:', emps.length, 'empleados');
-      // Sincronizar todo a Google Sheets después de cargar
-      setTimeout(() => { if(GAPI_CONFIG.connected) syncAllToSheets(); }, 2000);
+      // Sincronizar a Sheets solo si hay empleados reales
+      if (emps.length > 0) {
+        setTimeout(() => { if(GAPI_CONFIG.connected) syncAllToSheets(); }, 2000);
+      }
       return true;
     }
   } catch(e) {
@@ -397,6 +437,7 @@ function dbToEmp(r) {
     nomina: r.nomina||[], extractos: r.extractos||[],
     fechaRetiro: r.fecha_retiro||null,
     fotoData: r.foto_data||null,
+    // docs: el campo jsonb en Supabase ya contiene driveFileId y driveUrl por doc
     // Seguridad Social
     eps:             r.eps||'',
     afp:             r.afp||'',
@@ -473,6 +514,21 @@ function dbToBodega(r) {
 // ─── GUARDAR EN SUPABASE ──────────────────────────────────────
 async function sbSaveEmpleado(emp) {
   if (!SB_OK) return;
+  // Limpiar base64 de docs antes de guardar en Supabase
+  const docsClean = {};
+  Object.entries(emp.docs||{}).forEach(([k,v]) => {
+    if (!v) return;
+    docsClean[k] = {
+      fecha:             v.fecha||'',
+      fileName:          v.fileName||null,
+      driveFileId:       v.driveFileId||null,
+      driveUrl:          v.driveUrl||null,
+      rechazado:         v.rechazado||false,
+      pendienteRevision: v.pendienteRevision||false,
+      obs:               v.obs||'',
+      // base64 excluido intencionalmente — se usa Drive
+    };
+  });
   const row = {
     id: emp.id, name: emp.name, cedula: emp.cedula,
     email: emp.email||'', phone: emp.phone||'',
@@ -480,32 +536,27 @@ async function sbSaveEmpleado(emp) {
     empresa_id: emp.empresaId||null, fecha_ingreso: emp.fechaIngreso||'',
     contrato_tipo: emp.contratoTipo||'indefinido', salario: emp.salario||0,
     dir: emp.dir||'', status: emp.status||'activo',
-    docs: emp.docs||{}, contratos: emp.contratos||[],
-    nomina: emp.nomina||[], extractos: emp.extractos||[],
+    docs:      docsClean,
+    contratos: (emp.contratos||[]).map(c => { const x={...c}; delete x.fileData; return x; }),
+    nomina:    (emp.nomina||[]).map(n  => { const x={...n}; delete x.fileData; return x; }),
+    extractos: (emp.extractos||[]).map(e => { const x={...e}; delete x.fileData; return x; }),
     fecha_retiro: emp.fechaRetiro||null,
-    foto_data: emp.fotoData||null,
-    // Seguridad social
-    eps:          emp.eps||null,
-    afp:          emp.afp||null,
-    arl:          emp.arl||null,
-    caja_com:     emp.cajaCom||null,
-    fondo_ces:    emp.fondoCes||null,
-    pct_arl:      emp.pctArl||null,
-    // Bancario
-    banco:        emp.banco||null,
-    numero_cuenta:emp.numeroCuenta||null,
-    tipo_cuenta:  emp.tipoCuenta||null,
-    // Beneficios
+    foto_data:    emp.fotoData||null,
+    eps:           emp.eps||null,
+    afp:           emp.afp||null,
+    arl:           emp.arl||null,
+    pct_arl:       emp.pctArl||null,
+    caja_com:      emp.cajaCom||null,
+    fondo_ces:     emp.fondoCes||null,
+    banco:         emp.banco||null,
+    numero_cuenta: emp.numeroCuenta||null,
+    tipo_cuenta:   emp.tipoCuenta||null,
     subsidio_transporte: emp.subsidioTransporte ?? true,
-    dotacion:            emp.dotacion ?? true,
-    area_fisica:         emp.areaFisica||null,
+    dotacion:      emp.dotacion ?? true,
+    area_fisica:   emp.areaFisica||null,
   };
-  const exists = await sbFetch('empleados','GET',null,`?id=eq.${emp.id}`);
-  if (exists && exists.length > 0) {
-    await sbFetch('empleados','PATCH',row,`?id=eq.${emp.id}`);
-  } else {
-    await sbFetch('empleados','POST',row);
-  }
+  // UPSERT — inserta o actualiza en un solo request
+  await sbFetch('empleados', 'POST', row, '', { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
 }
 async function sbSavePermiso(p) {
   if (!SB_OK) return;
@@ -626,11 +677,35 @@ const PERMISOS_SEED = [];
 
 const INCAP_SEED = [];
 
+
+// ─── PERSISTENCIA DE USUARIOS (empleados) ─────────────────
+function persistUsers() {
+  try {
+    // Solo guardar empleados (no los admin hardcodeados)
+    const empUsers = USERS.filter(u => u.role === 'empleado');
+    localStorage.setItem('sc_emp_users', JSON.stringify(empUsers));
+  } catch(e) {}
+}
+
+function loadPersistedUsers() {
+  try {
+    const saved = localStorage.getItem('sc_emp_users');
+    if (!saved) return;
+    const empUsers = JSON.parse(saved);
+    empUsers.forEach(u => {
+      if (!USERS.find(x => x.user === u.user)) {
+        USERS.push(u);
+      }
+    });
+  } catch(e) {}
+}
+
 // ─── INIT ─────────────────────────────────────────────────
 async function init() {
   loadSavedGapiConfig();
   loadSavedPasswords();
   loadSavedAdminUsers();
+  loadPersistedUsers(); // Restaurar usuarios de empleados
   loadSiigoConfig();
 
   // Datos estáticos siempre desde seed (no cambian en producción)
@@ -1350,6 +1425,7 @@ function saveEmpleado() {
         canWrite: true,
         empId:    newEmpId,
       });
+      persistUsers();
     }
     showNotif(`Empleado "${name}" registrado ✅ · Usuario: ${userLogin} · Contraseña: ${userLogin}`);
     showCredsModal(name, userLogin);
@@ -1529,9 +1605,14 @@ function renderCarpetaVida(emp, container) {
       <div class="doc-icon">${icon}</div>
       <div class="doc-info">
         <div class="doc-name">${t.name}${t.req?'<span style="color:var(--red)"> *</span>':''}</div>
-        ${doc?`<div class="doc-meta">Subido: ${doc.fecha} · ${doc.fileName||'Archivo'}</div>`:'<div class="doc-meta text-muted">No cargado</div>'}
+        ${doc?`<div class="doc-meta">
+          Subido: ${doc.fecha} · ${doc.fileName||'Archivo'}
+          ${doc.driveUrl?'<span style="color:var(--green);margin-left:6px;font-size:11px">📁 En Drive</span>':''}
+          ${doc.pendienteRevision?'<span style="color:var(--amber);margin-left:6px;font-size:11px">⏳ Pendiente revisión</span>':''}
+          ${doc.rechazado?'<span style="color:var(--red);margin-left:6px;font-size:11px">❌ Rechazado — sube uno nuevo</span>':''}
+        </div>`:'<div class="doc-meta text-muted">No cargado</div>'}
       </div>
-      ${doc&&doc.fileData?`<button class="btn btn-ghost btn-sm" onclick="viewDocFile('${emp.id}','${t.id}')">👁️</button>`:''}
+      ${(doc&&(doc.driveUrl||doc.fileData))?`<button class="btn btn-ghost btn-sm" onclick="viewDocFile('${emp.id}','${t.id}')">👁️ Ver</button>`:''}
       ${can('write')&&!doc?`<button class="btn btn-ghost btn-sm" onclick="openDocEmpModalTipo('${emp.id}','${t.id}')">📤</button>`:''}
       ${can('write')&&doc?`<button class="btn btn-danger btn-sm" onclick="rechazarDoc('${emp.id}','${t.id}')" title="Rechazar documento">✗</button>`:''}
     </div>`;
@@ -1866,26 +1947,62 @@ function saveDocEmpleado() {
   const fileName = SC.pendingFile?.name || null;
 
   if (ctx.tipo === 'carpeta') {
-    emp.docs[tipoId] = { fecha, obs, fileData, fileName };
-    if(fileData) uploadToDrive(fileData, fileName||tipoId+'.pdf', 'carpeta_vida', emp.name);
-    sbSaveEmpleado(emp);
+    // Guardar metadatos sin base64 (se sube a Drive)
+    emp.docs[tipoId] = { fecha, obs, fileName, fileData: null, driveFileId: null, pendienteRevision: false };
+    if (fileData) {
+      // Subir a Drive de forma asíncrona y guardar el fileId
+      uploadToDrive(fileData, fileName||tipoId+'.pdf', 'carpeta_vida', emp.name)
+        .then(fid => {
+          if (fid) {
+            emp.docs[tipoId].driveFileId = fid;
+            emp.docs[tipoId].driveUrl    = driveViewUrl(fid);
+          }
+          sbSaveEmpleado(emp);
+          renderEmpTab(currentEmpTab);
+          showNotif('📁 Documento subido a Drive ✅');
+        })
+        .catch(() => {
+          sbSaveEmpleado(emp);
+          showNotif('Documento guardado (sin Drive) ✅');
+        });
+    } else {
+      sbSaveEmpleado(emp);
+      showNotif('Documento guardado ✅');
+    }
   } else {
     const list = emp[ctx.tipo] = emp[ctx.tipo]||[];
     const tipoName = TIPOS_DOC_EMPLEADO.find(t=>t.id===tipoId)?.name || ctx.tipo;
-    list.push({ nombre: tipoName, fecha, obs, fileData, fileName });
+    const docEntry = { nombre: tipoName, fecha, obs, fileName, fileData: null, driveFileId: null };
+    list.push(docEntry);
     const folderMap = {contratos:'contratos', nomina:'nomina', extractos:'nomina'};
-    if(fileData) uploadToDrive(fileData, fileName||tipoName+'.pdf', folderMap[ctx.tipo]||'contratos', emp.name);
+    if (fileData) {
+      uploadToDrive(fileData, fileName||tipoName+'.pdf', folderMap[ctx.tipo]||'contratos', emp.name)
+        .then(fid => {
+          if (fid) { docEntry.driveFileId = fid; docEntry.driveUrl = driveViewUrl(fid); }
+          sbSaveEmpleado(emp);
+          renderEmpTab(currentEmpTab);
+        });
+    } else {
+      sbSaveEmpleado(emp);
+    }
   }
   SC.pendingFile = null;
   closeModal('modal-add-doc-emp');
-  showNotif('Documento guardado ✅');
-  renderEmpTab(currentEmpTab);
+  if (ctx.tipo !== 'carpeta') { showNotif('Documento guardado ✅'); renderEmpTab(currentEmpTab); }
 }
 
 function viewDocFile(empId, tipoId) {
   const emp = SC.empleados.find(e => e.id === empId);
   const doc = emp?.docs?.[tipoId];
-  if (doc?.fileData) { openPDFViewerData(doc.fileData); } else showNotif('Sin archivo disponible', 'error');
+  if (!doc) { showNotif('Sin archivo disponible', 'error'); return; }
+  if (doc.driveUrl) {
+    // Abrir en Drive en nueva pestaña
+    window.open(doc.driveUrl, '_blank');
+  } else if (doc.fileData) {
+    openPDFViewerData(doc.fileData);
+  } else {
+    showNotif('Sin archivo disponible', 'error');
+  }
 }
 
 function viewDocFromList(empId, tipo, idx) {
@@ -2140,22 +2257,29 @@ function confirmImport() {
       dotacion:           e.dotacion           !== undefined ? e.dotacion           : true,
       areaFisica:         e.areaFisica||'',
     };
-    if(dup){Object.assign(dup,data);actualizados++;}
-    else{
-      const newId = 'e'+Date.now()+(Math.random()*1000|0);
-      SC.empleados.push({id:newId,...data,docs:{},contratos:[],nomina:[],extractos:[],fotoData:null});
+    if (dup) {
+      Object.assign(dup, data);
+      sbSaveEmpleado(dup);   // ← guardar actualización en Supabase
+      actualizados++;
+    } else {
+      const newId  = 'e' + Date.now() + (Math.random()*1000|0);
+      const newEmp = {id:newId, ...data, docs:{}, contratos:[], nomina:[], extractos:[], fotoData:null};
+      SC.empleados.push(newEmp);
+      sbSaveEmpleado(newEmp);   // ← guardar nuevo en Supabase
       // Crear usuario con cédula como contraseña
       const uLogin = e.cedula.replace(/[^a-zA-Z0-9]/g,'');
-      if(!USERS.find(u=>u.user===uLogin)) {
-        USERS.push({id:'u'+Date.now()+(Math.random()*100|0),user:uLogin,pass:uLogin,
-          name:e.name,role:'empleado',roleName:'Empleado',canWrite:true,empId:newId});
+      if (!USERS.find(u => u.user === uLogin)) {
+        USERS.push({id:'u'+Date.now()+(Math.random()*100|0), user:uLogin, pass:uLogin,
+          name:e.name, role:'empleado', roleName:'Empleado', canWrite:true, empId:newId});
       }
       nuevos++;
     }
   });
   closeModal('modal-import-emp');
   showNotif('Importación completa: '+nuevos+' nuevos · '+actualizados+' actualizados ✅');
-  renderEmpleados(); populateSelects();
+  persistUsers();
+  renderEmpleados();
+  populateSelects();
   syncToSheets('empleados');
 }
 
@@ -4769,11 +4893,31 @@ async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
       headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
       body,
     });
-    return res.result.id;
+    const fileId = res.result.id;
+    // Hacer el archivo visible para lectura (viewer)
+    if (fileId) {
+      try {
+        await gapi.client.drive.permissions.create({
+          fileId,
+          resource: { role: 'reader', type: 'anyone' },
+        });
+      } catch(e) {}
+    }
+    return fileId;
   } catch(e) {
     console.error('Drive upload error:', e);
     return null;
   }
+}
+
+// Construir URL de visualización desde fileId de Drive
+function driveViewUrl(fileId) {
+  if (!fileId) return null;
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
+function drivePreviewUrl(fileId) {
+  if (!fileId) return null;
+  return `https://drive.google.com/file/d/${fileId}/preview`;
 }
 
 // Cola de archivos pendientes cuando no hay conexión
@@ -4815,8 +4959,10 @@ async function initSpreadsheet() {
         await writeSheetHeaders(tab);
       }
     }
-    // Sync inicial
-    await syncAllToSheets();
+    // Sync inicial solo si hay empleados cargados
+    if (SC.empleados.length > 0 && SB_OK) {
+      await syncAllToSheets();
+    }
   } catch(e) {
     console.error('Sheets init error:', e);
   }
