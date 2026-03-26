@@ -421,14 +421,26 @@ async function loadFromSupabase() {
       hideLoadingBanner();
       console.log('✅ Supabase OK —', SC.empleados.length, 'empleados cargados');
       // Reconstruir usuarios de empleados en memoria
-      SC.empleados.forEach(emp => {
-        const cedNorm = String(emp.cedula||'').replace(/[.\s,]/g,'');
-        if (cedNorm && !USERS.find(u => u.user === cedNorm)) {
+      // Agrupar por cédula y asignar empId al registro de mayor prioridad
+      const cedulas = [...new Set(SC.empleados.map(e => String(e.cedula||'').replace(/[.\s,]/g,'')))];
+      cedulas.forEach(cedNorm => {
+        if (!cedNorm) return;
+        const todos = SC.empleados.filter(e => String(e.cedula||'').replace(/[.\s,]/g,'') === cedNorm);
+        const activos     = todos.filter(e => e.status === 'activo')    .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
+        const sancionados = todos.filter(e => e.status === 'sancionado').sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
+        const retirados   = todos.filter(e => e.status === 'retirado')  .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
+        const principal   = activos[0] || sancionados[0] || retirados[0];
+        if (!principal) return;
+        const existing = USERS.find(u => u.user === cedNorm && u.role === 'empleado');
+        if (existing) {
+          existing.empId = principal.id;
+          existing.name  = principal.name;
+        } else {
           USERS.push({
-            id: 'u_' + emp.id,
+            id: 'u_' + principal.id,
             user: cedNorm, pass: cedNorm,
-            name: emp.name, role: 'empleado',
-            roleName: 'Empleado', canWrite: true, empId: emp.id,
+            name: principal.name, role: 'empleado',
+            roleName: 'Empleado', canWrite: true, empId: principal.id,
           });
         }
       });
@@ -809,9 +821,14 @@ function doLoginEmpleado() {
     // Puede haber múltiples registros con la misma cédula (recontrataciones)
     // Prioridad: activo > sancionado > más reciente retirado
     const todos = SC.empleados.filter(e => normalizeCedula(e.cedula) === cedNorm);
-    const emp = todos.find(e => e.status === 'activo')
-             || todos.find(e => e.status === 'sancionado')
-             || todos.sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''))[0];
+    // Prioridad: activo con fecha más reciente > sancionado > retirado más reciente
+    const activos    = todos.filter(e => e.status === 'activo')
+                           .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
+    const sancionados= todos.filter(e => e.status === 'sancionado')
+                           .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
+    const retirados  = todos.filter(e => e.status === 'retirado')
+                           .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
+    const emp = activos[0] || sancionados[0] || retirados[0];
     if (emp) {
       found = {
         id:       'u_' + emp.id,
@@ -1494,14 +1511,27 @@ function saveEmpleado() {
     }
     SC._editEmpId = null;
   } else {
-    // Create mode — verificar si ya existe contrato activo en misma empresa
+    // Create mode
     const cedNormCreate = cedula.replace(/[^a-zA-Z0-9]/g,'');
-    const dupActivoMismaEmp = SC.empleados.find(e =>
+    const fechaIngreso  = document.getElementById('em-fecha').value;
+
+    // Bloquear solo si ya existe una vinculación idéntica: misma cédula + empresa + fechaIngreso
+    const dupIdentico = SC.empleados.find(e =>
+      e.cedula === cedula &&
+      e.empresaId === empresaId &&
+      (e.fechaIngreso||'') === (fechaIngreso||'')
+    );
+    if (dupIdentico) {
+      showNotif('Ya existe una vinculación con esta cédula, empresa y fecha de ingreso. Edita el registro existente.', 'error');
+      return;
+    }
+
+    // Advertir (no bloquear) si ya existe contrato activo en la misma empresa → posible reintegro
+    const activaMismaEmp = SC.empleados.find(e =>
       e.cedula === cedula && e.empresaId === empresaId && e.status === 'activo'
     );
-    if (dupActivoMismaEmp) {
-      showNotif('Este empleado ya tiene un contrato ACTIVO en esta empresa. Edita el registro existente.', 'error');
-      return;
+    if (activaMismaEmp) {
+      showNotif('⚠️ Este empleado ya tiene un contrato ACTIVO en esta empresa. Se creará un nuevo período.', 'success');
     }
     const newEmpId = 'e' + Date.now();
     const userLogin = cedNormCreate;
@@ -2251,6 +2281,58 @@ function parseCSVImport(text, fileName) {
   processImportRows(rows, fileName);
 }
 
+// ─── CONVERSIÓN DE FECHAS EXCEL → ISO ───────────────────────
+// Excel guarda fechas como número serial (días desde 1900-01-01)
+// Ej: 45748 → "2025-03-15"
+function excelSerialToISO(serial) {
+  const n = Number(serial);
+  if (!n || isNaN(n) || n < 1) return '';
+  // Excel tiene un bug histórico: cuenta 1900 como bisiesto (no lo es)
+  // Por eso se resta 1 extra para fechas posteriores a Feb 1900
+  const utc = (n - 25569) * 86400 * 1000;
+  const d   = new Date(utc);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().split('T')[0];  // "YYYY-MM-DD"
+}
+
+// Normaliza cualquier valor de fecha a "YYYY-MM-DD"
+// Soporta: serial Excel, "45748", "2025-03-15", "15/03/2025", "15-03-2025",
+//          "2025/03/15", "15 Mar 2025", número JS Date
+function normalizarFecha(val) {
+  if (!val && val !== 0) return '';
+  const s = String(val).trim();
+  if (!s || s === '0') return '';
+
+  // Serial numérico de Excel (entero entre 1 y 99999)
+  if (/^\d{4,6}$/.test(s)) {
+    const n = Number(s);
+    if (n > 0 && n < 99999) return excelSerialToISO(n);
+  }
+
+  // Ya es ISO YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // Formatos DD/MM/YYYY o DD-MM-YYYY o DD.MM.YYYY
+  const dmy = s.match(/^(\d{1,2})[\-\/\.](\d{1,2})[\-\/\.](\d{4})$/);
+  if (dmy) {
+    const [, d, m, y] = dmy;
+    return y + '-' + m.padStart(2,'0') + '-' + d.padStart(2,'0');
+  }
+
+  // Formato YYYY/MM/DD
+  const ymd = s.match(/^(\d{4})[\/](\d{1,2})[\/](\d{1,2})$/);
+  if (ymd) {
+    const [, y, m, d] = ymd;
+    return y + '-' + m.padStart(2,'0') + '-' + d.padStart(2,'0');
+  }
+
+  // Intentar con Date.parse como último recurso
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+
+  return s;  // devolver tal cual si no se pudo convertir
+}
+
 function parseExcelImport(buffer, fileName) {
   if(typeof XLSX==='undefined'){
     showNotif('SheetJS no disponible — usa CSV', 'error');
@@ -2258,13 +2340,26 @@ function parseExcelImport(buffer, fileName) {
     return;
   }
   try {
-    const wb = XLSX.read(buffer, {type:'array'});
+    // cellDates:true hace que SheetJS convierta números seriales a objetos Date
+    const wb = XLSX.read(buffer, {type:'array', cellDates:true});
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+    const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false, dateNF:'yyyy-mm-dd'});
     if(data.length<2){showNotif('Archivo vacío','error');return;}
     const headers = data[0].map(h=>String(h||'').trim().toLowerCase());
     const rows = data.slice(1).filter(r=>r.some(v=>v)).map(r=>{
-      const obj={}; headers.forEach((h,i)=>{obj[h]=r[i]!=null?String(r[i]).trim():'';});
+      const obj={};
+      headers.forEach((h,i)=>{
+        let v = r[i];
+        // Si es objeto Date (cellDates:true), convertir a ISO
+        if (v instanceof Date) {
+          v = isNaN(v.getTime()) ? '' : v.toISOString().split('T')[0];
+        } else if (v != null) {
+          v = String(v).trim();
+        } else {
+          v = '';
+        }
+        obj[h] = v;
+      });
       return obj;
     });
     processImportRows(rows, fileName);
@@ -2300,7 +2395,8 @@ function processImportRows(rows, fileName) {
     }
     if(!emp.name)   emp._errores.push('Nombre requerido');
     if(!emp.cedula) emp._errores.push('Cédula requerida');
-    if(emp.fechaIngreso){const d=new Date(emp.fechaIngreso);if(!isNaN(d))emp.fechaIngreso=d.toISOString().split('T')[0];}
+    // Normalizar fecha de ingreso (soporta serial Excel, DD/MM/YYYY, YYYY-MM-DD, etc.)
+    if (emp.fechaIngreso) emp.fechaIngreso = normalizarFecha(emp.fechaIngreso);
     emp.salario = parseInt(String(emp.salario||'0').replace(/[^0-9]/g,''))||0;
     const cmap={indefinido:'indefinido',fijo:'fijo',obra:'obra',aprendizaje:'aprendizaje'};
     emp.contratoTipo = cmap[(emp.contratoTipo||'').toLowerCase()]||'indefinido';
@@ -2319,11 +2415,28 @@ function processImportRows(rows, fileName) {
     if(emp.pctArl && arlMap[emp.pctArl.trim().toLowerCase()]) {
       emp.pctArl = arlMap[emp.pctArl.trim().toLowerCase()];
     }
-    const empsMismaCed = SC.empleados.filter(e=>e.cedula===emp.cedula);
-    if(empsMismaCed.length > 0) {
-      const mismEmpresa = empsMismaCed.find(x=>x.empresaId===(emp.empresaId||null));
-      if(mismEmpresa) emp._warnings.push('Ya existe en esta empresa — se actualizará');
-      else emp._warnings.push('Recontratación: se creará nuevo registro (empresa diferente)');
+    const empsMismaCed = SC.empleados.filter(e => e.cedula === emp.cedula);
+    if (empsMismaCed.length > 0) {
+      // Buscar vinculación exacta: misma cédula + misma empresa + misma fechaIngreso
+      const vinculacionExacta = empsMismaCed.find(x =>
+        x.empresaId === (emp.empresaId||null) &&
+        (x.fechaIngreso||'') === (emp.fechaIngreso||'')
+      );
+      // Buscar vinculación activa en la misma empresa (posible duplicado real)
+      const activaMismaEmpresa = empsMismaCed.find(x =>
+        x.empresaId === (emp.empresaId||null) && x.status === 'activo'
+      );
+      if (vinculacionExacta) {
+        emp._warnings.push('Vinculación idéntica ya existe — se actualizará');
+      } else if (activaMismaEmpresa && (emp.status||'activo') === 'activo') {
+        emp._errores.push('Ya existe un contrato ACTIVO en esta empresa para esta cédula. Retira el anterior antes de reimportar.');
+      } else {
+        // Reintegro (misma empresa, período diferente) o nueva empresa
+        const tipoMsg = empsMismaCed.some(x => x.empresaId === (emp.empresaId||null))
+          ? 'Reintegro: nuevo período en la misma empresa'
+          : 'Recontratación: nuevo período en empresa diferente';
+        emp._warnings.push(tipoMsg + ' — se creará nuevo registro');
+      }
     }
     return emp;
   });
@@ -2388,38 +2501,39 @@ function confirmImport() {
       areaFisica:         e.areaFisica||'',
     };
 
-    // Buscar vinculación exacta: misma cédula Y misma empresa
+    // Vinculación exacta = misma cédula + misma empresa + misma fechaIngreso
+    // Esto permite reintegros: misma persona, misma empresa, fecha diferente → nuevo registro
     const dupExacto = SC.empleados.find(x =>
-      x.cedula === e.cedula && x.empresaId === (e.empresaId||null)
-    );
-    // También buscar vinculación activa con esa cédula (cualquier empresa)
-    const dupActivo = SC.empleados.find(x =>
-      x.cedula === e.cedula && x.status === 'activo'
+      x.cedula === e.cedula &&
+      x.empresaId === (e.empresaId||null) &&
+      (x.fechaIngreso||'') === (data.fechaIngreso||'')
     );
 
     if (dupExacto) {
-      // Misma empresa → actualizar el registro existente
+      // Actualizar la vinculación idéntica existente (mismos 3 campos)
       Object.assign(dupExacto, data);
       sbSaveEmpleado(dupExacto);
-      // Actualizar empId en USERS si el usuario ya existe
+      // Si este registro pasó a activo, actualizar empId del usuario
       const userObj = USERS.find(u => u.user === cedNorm && u.role === 'empleado');
-      if (userObj && dupActivo?.id === dupExacto.id) userObj.empId = dupExacto.id;
+      if (userObj && data.status === 'activo') userObj.empId = dupExacto.id;
       actualizados++;
     } else {
-      // Nueva vinculación (empresa diferente o primera vez)
-      // Preservar contraseña si el empleado ya tenía usuario
+      // Nuevo registro: reintegro, nueva empresa, o primera vez
       const existingUser = USERS.find(u => u.user === cedNorm && u.role === 'empleado');
       const newId  = 'e' + Date.now() + (Math.random()*1000|0);
       const newEmp = {id:newId, ...data, docs:{}, contratos:[], nomina:[], extractos:[], fotoData:null};
       SC.empleados.push(newEmp);
       sbSaveEmpleado(newEmp);
-      const uLogin = cedNorm;
       if (existingUser) {
-        // Ya tiene usuario — actualizar empId solo si está activo
+        // Ya tiene usuario: actualizar empId si el nuevo registro es el activo
         if (data.status === 'activo') existingUser.empId = newId;
       } else {
-        USERS.push({id:'u'+Date.now()+(Math.random()*100|0), user:uLogin, pass:uLogin,
-          name:e.name, role:'empleado', roleName:'Empleado', canWrite:true, empId:newId});
+        USERS.push({
+          id: 'u'+Date.now()+(Math.random()*100|0),
+          user: cedNorm, pass: cedNorm,
+          name: e.name, role: 'empleado', roleName: 'Empleado',
+          canWrite: true, empId: newId,
+        });
       }
       nuevos++;
     }
