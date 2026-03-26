@@ -47,47 +47,59 @@ function handlePortalDocUpload(e, tipoId) {
   const emp   = SC.empleados.find(x => x.id === empId);
   if (!emp) return;
 
-  // Validar tamaño máx 15MB
   if (file.size > 15 * 1024 * 1024) {
-    showNotif('El archivo supera los 15MB permitidos', 'error'); return;
+    showNotif('El archivo supera los 15 MB permitidos', 'error'); return;
   }
 
+  const tipoNombre = TIPOS_DOC_EMPLEADO.find(t => t.id === tipoId)?.name || tipoId;
   showNotif('⏳ Subiendo documento...');
+
   const reader = new FileReader();
-  reader.onload = ev => {
+  reader.onload = async ev => {
     const fileData = ev.target.result;
-    // Guardar metadatos inmediatamente, base64 temporal solo para visualizar antes de Drive
+
+    // Registrar metadatos inmediatamente
     emp.docs[tipoId] = {
       fecha:             new Date().toLocaleDateString('es-CO'),
       fileName:          file.name,
-      fileData:          null,       // No guardamos base64 en Supabase
+      fileData:          null,
       driveFileId:       null,
+      driveUrl:          null,
       rechazado:         false,
       pendienteRevision: true,
     };
-    // Subir a Drive → carpeta del empleado
+
     if (GAPI_CONFIG.connected) {
-      uploadToDrive(fileData, file.name, 'carpeta_vida', emp.name)
-        .then(fid => {
-          if (fid) {
-            emp.docs[tipoId].driveFileId = fid;
-            emp.docs[tipoId].driveUrl    = driveViewUrl(fid);
-          }
-          sbSaveEmpleado(emp);
-          renderPortal('docs');
-          showNotif('📁 Documento subido a Drive ✅ — Pendiente de revisión por RRHH');
-        })
-        .catch(() => {
-          sbSaveEmpleado(emp);
-          renderPortal('docs');
-          showNotif('Documento guardado ✅ — Pendiente de revisión por RRHH');
-        });
+      // Nombre de archivo: TipoDoc_NombreEmpleado_Fecha.ext
+      const ext      = file.name.split('.').pop();
+      const safeName = tipoNombre.replace(/[^a-zA-Z0-9]/g,'_');
+      const fecha    = new Date().toISOString().split('T')[0];
+      const fileName = `${safeName}_${fecha}.${ext}`;
+
+      try {
+        const fid = await uploadToDrive(fileData, fileName, 'carpeta_vida', emp.name);
+        if (fid) {
+          emp.docs[tipoId].driveFileId = fid;
+          emp.docs[tipoId].driveUrl    = driveViewUrl(fid);
+          emp.docs[tipoId].fileName    = fileName;
+        }
+        await sbSaveEmpleado(emp);
+        syncToSheets('empleados');
+        renderPortal('docs');
+        showNotif('📁 ' + tipoNombre + ' subido a Drive ✅ — Pendiente de revisión por RRHH');
+      } catch(err) {
+        // Drive falló pero igual guardamos en Supabase con fileData temporal
+        emp.docs[tipoId].fileData = fileData;
+        await sbSaveEmpleado(emp);
+        renderPortal('docs');
+        showNotif('Documento guardado ✅ — Pendiente de revisión por RRHH');
+      }
     } else {
-      // Sin Drive: guardar temporalmente con base64 para que RRHH pueda verlo
+      // Sin Drive: base64 temporal visible para RRHH
       emp.docs[tipoId].fileData = fileData;
-      sbSaveEmpleado(emp);
+      await sbSaveEmpleado(emp);
       renderPortal('docs');
-      showNotif('Documento subido ✅ — Pendiente de revisión por RRHH (conecta Drive para guardar en la nube)');
+      showNotif('Documento guardado ✅ — Pendiente de revisión (conecta Drive para almacenamiento en la nube)');
     }
   };
   reader.readAsDataURL(file);
@@ -752,18 +764,98 @@ async function init() {
 }
 
 // ─── AUTH ──────────────────────────────────────────────────
+
+// Alterna entre el panel de empleado y el de administrador
+function switchLoginMode(mode) {
+  const empSec = document.getElementById('login-emp-section');
+  const admSec = document.getElementById('login-adm-section');
+  const btnEmp = document.getElementById('btn-mode-emp');
+  const btnAdm = document.getElementById('btn-mode-adm');
+  if (mode === 'empleado') {
+    empSec.style.display = '';
+    admSec.style.display = 'none';
+    btnEmp.style.background    = 'var(--navy)';
+    btnEmp.style.color         = '#fff';
+    btnEmp.style.boxShadow     = '0 2px 6px rgba(0,0,0,.15)';
+    btnAdm.style.background    = 'transparent';
+    btnAdm.style.color         = 'var(--text-muted)';
+    btnAdm.style.boxShadow     = 'none';
+    setTimeout(() => document.getElementById('login-cedula')?.focus(), 50);
+  } else {
+    empSec.style.display = 'none';
+    admSec.style.display = '';
+    btnAdm.style.background    = 'var(--navy)';
+    btnAdm.style.color         = '#fff';
+    btnAdm.style.boxShadow     = '0 2px 6px rgba(0,0,0,.15)';
+    btnEmp.style.background    = 'transparent';
+    btnEmp.style.color         = 'var(--text-muted)';
+    btnEmp.style.boxShadow     = 'none';
+    setTimeout(() => document.getElementById('login-user')?.focus(), 50);
+  }
+}
+
+// Login empleado: cédula como usuario, contraseña (por defecto = cédula)
+function doLoginEmpleado() {
+  const cedRaw = document.getElementById('login-cedula')?.value?.trim() || '';
+  const cedNorm = cedRaw.replace(/[.\s,]/g, '');
+  if (!cedNorm) {
+    document.getElementById('login-error-emp').style.display = 'block';
+    document.getElementById('login-error-emp').textContent = '⚠️ Ingresa tu número de documento.';
+    return;
+  }
+
+  // Buscar en USERS (usuario = cédula limpia)
+  let found = USERS.find(x => x.role === 'empleado' && x.user === cedNorm);
+
+  // Si no está en USERS (cargó desde Supabase pero no hay user local), crear dinámicamente
+  if (!found) {
+    const emp = SC.empleados.find(e => normalizeCedula(e.cedula) === cedNorm);
+    if (emp) {
+      found = {
+        id:       'u_' + emp.id,
+        user:     cedNorm,
+        pass:     cedNorm,   // contraseña inicial = cédula
+        name:     emp.name,
+        role:     'empleado',
+        roleName: 'Empleado',
+        canWrite: true,
+        empId:    emp.id,
+      };
+      // Guardar en USERS y persistir para próximas sesiones
+      if (!USERS.find(u => u.user === cedNorm)) {
+        USERS.push(found);
+        persistUsers();
+      }
+    }
+  }
+
+  if (!found) {
+    document.getElementById('login-error-emp').style.display = 'block';
+    document.getElementById('login-error-emp').textContent = '⚠️ Número de documento no encontrado. Verifica e intenta de nuevo.';
+    return;
+  }
+
+  // Validar contraseña
+  const passEl = document.getElementById('login-pass-emp');
+  const pass = passEl ? passEl.value : found.pass; // si no hay campo de pass, usar la guardada
+  if (pass !== found.pass) {
+    document.getElementById('login-error-emp').style.display = 'block';
+    document.getElementById('login-error-emp').textContent = '⚠️ Contraseña incorrecta.';
+    return;
+  }
+
+  document.getElementById('login-error-emp').style.display = 'none';
+  SC.user = found;
+  sessionStorage.setItem('sc_user', JSON.stringify(found));
+  startApp();
+}
+
+// Login administrador: usuario + contraseña
 function doLogin() {
   const uRaw = document.getElementById('login-user').value.trim();
   const p    = document.getElementById('login-pass').value;
-  // Intentar primero login exacto
-  let found = USERS.find(x => x.user === uRaw && x.pass === p);
-  // Si no, intentar normalizando cédula (quitar puntos/espacios/comas)
-  // SOLO si parece una cédula (mayormente dígitos)
-  if (!found) {
-    const uNorm = uRaw.replace(/[.\s,]/g, '');
-    const pareceNro = /^[0-9]+$/.test(uNorm);
-    if (pareceNro) found = USERS.find(x => x.user === uNorm && x.pass === p);
-  }
+  // Solo admins (no empleados) por este formulario
+  let found = USERS.find(x => x.role !== 'empleado' && x.user === uRaw && x.pass === p);
   if (!found) {
     document.getElementById('login-error').style.display = 'block';
     return;
@@ -788,10 +880,18 @@ function normalizeCedula(s) {
 function doLogout() {
   SC.user = null;
   sessionStorage.removeItem('sc_user');
-  document.getElementById('app').style.display = 'none';
+  document.getElementById('app').style.display        = 'none';
   document.getElementById('login-page').style.display = 'flex';
-  document.getElementById('login-user').value = '';
-  document.getElementById('login-pass').value = '';
+  // Limpiar todos los campos del login
+  const ids = ['login-cedula','login-pass-emp','login-user','login-pass'];
+  ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  // Errores ocultos
+  ['login-error-emp','login-error'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  // Volver al modo empleado por defecto
+  switchLoginMode('empleado');
 }
 
 function startApp() {
@@ -838,8 +938,8 @@ function startApp() {
       // Avisar al empleado si aún usa la contraseña inicial (= su cédula)
       if (u.pass === u.user) {
         setTimeout(() => {
-          showNotif('🔑 Tu contraseña es tu número de documento. Te recomendamos cambiarla.', 'success');
-        }, 1200);
+          showNotif('🔑 Estás usando tu número de documento como contraseña. Te recomendamos cambiarla haciendo clic en <b>Mi Perfil → Cambiar Contraseña</b>.', 'success');
+        }, 1000);
       }
     }
   } else if (u.role === 'gerencia') {
@@ -1302,9 +1402,12 @@ window.openUserMgmt = openUserMgmt;
 window.saveUserAdmin = saveUserAdmin;
 window.loadSavedAdminUsers = loadSavedAdminUsers;
 
-window.showCredsModal = showCredsModal;
-window.changePassword = changePassword;
+window.showCredsModal     = showCredsModal;
+window.changePassword     = changePassword;
 window.loadSavedPasswords = loadSavedPasswords;
+window.switchLoginMode    = switchLoginMode;
+window.doLoginEmpleado    = doLoginEmpleado;
+window.doLogin            = doLogin;
 
 window.applyAllDrivePermissions = applyAllDrivePermissions;
 window.saveRoleEmailsForm = saveRoleEmailsForm;
@@ -1446,8 +1549,8 @@ function saveEmpleado() {
   }
   closeModal('modal-add-emp');
   syncToSheets('empleados');
-  // Auto-share Drive folder for new/updated employees
-  SC.empleados.filter(e=>e.email).forEach(e=>{ shareEmployeeFolder(e.name,e.email); });
+  // Los archivos se guardan en Drive bajo la carpeta del empleado.
+  // El acceso se controla desde la app (portal), sin compartir carpetas por email.
   if (SC.currentView === 'empleados') renderEmpleados();
   else if (SC.currentView === 'empleado-detail') openEmpleadoDetail(SC.currentEmpId);
 }
@@ -3134,26 +3237,56 @@ function renderPortal(tab) {
   }
   else if (tab === 'docs') {
     if (!emp) { content.innerHTML = '<div class="text-muted">No se encontró empleado.</div>'; return; }
-    const docCount = Object.keys(emp.docs||{}).length;
+    const docCount = Object.values(emp.docs||{}).filter(d => d && !d.rechazado).length;
     const reqCount = TIPOS_DOC_EMPLEADO.filter(t=>t.req).length;
-    let html = `<div class="section-header mb-4"><div class="section-title" style="font-size:16px">📁 Mi Carpeta de <span>Vida</span></div></div>
-      <div class="info-box mb-4">Tu carpeta de vida tiene ${docCount} de ${reqCount} documentos requeridos cargados.</div>`;
+    let html = `
+      <div class="section-header mb-4">
+        <div class="section-title" style="font-size:16px">📁 Mi Carpeta de <span>Vida</span></div>
+      </div>
+      <div class="info-box mb-4">
+        Tu carpeta de vida tiene <strong>${docCount}</strong> de <strong>${reqCount}</strong> documentos requeridos cargados.
+        Los archivos se guardan de forma segura en el sistema.
+      </div>`;
     TIPOS_DOC_EMPLEADO.forEach(t => {
       const doc = emp.docs[t.id];
-      const rejected = doc?.rechazado;
-      const cls = doc && !rejected ? 'ok' : t.req ? 'missing' : 'optional';
-      const icon = doc && !rejected ? '✅' : rejected ? '🔄' : t.req ? '❌' : '⬜';
-      const statusTxt = rejected ? '<span class="badge badge-red" style="margin-left:4px">Rechazado — actualizar</span>' : '';
-      // Employee can upload pending or rejected docs
-      const canUpload = !doc || rejected;
-      html += `<div class="doc-item ${cls}">
-        <div class="doc-icon">${icon}</div>
-        <div class="doc-info">
-          <div class="doc-name">${t.name}${statusTxt}</div>
-          ${doc?`<div class="doc-meta">Subido: ${doc.fecha}${rejected?' · <span style=color:var(--red)>Rechazado</span>':''}</div>`:'<div class="doc-meta text-muted">Pendiente</div>'}
+      const rejected  = doc?.rechazado;
+      const pending   = doc?.pendienteRevision;
+      const hasFile   = doc && !rejected && (doc.driveUrl || doc.driveFileId || doc.fileData);
+      const cls  = hasFile ? 'ok' : rejected ? 'missing' : t.req ? 'missing' : 'optional';
+      const icon = hasFile ? '✅' : rejected ? '🔄' : t.req ? '❌' : '⬜';
+      const statusBadgeHtml = rejected
+        ? '<span class="badge badge-red" style="margin-left:6px">Rechazado — actualizar</span>'
+        : pending
+        ? '<span class="badge badge-yellow" style="margin-left:6px">En revisión</span>'
+        : '';
+      const canUpload = !doc || rejected;   // puede subir si no tiene doc o fue rechazado
+      const canView   = doc && !rejected && (doc.driveUrl || doc.driveFileId || doc.fileData);
+      html += `<div class="doc-item ${cls}" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;margin-bottom:8px">
+        <div class="doc-icon" style="font-size:20px;min-width:28px;text-align:center">${icon}</div>
+        <div class="doc-info" style="flex:1;min-width:0">
+          <div class="doc-name" style="font-weight:600;font-size:13px">${t.name}${statusBadgeHtml}</div>
+          <div class="doc-meta" style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            ${doc && !rejected
+              ? `Subido el ${doc.fecha}${doc.fileName ? ` · ${doc.fileName}` : ''}`
+              : t.req ? 'Obligatorio — pendiente de carga' : 'Opcional — pendiente de carga'}
+          </div>
         </div>
-        ${doc?.fileData&&!rejected?`<button class="btn btn-ghost btn-sm" onclick="viewDocFile('${emp.id}','${t.id}')">👁️</button>`:''}
-        ${canUpload?`<label class="btn btn-primary btn-sm" style="cursor:pointer">📤 Subir<input type="file" accept=".pdf,.jpg,.png,.doc,.docx" style="display:none" onchange="handlePortalDocUpload(event,'${t.id}')"></label>`:''}
+        <div class="flex gap-2" style="flex-shrink:0">
+          ${canView
+            ? `<button class="btn btn-ghost btn-sm" onclick="viewDocFile('${emp.id}','${t.id}')">👁️ Ver</button>`
+            : ''}
+          ${canUpload
+            ? `<label class="btn btn-primary btn-sm" style="cursor:pointer;white-space:nowrap">
+                📤 Subir
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style="display:none"
+                  onchange="handlePortalDocUpload(event,'${t.id}')">
+              </label>`
+            : `<label class="btn btn-ghost btn-sm" style="cursor:pointer;white-space:nowrap" title="Reemplazar documento">
+                🔄
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style="display:none"
+                  onchange="handlePortalDocUpload(event,'${t.id}')">
+              </label>`}
+        </div>
       </div>`;
     });
     content.innerHTML = html;
@@ -5258,36 +5391,14 @@ async function shareEmployeeFolder(empName, empEmail) {
 }
 
 async function applyAllDrivePermissions() {
-  if (!GAPI_CONFIG.connected) {
-    showNotif('Conecta primero con Google Drive', 'error');
-    return;
-  }
-  showNotif('⚙️ Aplicando permisos en Drive...');
-  let applied = 0;
-
-  // RRHH roles → Editor
-  const rhEmails = DRIVE_ROLE_EMAILS['rrhh'] || [];
-  for (const email of rhEmails) {
-    await shareAllFoldersWithRole(email, 'writer');
-    applied++;
-  }
-  // Gerencia → Solo lectura, todas las carpetas
-  const gerEmails = DRIVE_ROLE_EMAILS['gerencia'] || [];
-  for (const email of gerEmails) {
-    await shareAllFoldersWithRole(email, 'reader');
-    applied++;
-  }
-  // Empleados → Solo lectura en su carpeta personal
-  for (const emp of SC.empleados) {
-    if (emp.email && emp.status === 'activo') {
-      await shareEmployeeFolder(emp.name, emp.email);
-      applied++;
-    }
-  }
-
-  showNotif(`✅ Permisos aplicados en Drive — ${applied} cuentas configuradas`);
-  saveRoleEmailsToStorage();
+  // ⚠️  El acceso a documentos se controla desde el portal de la app.
+  // No se comparten carpetas de Drive por email para evitar errores 400/403.
+  showNotif('ℹ️ El acceso a documentos se gestiona desde el portal de cada empleado.', 'info');
 }
+
+/* ORIGINAL DESHABILITADO — se reemplazó por control de acceso en la app
+async function applyAllDrivePermissions_DISABLED() { }
+*/
 
 function saveRoleEmailsToStorage() {
   try {
@@ -5344,27 +5455,38 @@ function showCredsModal(nombre, userLogin) {
 
 // Cambio de contraseña desde portal empleado
 function changePassword() {
-  const empId = SC.user?.empId;
   const oldPass  = document.getElementById('cp-old')?.value;
   const newPass1 = document.getElementById('cp-new1')?.value;
   const newPass2 = document.getElementById('cp-new2')?.value;
   if (!oldPass || !newPass1 || !newPass2) { showNotif('Completa todos los campos', 'error'); return; }
   if (newPass1 !== newPass2) { showNotif('Las contraseñas nuevas no coinciden', 'error'); return; }
   if (newPass1.length < 6)  { showNotif('La contraseña debe tener al menos 6 caracteres', 'error'); return; }
+
   const userObj = USERS.find(u => u.id === SC.user?.id);
   if (!userObj) { showNotif('Usuario no encontrado', 'error'); return; }
   if (userObj.pass !== oldPass) { showNotif('La contraseña actual es incorrecta', 'error'); return; }
+
+  // Actualizar en memoria
   userObj.pass = newPass1;
-  // Persist
+  SC.user.pass = newPass1;
+  sessionStorage.setItem('sc_user', JSON.stringify(SC.user));
+
+  // Persistir en sc_users (admins y cambios puntuales)
   try {
-    const saved = JSON.parse(localStorage.getItem('sc_users')||'[]');
-    const idx = saved.findIndex(u=>u.id===userObj.id);
-    if (idx>=0) saved[idx].pass = newPass1;
-    else saved.push({id:userObj.id, pass:newPass1});
-    localStorage.setItem('sc_users', JSON.stringify(saved));
+    const savedU = JSON.parse(localStorage.getItem('sc_users')||'[]');
+    const idx = savedU.findIndex(u => u.id === userObj.id);
+    if (idx >= 0) savedU[idx].pass = newPass1;
+    else savedU.push({ id: userObj.id, pass: newPass1 });
+    localStorage.setItem('sc_users', JSON.stringify(savedU));
   } catch(e) {}
+
+  // Persistir en sc_emp_users (empleados)
+  if (userObj.role === 'empleado') persistUsers();
+
   closeModal('modal-change-pass');
-  showNotif('Contraseña actualizada ✅');
+  // Limpiar campos
+  ['cp-old','cp-new1','cp-new2'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  showNotif('🔑 Contraseña actualizada correctamente ✅');
 }
 
 // Al iniciar: cargar contraseñas guardadas (permite cambios persistentes)

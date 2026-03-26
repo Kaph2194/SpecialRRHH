@@ -32,22 +32,73 @@
       </div>
 
       <h1 class="login-title">Bienvenido</h1>
-      <p class="login-desc">Ingresa tus credenciales para acceder al sistema de gestión de talento humano.</p>
 
-      <div class="form-group">
-        <label class="form-label">Usuario <span style="font-size:11px;color:var(--text-muted);font-weight:400">(empleados: número de documento sin puntos)</span></label>
-        <input class="form-input" id="login-user" placeholder="Ej: 1234567 o superadmin" onkeydown="if(event.key==='Enter')doLogin()">
+      <!-- Selector de modo -->
+      <div style="display:flex;gap:6px;margin-bottom:20px;background:rgba(0,0,0,.06);border-radius:10px;padding:4px;">
+        <button id="btn-mode-emp" onclick="switchLoginMode('empleado')"
+          style="flex:1;padding:8px 12px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:var(--navy);color:#fff;transition:all .2s;box-shadow:0 2px 6px rgba(0,0,0,.15)">
+          👤 Soy Empleado
+        </button>
+        <button id="btn-mode-adm" onclick="switchLoginMode('admin')"
+          style="flex:1;padding:8px 12px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--text-muted);transition:all .2s">
+          🔐 Administrador
+        </button>
       </div>
-      <div class="form-group">
-        <label class="form-label">Contraseña</label>
-        <input class="form-input" id="login-pass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
-      </div>
-      <div id="login-error" class="login-error" style="display:none">Usuario o contraseña incorrectos</div>
-      <button class="btn btn-primary full-w" onclick="doLogin()">Ingresar al Sistema</button>
 
-      <div class="login-demo">
-        
+      <!-- ── MODO EMPLEADO: cédula + contraseña ── -->
+      <div id="login-emp-section">
+        <p class="login-desc" style="margin-top:0;margin-bottom:18px">
+          Ingresa tu número de documento y contraseña para acceder a tu portal.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Número de Documento</label>
+          <input class="form-input" id="login-cedula" placeholder="Ej: 1012345678"
+            inputmode="numeric" autocomplete="off"
+            style="font-size:18px;letter-spacing:2px;text-align:center;padding:13px"
+            onkeydown="if(event.key==='Enter')document.getElementById('login-pass-emp').focus()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Contraseña
+            <span style="font-size:11px;color:var(--text-muted);font-weight:400">(por defecto: tu número de documento)</span>
+          </label>
+          <input class="form-input" id="login-pass-emp" type="password" placeholder="••••••••"
+            onkeydown="if(event.key==='Enter')doLoginEmpleado()">
+        </div>
+        <div id="login-error-emp" class="login-error" style="display:none">
+          ⚠️ Datos incorrectos. Verifica e intenta de nuevo.
+        </div>
+        <button class="btn btn-primary full-w" style="padding:13px;font-size:15px;margin-top:6px"
+          onclick="doLoginEmpleado()">
+          Ingresar a mi Portal →
+        </button>
       </div>
+
+      <!-- ── MODO ADMIN: usuario + contraseña ── -->
+      <div id="login-adm-section" style="display:none">
+        <p class="login-desc" style="margin-top:0;margin-bottom:18px">
+          Acceso exclusivo para administradores del sistema.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Usuario</label>
+          <input class="form-input" id="login-user" placeholder="superadmin"
+            onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Contraseña</label>
+          <input class="form-input" id="login-pass" type="password" placeholder="••••••••"
+            onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <div id="login-error" class="login-error" style="display:none">
+          ⚠️ Usuario o contraseña incorrectos
+        </div>
+        <button class="btn btn-primary full-w" style="padding:13px;font-size:15px;margin-top:6px"
+          onclick="doLogin()">
+          Ingresar al Sistema →
+        </button>
+      </div>
+
+      <div class="login-demo"></div>-size:18px;letter-spacing:2px;text-align:center"
+            onkeydown="if(event.key==='
 
     </div>
   </div>
