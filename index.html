@@ -225,6 +225,8 @@
         <div class="tab" onclick="empTab('incapacidades',this)">🏥 Incapacidades</div>
         <div class="tab" onclick="empTab('vacaciones',this)">🏖 Vacaciones</div>
         <div class="tab" onclick="empTab('disc',this)">⚖️ Disciplinarios</div>
+        <div class="tab" onclick="empTab('horario',this)">🕐 Horario</div>
+        <div class="tab" onclick="empTab('descuentos',this)">💳 Descuentos</div>
       </div>
       <div id="emp-tab-content"></div>
     </div>
@@ -378,6 +380,160 @@
     <!-- ═══════════════════════════════════════════════ -->
     <!-- ÁREAS ADMIN                                     -->
     <!-- ═══════════════════════════════════════════════ -->
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PERFILES DE CARGO                                        -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div id="view-perfiles-cargo" class="view"></div>
+
+    <!-- Modal Perfil de Cargo -->
+    <div class="modal-overlay" id="modal-perfil-cargo">
+      <div class="modal" style="max-width:780px;max-height:92vh;overflow-y:auto">
+        <div class="modal-header" style="position:sticky;top:0;background:var(--bg-card);z-index:10;border-bottom:1px solid var(--navy-border)">
+          <div class="modal-title" id="pc-title">🎯 Perfil de Cargo</div>
+          <button class="modal-close" onclick="closeModal('modal-perfil-cargo')">✕</button>
+        </div>
+        <div class="modal-body" style="padding:20px">
+
+          <!-- Rango salarial -->
+          <div class="glass-card p-4 mb-4" style="border-left:4px solid var(--navy)">
+            <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">💰 Rango Salarial del Cargo</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+              <div class="form-group" style="margin:0">
+                <label class="form-label">Salario Mínimo del Rango (S_min)</label>
+                <input class="form-input" id="pc-sal-min" type="number" placeholder="Ej: 2000000"
+                  oninput="actualizarSalarioPonderado()">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label">Salario Máximo del Rango (S_max)</label>
+                <input class="form-input" id="pc-sal-max" type="number" placeholder="Ej: 4000000"
+                  oninput="actualizarSalarioPonderado()">
+              </div>
+            </div>
+            <!-- Calculadora resultado -->
+            <div id="pc-sal-calculado" style="padding:12px;background:rgba(17,31,77,.04);border-radius:10px;min-height:44px"></div>
+          </div>
+
+          <!-- Requisitos descriptivos -->
+          <div class="glass-card p-4 mb-4">
+            <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">📋 Requisitos del Cargo</div>
+            <div class="form-group">
+              <label class="form-label">📚 Formación Académica (títulos, certificaciones relevantes)</label>
+              <textarea class="form-input" id="pc-formacion" rows="2"
+                placeholder="Ej: Tecnólogo o profesional en Mecánica Automotriz, certificación Bosch Service..."></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label">💼 Experiencia Previa (roles similares y logros cuantificables)</label>
+              <textarea class="form-input" id="pc-experiencia" rows="2"
+                placeholder="Ej: Mínimo 2 años como mecánico general, experiencia en diagnóstico OBD2..."></textarea>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">🛠 Herramientas, Software e Idiomas</label>
+              <textarea class="form-input" id="pc-herramientas" rows="2"
+                placeholder="Ej: Scanner Launch X431, Suite Office, inglés técnico básico..."></textarea>
+            </div>
+          </div>
+
+          <!-- Checklist de competencias con pesos -->
+          <div class="glass-card p-4 mb-4">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <div style="font-weight:700;font-size:14px;color:var(--navy)">⚙️ Competencias Técnicas (Hard Skills)</div>
+              <button class="btn btn-ghost btn-sm" onclick="agregarItemPC('tecnicas')">+ Agregar</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Conocimiento técnico, formación, experiencia y herramientas específicas del cargo</div>
+            <div id="pc-tecnicas"></div>
+          </div>
+
+          <div class="glass-card p-4 mb-4">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <div style="font-weight:700;font-size:14px;color:var(--navy)">🤝 Competencias Conductuales (Soft Skills)</div>
+              <button class="btn btn-ghost btn-sm" onclick="agregarItemPC('blandas')">+ Agregar</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Comunicación, trabajo en equipo, resolución de problemas y liderazgo</div>
+            <div id="pc-blandas"></div>
+          </div>
+
+          <div class="glass-card p-4 mb-4">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <div style="font-weight:700;font-size:14px;color:var(--navy)">🧠 Rasgos de Personalidad y Adaptabilidad</div>
+              <button class="btn btn-ghost btn-sm" onclick="agregarItemPC('personalidad')">+ Agregar</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Resiliencia, proactividad y ética. Asigna peso 0 si no aplica ponderación salarial</div>
+            <div id="pc-personalidad"></div>
+          </div>
+
+          <div class="glass-card p-4 mb-4">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <div style="font-weight:700;font-size:14px;color:var(--navy)">🚀 Potencial de Aprendizaje (Learnability)</div>
+              <button class="btn btn-ghost btn-sm" onclick="agregarItemPC('aprendizaje')">+ Agregar</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Curiosidad intelectual y agilidad mental. Asigna peso 0 si no aplica ponderación salarial</div>
+            <div id="pc-aprendizaje"></div>
+          </div>
+
+          <!-- Total de pesos -->
+          <div class="info-box mb-4" style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-weight:600">Suma total de pesos (criterios activos):</span>
+            <span id="pc-total-peso" style="font-size:20px;font-weight:800">0%</span>
+          </div>
+
+          <!-- Calculadora salarial interactiva -->
+          <div class="glass-card p-4" style="border-left:4px solid var(--green)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div style="font-weight:700;font-size:14px;color:var(--navy)">🧮 Calculadora Salarial Ponderada</div>
+              <button class="btn btn-ghost btn-sm" onclick="renderSlidersPC()">Cargar sliders</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">
+              Fórmula: S<sub>final</sub> = S<sub>min</sub> + (S<sub>max</sub> − S<sub>min</sub>) × Σ(Puntaje<sub>i</sub> × Peso<sub>i</sub> / 100)
+            </div>
+            <div id="pc-sliders" style="margin-bottom:12px">
+              <div class="text-sm text-muted">Haz clic en "Cargar sliders" para evaluar un candidato/empleado</div>
+            </div>
+
+            <!-- Ajustes opcionales -->
+            <div style="border-top:1px solid var(--navy-border);padding-top:14px;margin-top:4px">
+              <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:10px">⚙️ Ajustes opcionales</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                <div>
+                  <label class="form-label" style="font-size:11px">🌍 Costo de vida</label>
+                  <select id="pc-adj-vida" class="form-select" style="font-size:12px" oninput="actualizarSalarioPonderado()">
+                    <option value="0">Sin ajuste</option>
+                    <option value="5">+5% (zona cara)</option>
+                    <option value="10">+10% (ciudad prime)</option>
+                    <option value="-5">-5% (zona económica)</option>
+                    <option value="-10">-10% (remoto barato)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size:11px">🎯 Escasez de talento</label>
+                  <select id="pc-adj-escasez" class="form-select" style="font-size:12px" oninput="actualizarSalarioPonderado()">
+                    <option value="0">Sin ajuste</option>
+                    <option value="5">+5% (algo escaso)</option>
+                    <option value="10">+10% (escaso)</option>
+                    <option value="20">+20% (muy escaso)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size:11px">🏢 Presupuesto org.</label>
+                  <select id="pc-adj-presupuesto" class="form-select" style="font-size:12px" oninput="actualizarSalarioPonderado()">
+                    <option value="0">Sin ajuste</option>
+                    <option value="-5">-5% (ajustado)</option>
+                    <option value="-10">-10% (restricción)</option>
+                    <option value="5">+5% (holgado)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer" style="position:sticky;bottom:0;background:var(--bg-card);border-top:1px solid var(--navy-border)">
+          <button class="btn btn-ghost" onclick="closeModal('modal-perfil-cargo')">Cancelar</button>
+          <button class="btn btn-primary" onclick="savePerfilCargo()">💾 Guardar Perfil</button>
+        </div>
+      </div>
+    </div>
+
     <div id="view-areas" class="view">
       <div class="section-header mb-4">
         <div class="section-title">Áreas <span>Organizacionales</span></div>
@@ -391,6 +547,236 @@
       </div>
     </div>
 
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- NOVEDADES DIARIAS (Admin/RH)                      -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="view-novedades-diarias" class="view">
+      <div class="section-header mb-4">
+        <div class="section-title">Novedades <span>Diarias</span></div>
+        <div class="flex gap-2">
+          <input type="date" id="nd-fecha-filtro" class="form-input" style="width:160px" onchange="renderNovedadesDiarias()">
+          <select id="nd-area-filtro" class="form-select" style="width:160px" onchange="renderNovedadesDiarias()">
+            <option value="">Todas las áreas</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="openCargarBiometrico()">📂 Cargar Biométrico</button>
+          <button class="btn btn-ghost btn-sm" onclick="openCargarMalla()">📋 Malla sin Marca</button>
+        </div>
+      </div>
+      <div id="novedades-diarias-content"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- NOVEDADES ÁREA (Líder de Área)                   -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="view-novedades-area" class="view">
+      <div class="section-header mb-4">
+        <div class="section-title">📅 Reportar <span>Novedades del Área</span></div>
+        <button class="btn btn-primary btn-sm" onclick="openNuevaNovedadArea()">+ Nueva Novedad</button>
+      </div>
+      <div id="novedades-area-calendar"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- DESCUENTOS & PRÉSTAMOS                           -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="view-descuentos" class="view">
+      <div class="section-header mb-4">
+        <div class="section-title">💳 Descuentos & <span>Préstamos</span></div>
+        <div class="flex gap-2">
+          <select id="desc-filtro-tipo" class="form-select" style="width:160px" onchange="renderDescuentos()">
+            <option value="">Todos los tipos</option>
+            <option value="prestamo">Préstamo</option>
+            <option value="anticipo">Anticipo de Nómina</option>
+            <option value="deduccion">Deducción</option>
+            <option value="descuento_voluntario">Descuento Voluntario</option>
+            <option value="libranza">Libranza</option>
+            <option value="otro">Otro</option>
+          </select>
+          <select id="desc-filtro-estado" class="form-select" style="width:140px" onchange="renderDescuentos()">
+            <option value="">Todos los estados</option>
+            <option value="pendiente_aprobacion">Pendiente Aprobación</option>
+            <option value="aprobado">Aprobado</option>
+            <option value="activo">Activo</option>
+            <option value="pagado">Pagado</option>
+            <option value="rechazado">Rechazado</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openNuevoDescuento()">+ Nuevo</button>
+        </div>
+      </div>
+      <div id="descuentos-content"></div>
+    </div>
+
+    <!-- Modal Descuento/Préstamo -->
+    <div class="modal-overlay" id="modal-descuento">
+      <div class="modal" style="max-width:540px">
+        <div class="modal-header">
+          <div class="modal-title" id="desc-modal-title">💳 Nuevo Descuento / Préstamo</div>
+          <button class="modal-close" onclick="closeModal('modal-descuento')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group" id="desc-emp-group">
+            <label class="form-label">Empleado *</label>
+            <select class="form-select" id="desc-emp"></select>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Tipo *</label>
+              <select class="form-select" id="desc-tipo" onchange="toggleDescuentoFields()">
+                <option value="prestamo">💰 Préstamo</option>
+                <option value="anticipo">📅 Anticipo de Nómina</option>
+                <option value="deduccion">📉 Deducción</option>
+                <option value="descuento_voluntario">✍️ Descuento Voluntario</option>
+                <option value="libranza">🏦 Libranza</option>
+                <option value="otro">Otro</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Monto Total *</label>
+              <input class="form-input" id="desc-monto" type="number" placeholder="0" oninput="calcCuotaDesc()">
+            </div>
+          </div>
+          <!-- Campos de préstamo -->
+          <div id="desc-prestamo-fields">
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label">N° de Cuotas</label>
+                <input class="form-input" id="desc-cuotas" type="number" min="1" value="1" oninput="calcCuotaDesc()">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Cuota por Período</label>
+                <input class="form-input" id="desc-cuota-calc" type="text" readonly style="background:var(--bg);font-weight:600;color:var(--green)">
+              </div>
+            </div>
+            <div class="info-box" id="desc-aprobacion-nota" style="font-size:12px">
+              ⚠️ Los <strong>préstamos</strong> requieren aprobación de Gerencia y Líder RRHH antes de ser descontados.
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha de Inicio *</label>
+            <input class="form-input" id="desc-fecha" type="date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Descripción / Motivo *</label>
+            <textarea class="form-textarea" id="desc-descripcion" placeholder="Describe el motivo o condiciones del descuento..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-descuento')">Cancelar</button>
+          <button class="btn btn-primary" id="desc-btn-guardar" onclick="saveDescuento()">💾 Guardar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Biométrico -->
+    <div class="modal-overlay" id="modal-biometrico">
+      <div class="modal" style="max-width:600px">
+        <div class="modal-header">
+          <div class="modal-title">📂 Cargar Archivo Biométrico</div>
+          <button class="modal-close" onclick="closeModal('modal-biometrico')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="info-box mb-3" style="font-size:12px">
+            📋 Carga el archivo exportado del sistema biométrico (CSV o Excel). Debe contener: <strong>cédula, nombre, fecha, hora entrada, hora salida</strong>.
+          </div>
+          <div class="form-group">
+            <label class="form-label">Período</label>
+            <div class="form-grid">
+              <input class="form-input" id="bio-fecha-ini" type="date">
+              <input class="form-input" id="bio-fecha-fin" type="date">
+            </div>
+          </div>
+          <div class="drop-zone" style="padding:20px;text-align:center" ondragover="event.preventDefault()" ondrop="handleBioDrop(event)">
+            <input type="file" id="bio-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleBioFile(event)">
+            <div id="bio-file-lbl" style="font-size:14px;margin-bottom:8px">📂 Arrastra el archivo biométrico aquí o haz clic</div>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('bio-file').click()">Seleccionar archivo</button>
+          </div>
+          <div id="bio-preview" style="margin-top:12px"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-biometrico')">Cancelar</button>
+          <button class="btn btn-primary" id="bio-btn-procesar" onclick="procesarBiometrico()" style="display:none">⚙️ Procesar y Comparar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Malla sin Marca -->
+    <div class="modal-overlay" id="modal-malla">
+      <div class="modal" style="max-width:600px">
+        <div class="modal-header">
+          <div class="modal-title">📋 Malla de Asistencia (sin biométrico)</div>
+          <button class="modal-close" onclick="closeModal('modal-malla')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="info-box mb-3" style="font-size:12px">
+            Para empleados que no marcan biométrico. Registra manualmente los días trabajados, horas extra, dominicales, nocturnos, etc.
+          </div>
+          <div class="form-group">
+            <label class="form-label">Empleado</label>
+            <select class="form-select" id="malla-emp"></select>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Período (mes)</label>
+              <input class="form-input" id="malla-periodo" type="month">
+            </div>
+          </div>
+          <div id="malla-grid" style="margin-top:12px"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-malla')">Cancelar</button>
+          <button class="btn btn-primary" onclick="saveMalla()">💾 Guardar Malla</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Novedad Área -->
+    <div class="modal-overlay" id="modal-novedad-area">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+          <div class="modal-title">📅 Reportar Novedad</div>
+          <button class="modal-close" onclick="closeModal('modal-novedad-area')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Empleado *</label>
+            <select class="form-select" id="nav-emp"></select>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Fecha *</label>
+              <input class="form-input" id="nav-fecha" type="date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tipo de Novedad *</label>
+              <select class="form-select" id="nav-tipo">
+                <option value="ausencia">🔴 Ausencia injustificada</option>
+                <option value="tardanza">⏰ Tardanza / Llegada tarde</option>
+                <option value="salida_temprana">🏃 Salida temprana</option>
+                <option value="hora_extra">⭐ Hora extra</option>
+                <option value="dominical">🌟 Dominical / Festivo</option>
+                <option value="nocturno">🌙 Nocturno</option>
+                <option value="permiso">📋 Permiso aprobado</option>
+                <option value="incapacidad">🏥 Incapacidad</option>
+                <option value="otro">📝 Otro</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Horas (si aplica)</label>
+            <input class="form-input" id="nav-horas" type="number" step="0.5" min="0" placeholder="Ej: 2">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Descripción</label>
+            <textarea class="form-textarea" id="nav-descripcion" placeholder="Detalle de la novedad..." rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-novedad-area')">Cancelar</button>
+          <button class="btn btn-primary" onclick="saveNovedadArea()">📤 Reportar</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ═══════════════════════════════════════════════ -->
     <!-- EMPRESAS ADMIN                                   -->
@@ -712,15 +1098,36 @@
     </div>
     <div class="modal-body">
       <div class="form-group" id="perm-emp-group" style="display:none"><label class="form-label">Empleado</label><select class="form-select" id="perm-emp"></select></div>
-      <div class="form-group"><label class="form-label">Tipo de Permiso</label><select class="form-select" id="perm-tipo" onchange="togglePermisoHoras()">
-        <option value="calamidad">Calamidad Doméstica</option>
-        <option value="medico">Cita Médica</option>
-        <option value="personal">Asunto Personal</option>
-        <option value="luto">Luto</option>
-        <option value="maternidad">Maternidad/Paternidad</option>
-        <option value="horas">Permiso por Horas</option>
-        <option value="otro">Otro</option>
+      <div class="form-group"><label class="form-label">Tipo de Permiso / Licencia</label>
+      <select class="form-select" id="perm-tipo" onchange="togglePermisoHoras();updateTratamientoPermiso()">
+        <optgroup label="── Permisos ──">
+          <option value="calamidad">Calamidad Doméstica</option>
+          <option value="medico">Cita Médica</option>
+          <option value="personal">Asunto Personal</option>
+          <option value="luto">Luto</option>
+          <option value="horas">Permiso por Horas</option>
+          <option value="otro">Otro</option>
+        </optgroup>
+        <optgroup label="── Licencias Remuneradas ──">
+          <option value="licencia_remunerada">Licencia Remunerada</option>
+          <option value="licencia_maternidad">Licencia Maternidad (17 sem)</option>
+          <option value="licencia_paternidad">Licencia Paternidad (8 días)</option>
+        </optgroup>
+        <optgroup label="── Licencias No Remuneradas ──">
+          <option value="licencia_no_remunerada">Licencia No Remunerada</option>
+        </optgroup>
       </select></div>
+      <!-- Tratamiento nómina — visible solo para admin/RH -->
+      <div class="form-group" id="perm-tratamiento-group">
+        <label class="form-label">Tratamiento en Nómina</label>
+        <select class="form-select" id="perm-tratamiento" onchange="updateTratamientoPermiso()">
+          <option value="descuento">💸 Se descuenta de nómina</option>
+          <option value="compensacion">🔄 Se repone el tiempo</option>
+          <option value="remunerado">✅ Remunerado (no descuenta)</option>
+          <option value="pendiente">⏳ Pendiente de definir</option>
+        </select>
+      </div>
+      <div id="perm-tratamiento-nota" class="info-box mb-3" style="font-size:12px;display:none"></div>
       <div class="info-box mb-3" style="font-size:12px" id="perm-72h-note">⏰ Los permisos deben solicitarse con mínimo <strong>72 horas de anticipación</strong> a la fecha y hora del permiso.</div>
       <!-- Campos para permiso por DÍAS (todos los tipos excepto horas) -->
       <div id="perm-dias-fields">
@@ -777,11 +1184,50 @@
     </div>
     <div class="modal-body">
       <div class="form-group" id="incap-emp-group" style="display:none"><label class="form-label">Empleado</label><select class="form-select" id="incap-emp"></select></div>
+      <!-- Tipo de incapacidad -->
+      <div class="form-group">
+        <label class="form-label">Tipo de Incapacidad</label>
+        <select class="form-select" id="incap-tipo" onchange="toggleIncapAT()">
+          <option value="enfermedad_general">🏥 Enfermedad General (EPS)</option>
+          <option value="accidente_trabajo">🚨 Accidente de Trabajo (ARL)</option>
+          <option value="enfermedad_laboral">⚠️ Enfermedad Laboral (ARL)</option>
+          <option value="maternidad">🤱 Licencia Maternidad/Paternidad</option>
+        </select>
+      </div>
       <div class="form-grid">
-        <div class="form-group"><label class="form-label">Diagnóstico *</label><input class="form-input" id="incap-diag" placeholder="Diagnóstico médico"></div>
+        <div class="form-group"><label class="form-label">Diagnóstico *</label><input class="form-input" id="incap-diag" placeholder="Diagnóstico médico o descripción del accidente"></div>
         <div class="form-group"><label class="form-label">Días de Incapacidad *</label><input class="form-input" id="incap-dias" type="number" min="1" placeholder="0" oninput="checkIncapDias()"></div>
-        <div class="form-group"><label class="form-label">EPS *</label><input class="form-input" id="incap-eps" placeholder="Nombre de la EPS"></div>
+        <div class="form-group"><label class="form-label">EPS / ARL *</label><input class="form-input" id="incap-eps" placeholder="Nombre de EPS o ARL"></div>
         <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="incap-fecha" type="date"></div>
+      </div>
+      <!-- Campos específicos de Accidente de Trabajo -->
+      <div id="incap-at-group" style="display:none">
+        <div class="info-box mb-3" style="border-left:4px solid var(--red);background:var(--red-bg);font-size:12px">
+          🚨 <strong>Accidente de Trabajo:</strong> Se debe adjuntar el reporte FURAT y la incapacidad emitida por la ARL.
+          La incapacidad desde el día 1 la cubre la ARL al 100%.
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Fecha del Accidente *</label>
+            <input class="form-input" id="incap-at-fecha" type="date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Lugar del Accidente *</label>
+            <input class="form-input" id="incap-at-lugar" placeholder="Ej: Sede principal / Taller / En tránsito">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Descripción del Accidente *</label>
+          <textarea class="form-textarea" id="incap-at-desc" placeholder="Descripción detallada de cómo ocurrió el accidente..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reporte FURAT — Reporte a la ARL (PDF) *</label>
+          <div class="drop-zone" style="padding:14px;border-color:rgba(220,38,38,0.4)" ondragover="event.preventDefault()" ondrop="handleFuratDrop(event)">
+            <input type="file" id="incap-furat-file" accept=".pdf" style="display:none" onchange="handleFuratFile(event)">
+            <div id="incap-furat-lbl" style="font-size:13px;margin:4px 0">📋 Reporte FURAT (PDF)</div>
+            <button class="btn btn-ghost btn-sm mt-2" onclick="document.getElementById('incap-furat-file').click()">Seleccionar PDF</button>
+          </div>
+        </div>
       </div>
       <div id="incap-dias-warning" class="warning-72h mb-3" style="display:none">
         ⚠️ Incapacidades mayores a 2 días requieren adjuntar también la epicrisis médica.
@@ -1595,6 +2041,61 @@ function initNovedadesModal() {
   const mes = hoy.toISOString().slice(0,7);
   const el = document.getElementById('nov-periodo');
   if (el && !el.value) el.value = mes;
+}
+
+function updateTratamientoPermiso() {
+  const tipo = document.getElementById('perm-tipo')?.value || '';
+  const tratEl = document.getElementById('perm-tratamiento');
+  const notaEl = document.getElementById('perm-tratamiento-nota');
+  const grupoEl = document.getElementById('perm-tratamiento-group');
+  if (!tratEl) return;
+  // Autoseleccionar tratamiento según tipo
+  const notas = {
+    licencia_remunerada:    { val:'remunerado',   txt:'✅ Licencia remunerada: el empleado recibe su salario normal. No descuenta de nómina.' },
+    licencia_maternidad:    { val:'remunerado',   txt:'✅ Licencia de maternidad (17 semanas): cubierta por EPS, no descuenta del empleador.' },
+    licencia_paternidad:    { val:'remunerado',   txt:'✅ Licencia de paternidad (8 días hábiles): cubierta por EPS, no descuenta.' },
+    licencia_no_remunerada: { val:'descuento',    txt:'💸 Licencia no remunerada: se descuenta de nómina por los días de ausencia.' },
+    calamidad:              { val:'remunerado',   txt:'✅ Calamidad doméstica: según la ley, no descuenta de nómina (hasta 5 días).' },
+    luto:                   { val:'remunerado',   txt:'✅ Licencia por luto: 5 días hábiles remunerados según ley.' },
+    medico:                 { val:'compensacion', txt:'🔄 Cita médica: se acostumbra reponer el tiempo dentro de la misma semana.' },
+    personal:               { val:'pendiente',    txt:'⏳ Permiso personal: definir con el jefe si descuenta, se repone o se remunera.' },
+    horas:                  { val:'compensacion', txt:'🔄 Permiso por horas: usualmente se repone dentro de la semana o quincena.' },
+  };
+  const config = notas[tipo];
+  if (config) {
+    tratEl.value = config.val;
+    if (notaEl) { notaEl.innerHTML = config.txt; notaEl.style.display = ''; }
+  } else {
+    if (notaEl) notaEl.style.display = 'none';
+  }
+  // Solo admins/RH ven este campo
+  const role = window.SC?.user?.role;
+  if (grupoEl) grupoEl.style.display = (role === 'empleado') ? 'none' : '';
+}
+
+function toggleIncapAT() {
+  const tipo = document.getElementById('incap-tipo')?.value || '';
+  const atGroup = document.getElementById('incap-at-group');
+  if (atGroup) atGroup.style.display = (tipo === 'accidente_trabajo' || tipo === 'enfermedad_laboral') ? '' : 'none';
+  const epsLabel = document.getElementById('incap-eps')?.previousElementSibling;
+  if (epsLabel) epsLabel.textContent = (tipo === 'accidente_trabajo' || tipo === 'enfermedad_laboral') ? 'ARL *' : 'EPS *';
+}
+
+function handleFuratFile(e) {
+  const f = e.target.files[0]; if (!f) return;
+  if (!SC.pendingFiles) SC.pendingFiles = {};
+  const reader = new FileReader();
+  reader.onload = ev => {
+    SC.pendingFiles.furat = { data: ev.target.result, name: f.name };
+    document.getElementById('incap-furat-lbl').textContent = '✅ ' + f.name;
+  };
+  reader.readAsDataURL(f);
+}
+function handleFuratDrop(e) {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0]; if (!f) return;
+  document.getElementById('incap-furat-file').files = e.dataTransfer.files;
+  handleFuratFile({ target: { files: e.dataTransfer.files } });
 }
 
 function togglePermisoHoras() {

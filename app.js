@@ -173,6 +173,11 @@ let USERS = [
     name:'Líder RRHH',            role:'lider_rrhh',
     roleName:'Líder RRHH',        canWrite:false },
 
+  { id:'u3b', user:'lider.area',   pass:'LiderArea2024*',
+    name:'Líder de Área (Demo)',   role:'lider_area',
+    roleName:'Líder de Área',      canWrite:true,
+    areaId: null },  // areaId se asigna al crear el usuario
+
   { id:'u4', user:'gerencia',     pass:'Gerencia2024*',
     name:'Gerencia',              role:'gerencia',
     roleName:'Gerencia',          canWrite:false },
@@ -266,6 +271,10 @@ const SC = {
   clEditCargo: null,
   clEditData: null,
   empresaEditId: null,   // for empresa editor (superadmin)
+  perfilesCargo: {},     // { 'NombreCargo': { salMin, salMax, tecnicas:[], blandas:[], personalidad:[], aprendizaje:[], formacion, experiencia, herramientas } }
+  horarios: {},          // { empId: { tipo:'fijo'|'flexible'|'rotativo', dias:[], entrada:'', salida:'' } }
+  descuentos: [],        // [ { id, empId, tipo, monto, cuotas, cuotasPagadas, estado, aprobadoPor, fecha, descripcion } ]
+  novedadesArea: [],     // [ { id, empId, fecha, tipo, horas, descripcion, reportadoPor, areaId } ]
 };
 
 // ─── SEED DATA ────────────────────────────────────────────
@@ -744,6 +753,10 @@ async function init() {
   loadSavedEmpresas(); // Restaura solo representante legal
   SC.checklists = {};
   SC.vacantes = JSON.parse(localStorage.getItem('sc_vacantes')||'[]');
+  SC.perfilesCargo  = JSON.parse(localStorage.getItem('sc_perfiles_cargo')||'{}');
+  SC.horarios       = JSON.parse(localStorage.getItem('sc_horarios')||'{}');
+  SC.descuentos     = JSON.parse(localStorage.getItem('sc_descuentos')||'[]');
+  SC.novedadesArea  = JSON.parse(localStorage.getItem('sc_novedades_area')||'[]');
 
   // Intentar cargar datos dinámicos desde Supabase
   const sbLoaded = await loadFromSupabase();
@@ -971,6 +984,8 @@ function startApp() {
 function can(action) {
   if (!SC.user) return false;
   if (SC.user.role === 'gerencia' || SC.user.role === 'lider_rrhh') return false;
+  // lider_area solo puede escribir novedades/permisos de su área
+  if (SC.user.role === 'lider_area') return action === 'write' ? true : false;
   return SC.user.canWrite;
 }
 
@@ -998,10 +1013,23 @@ function buildSidebar() {
   addNavSep(nav, 'DOCUMENTOS');
   addNavItem(nav, '🗄', 'Bodega Documental', 'bodega');
   addNavSep(nav, 'NÓMINA & GESTIÓN');
+  // Lider de área: vista reducida
+  if (u.role === 'lider_area') {
+    addNavItem(nav, '👥', 'Mi Equipo', 'empleados');
+    addNavSep(nav, 'NOVEDADES');
+    addNavItem(nav, '📅', 'Reportar Novedades', 'novedades-area');
+    addNavItem(nav, '🗓', 'Permisos del Área', 'permisos-admin');
+    addNavItem(nav, '🏥', 'Incapacidades', 'incapacidades-admin');
+    return;
+  }
   addNavItem(nav, '🗓', 'Permisos', 'permisos-admin');
   addNavItem(nav, '🏥', 'Incapacidades', 'incapacidades-admin');
+  addNavSep(nav, 'NÓMINA');
+  addNavItem(nav, '📅', 'Novedades Diarias', 'novedades-diarias');
+  addNavItem(nav, '💳', 'Descuentos & Préstamos', 'descuentos');
   addNavSep(nav, 'ADMINISTRACIÓN');
   addNavItem(nav, '📐', 'Áreas', 'areas');
+  addNavItem(nav, '🎯', 'Perfiles de Cargo', 'perfiles-cargo');
   addNavItem(nav, '⚖️', 'Disciplinarios', 'disciplinarios');
   if (u.role === 'gerencia' || u.role === 'superadmin' || u.role === 'analista_rrhh' || u.role === 'lider_rrhh') {
     addNavItem(nav, '📊', 'Panel Gerencia', 'gerencia');
@@ -1079,6 +1107,10 @@ function showView(viewId) {
   else if (viewId === 'portal') { renderPortal('perfil'); }
   else if (viewId === 'gerencia') { renderGerencia('resumen'); }
   else if (viewId === 'areas') { renderAreas(); }
+  else if (viewId === 'perfiles-cargo')    { renderPerfilesCargo(); }
+  else if (viewId === 'novedades-diarias') { renderNovedadesDiarias(); }
+  else if (viewId === 'novedades-area')    { renderNovedadesAreaCalendar(); }
+  else if (viewId === 'descuentos')        { renderDescuentos(); }
   else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('w')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
   else if (viewId === 'drive-config') { openDrivePanel(); showView('dashboard'); }
@@ -1737,7 +1769,8 @@ function renderEmpTab(tab) {
           <div class="stat-value" style="font-size:22px;color:var(--red)">${discEmp.filter(d=>d.estado==='en_proceso').length}</div>
           <div class="text-xs text-muted">En proceso</div>
         </div>` : ''}
-      </div>`;
+      </div>
+      ${buildPerfilCargoEmpHTML(emp)}`;
   }
   else if (tab === 'carpeta') { renderCarpetaVida(emp, content); }
   else if (tab === 'contratos') { renderDocSection(emp, 'contratos', content); }
@@ -1745,7 +1778,9 @@ function renderEmpTab(tab) {
   else if (tab === 'permisos') { renderEmpPermisos(emp, content); }
   else if (tab === 'incapacidades') { renderEmpIncap(emp, content); }
   else if (tab === 'vacaciones') { renderEmpVacaciones(emp, content); }
-  else if (tab === 'disc') { renderEmpDisc(emp, content); }
+  else if (tab === 'disc')       { renderEmpDisc(emp, content); }
+  else if (tab === 'horario')    { renderHorarioEmp(emp, content); }
+  else if (tab === 'descuentos') { renderDescuentosEmp(emp, content); }
 }
 
 function infoRow(label, val) {
@@ -2187,6 +2222,16 @@ function getEmpStatus(emp) {
     return hoy >= ini && hoy <= fin;
   });
   if (enVac) return 'en_vacaciones';
+  // Verificar si hoy está en incapacidad activa
+  const hoy2 = new Date(); hoy2.setHours(0,0,0,0);
+  const enIncap = SC.incapacidades.some(i => {
+    if (i.empId !== emp.id) return false;
+    if (i.status !== 'aprobado' && i.status !== 'activo') return false;
+    const ini = new Date(i.fechaInicio); ini.setHours(0,0,0,0);
+    const fin = new Date(ini); fin.setDate(fin.getDate() + (i.dias||1) - 1); fin.setHours(23,59,59,0);
+    return hoy2 >= ini && hoy2 <= fin;
+  });
+  if (enIncap) return 'incapacitado';
   return emp.status || 'activo';
 }
 
@@ -2398,7 +2443,7 @@ function processImportRows(rows, fileName) {
     // Normalizar fecha de ingreso (soporta serial Excel, DD/MM/YYYY, YYYY-MM-DD, etc.)
     if (emp.fechaIngreso) emp.fechaIngreso = normalizarFecha(emp.fechaIngreso);
     emp.salario = parseInt(String(emp.salario||'0').replace(/[^0-9]/g,''))||0;
-    const cmap={indefinido:'indefinido',fijo:'fijo',obra:'obra',aprendizaje:'Tercerizado'};
+    const cmap={indefinido:'indefinido',fijo:'fijo',obra:'obra',aprendizaje:'aprendizaje'};
     emp.contratoTipo = cmap[(emp.contratoTipo||'').toLowerCase()]||'indefinido';
     const smap={activo:'activo',retirado:'retirado',sancionado:'sancionado'};
     emp.status = smap[(emp.status||'').toLowerCase()]||'activo';
@@ -3162,7 +3207,10 @@ function savePermiso() {
 
   const finFinal = esPorHoras ? fechaHoras : (finReg || inicioReg);
   const diasVal  = esPorHoras ? (calcHoras(horaI, horaF) + 'h') : calcDias(inicioReg, finFinal);
-  const descontable = document.getElementById('perm-descontable')?.value || 'si';
+  const descontable  = document.getElementById('perm-descontable')?.value || 'si';
+  const tratamiento  = document.getElementById('perm-tratamiento')?.value || 'pendiente';
+  // Licencias remuneradas nunca descuentan
+  const esLicencia   = ['licencia_remunerada','licencia_maternidad','licencia_paternidad','licencia_no_remunerada'].includes(tipo);
 
   // For NON-horas: hora is captured but permiso is by day
   const horaIAll = document.getElementById('perm-hora-inicio')?.value || null;
@@ -3181,6 +3229,8 @@ function savePermiso() {
     horaFin:    horaFAll,
     dias: diasVal,
     descontable,
+    tratamiento,
+    esLicencia,
     motivo: document.getElementById('perm-motivo').value,
     fileData: permFileData,
     fileName: permFileName,
@@ -3309,33 +3359,52 @@ function openAdminIncapModal() {
 function saveIncapacidad() {
   const empId = SC.currentDocContext?.empId || document.getElementById('incap-emp').value || SC.user?.empId;
   if (!empId) { showNotif('Empleado requerido','error'); return; }
-  const diag = document.getElementById('incap-diag').value.trim();
+  const tipoIncap = document.getElementById('incap-tipo')?.value || 'enfermedad_general';
+  const esAT = tipoIncap === 'accidente_trabajo' || tipoIncap === 'enfermedad_laboral';
+  const diag    = document.getElementById('incap-diag').value.trim();
   const diasVal = parseInt(document.getElementById('incap-dias').value)||0;
-  const eps = document.getElementById('incap-eps').value.trim();
-  const fecha = document.getElementById('incap-fecha').value;
+  const eps     = document.getElementById('incap-eps').value.trim();
+  const fecha   = document.getElementById('incap-fecha').value;
   if (!diag || !diasVal || !eps || !fecha) { showNotif('Completa todos los campos','error'); return; }
 
-  // Si > 2 días: epicrisis obligatoria
-  if (diasVal > 2 && !SC.pendingFiles?.epicrisis) {
-    showNotif('⚠️ Incapacidades mayores a 2 días requieren adjuntar la epicrisis médica.', 'error');
-    return;
+  // AT: FURAT obligatorio
+  if (esAT && !SC.pendingFiles?.furat) {
+    showNotif('⚠️ Accidente de Trabajo requiere adjuntar el reporte FURAT a la ARL.', 'error'); return;
+  }
+  // Enfermedad general > 3 días: epicrisis obligatoria
+  if (!esAT && diasVal > 3 && !SC.pendingFiles?.epicrisis) {
+    showNotif('⚠️ Incapacidades mayores a 3 días requieren adjuntar la epicrisis médica.', 'error'); return;
   }
 
-  const empIncap = SC.empleados.find(x=>x.id===empId);
-  const certData = SC.pendingFiles?.certificado?.data||null;
-  const certName = SC.pendingFiles?.certificado?.name||null;
-  const epicData = SC.pendingFiles?.epicrisis?.data||null;
-  const epicName = SC.pendingFiles?.epicrisis?.name||null;
-  if(certData) uploadToDrive(certData, certName||'Incapacidad_'+diag+'.pdf', 'incapacidades', empIncap?.name||empId);
-  if(epicData) uploadToDrive(epicData, epicName||'Epicrisis_'+diag+'.pdf', 'incapacidades', empIncap?.name||empId);
+  const empIncap   = SC.empleados.find(x=>x.id===empId);
+  const certData   = SC.pendingFiles?.certificado?.data||null;
+  const certName   = SC.pendingFiles?.certificado?.name||null;
+  const epicData   = SC.pendingFiles?.epicrisis?.data||null;
+  const epicName   = SC.pendingFiles?.epicrisis?.name||null;
+  const furatData  = SC.pendingFiles?.furat?.data||null;
+  const furatName  = SC.pendingFiles?.furat?.name||null;
+
+  const folder = esAT ? 'incapacidades' : 'incapacidades';
+  if(certData)  uploadToDrive(certData,  certName ||'Incapacidad_'+diag+'.pdf',  folder, empIncap?.name||empId);
+  if(epicData)  uploadToDrive(epicData,  epicName ||'Epicrisis_'+diag+'.pdf',    folder, empIncap?.name||empId);
+  if(furatData) uploadToDrive(furatData, furatName||'FURAT_AT_'+fecha+'.pdf',    folder, empIncap?.name||empId);
+
+  // AT: también datos del accidente
+  const atDesc  = document.getElementById('incap-at-desc')?.value.trim()||'';
+  const atLugar = document.getElementById('incap-at-lugar')?.value.trim()||'';
+  const atFecha = document.getElementById('incap-at-fecha')?.value||'';
+
   SC.incapacidades.push({
     id: 'i' + Date.now(),
-    empId, diagnostico: diag,
+    empId, tipoIncap, diagnostico: diag,
     dias: diasVal, eps, fechaInicio: fecha,
     status: 'pendiente',
+    esAccidenteTrabajo: esAT,
+    atDescripcion: atDesc, atLugar, atFechaAccidente: atFecha,
     fileData: certData, fileName: certName,
     epicrisisData: epicData, epicrisisName: epicName,
-    requiereEpicrisis: diasVal > 2,
+    furatData: furatData, furatName,
+    requiereEpicrisis: !esAT && diasVal > 3,
     fecha: new Date().toLocaleDateString('es-CO'),
   });
   SC.pendingFiles = {};
@@ -4299,6 +4368,1218 @@ function abrirVincularEmpleado(candId) {
 }
 
 // ─── ÁREAS ────────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: PERFILES DE CARGO
+// ═══════════════════════════════════════════════════════════════
+
+function savePerfilesCargo() {
+  try { localStorage.setItem('sc_perfiles_cargo', JSON.stringify(SC.perfilesCargo)); } catch(e) {}
+}
+
+function getPerfilCargo(cargo) {
+  if (!SC.perfilesCargo[cargo]) {
+    SC.perfilesCargo[cargo] = {
+      salMin: 0, salMax: 0,
+      formacion:    '',
+      experiencia:  '',
+      herramientas: '',
+      tecnicas: [
+        { id:'t1', texto:'Conocimiento técnico del área',      peso:20, activo:true },
+        { id:'t2', texto:'Formación académica y certificaciones', peso:15, activo:true },
+        { id:'t3', texto:'Experiencia en roles similares',     peso:20, activo:true },
+        { id:'t4', texto:'Dominio de herramientas y software', peso:15, activo:true },
+      ],
+      blandas: [
+        { id:'b1', texto:'Comunicación efectiva',         peso:8, activo:true },
+        { id:'b2', texto:'Trabajo en equipo',             peso:7, activo:true },
+        { id:'b3', texto:'Resolución de problemas',       peso:7, activo:true },
+        { id:'b4', texto:'Liderazgo y autonomía',         peso:8, activo:true },
+      ],
+      personalidad: [
+        { id:'p1', texto:'Resiliencia bajo presión',      peso:0, activo:true },
+        { id:'p2', texto:'Proactividad',                   peso:0, activo:true },
+        { id:'p3', texto:'Ética y valores',               peso:0, activo:true },
+      ],
+      aprendizaje: [
+        { id:'a1', texto:'Curiosidad intelectual',        peso:0, activo:true },
+        { id:'a2', texto:'Agilidad mental / learnability',peso:0, activo:true },
+      ],
+    };
+  }
+  return SC.perfilesCargo[cargo];
+}
+
+// ── VISTA PRINCIPAL ──────────────────────────────────────────
+function renderPerfilesCargo() {
+  // Recopilar todos los cargos de todas las áreas
+  const todosLosCargos = [];
+  SC.areas.forEach(a => {
+    (a.positions||[]).forEach(p => {
+      if (!todosLosCargos.includes(p)) todosLosCargos.push(p);
+    });
+  });
+  todosLosCargos.sort();
+
+  const el = document.getElementById('view-perfiles-cargo');
+  if (!el) return;
+
+  const conPerfil    = todosLosCargos.filter(c => SC.perfilesCargo[c]);
+  const sinPerfil    = todosLosCargos.filter(c => !SC.perfilesCargo[c]);
+
+  // Estadísticas rápidas
+  const empsSalario = SC.empleados.filter(e => e.salario > 0);
+  const avgSalario  = empsSalario.length
+    ? Math.round(empsSalario.reduce((s,e)=>s+(e.salario||0),0)/empsSalario.length)
+    : 0;
+
+  el.innerHTML = `
+    <div class="section-header mb-4">
+      <div class="section-title">Perfiles de <span>Cargo</span></div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-sm" onclick="renderPerfilesCargo()">🔄 Actualizar</button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid mb-4" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-card">
+        <div class="stat-label">Total Cargos</div>
+        <div class="stat-value">${todosLosCargos.length}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Con Perfil Definido</div>
+        <div class="stat-value" style="color:var(--green)">${conPerfil.length}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Salario Promedio Empresa</div>
+        <div class="stat-value" style="font-size:16px">$${avgSalario.toLocaleString('es-CO')}</div>
+      </div>
+    </div>
+
+    <!-- Lista de cargos por área -->
+    ${SC.areas.map(area => {
+      const cargos = (area.positions||[]);
+      if (!cargos.length) return '';
+      return `<div class="glass-card p-4 mb-3">
+        <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">
+          ${area.icon} ${area.name}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          ${cargos.map(cargo => {
+            const perfil  = SC.perfilesCargo[cargo];
+            const emps    = SC.empleados.filter(e => e.cargo === cargo && e.salario > 0);
+            const avgEmp  = emps.length ? Math.round(emps.reduce((s,e)=>s+(e.salario||0),0)/emps.length) : 0;
+            const hasPerfil = !!perfil;
+            const pct = perfil ? calcPctPerfilCompleto(perfil) : 0;
+            return `<div style="border:1.5px solid ${hasPerfil?'var(--navy-border)':'#e5e7eb'};border-radius:10px;
+                         padding:10px 14px;min-width:200px;cursor:pointer;background:${hasPerfil?'var(--bg-card)':'rgba(0,0,0,.02)'};
+                         transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'"
+                         onmouseout="this.style.boxShadow='none'" onclick="openPerfilCargo('${cargo.replace(/'/g,"\\'")}')">
+              <div style="font-weight:600;font-size:13px;color:var(--navy);margin-bottom:4px">${cargo}</div>
+              ${hasPerfil ? `
+                <div style="font-size:11px;color:var(--text-muted)">
+                  $${(perfil.salMin||0).toLocaleString('es-CO')} – $${(perfil.salMax||0).toLocaleString('es-CO')}
+                </div>
+                ${avgEmp>0?`<div style="font-size:11px;color:var(--green)">Prom. actual: $${avgEmp.toLocaleString('es-CO')}</div>`:''}
+                <div style="margin-top:6px;height:4px;border-radius:2px;background:#e5e7eb">
+                  <div style="height:4px;border-radius:2px;background:var(--navy);width:${pct}%"></div>
+                </div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${pct}% completo</div>
+              ` : `<div style="font-size:11px;color:var(--text-muted)">Sin perfil — Click para crear</div>`}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function calcPctPerfilCompleto(perfil) {
+  let pts = 0;
+  if (perfil.salMin > 0) pts += 20;
+  if (perfil.formacion?.trim())    pts += 15;
+  if (perfil.experiencia?.trim())  pts += 15;
+  if (perfil.herramientas?.trim()) pts += 10;
+  const allItems = [...(perfil.tecnicas||[]),...(perfil.blandas||[]),...(perfil.personalidad||[]),...(perfil.aprendizaje||[])];
+  if (allItems.length > 0) pts += 40;
+  return Math.min(pts, 100);
+}
+
+// ── MODAL PERFIL DE CARGO ─────────────────────────────────────
+let _cargoEditando = '';
+
+function openPerfilCargo(cargo) {
+  _cargoEditando = cargo;
+  const perfil = getPerfilCargo(cargo);
+  const modal = document.getElementById('modal-perfil-cargo');
+  if (!modal) return;
+
+  document.getElementById('pc-title').textContent = '🎯 Perfil de Cargo: ' + cargo;
+  document.getElementById('pc-sal-min').value  = perfil.salMin  || '';
+  document.getElementById('pc-sal-max').value  = perfil.salMax  || '';
+  document.getElementById('pc-formacion').value    = perfil.formacion    || '';
+  document.getElementById('pc-experiencia').value  = perfil.experiencia  || '';
+  document.getElementById('pc-herramientas').value = perfil.herramientas || '';
+
+  renderChecklistPC('pc-tecnicas',    perfil.tecnicas,    'tecnicas');
+  renderChecklistPC('pc-blandas',     perfil.blandas,     'blandas');
+  renderChecklistPC('pc-personalidad',perfil.personalidad,'personalidad');
+  renderChecklistPC('pc-aprendizaje', perfil.aprendizaje, 'aprendizaje');
+
+  actualizarSalarioPonderado();
+  openModal('modal-perfil-cargo');
+}
+
+function renderChecklistPC(containerId, items, seccion) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = (items||[]).map((item,i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--navy-border)">
+      <input type="checkbox" ${item.activo?'checked':''} onchange="toggleItemPC('${seccion}',${i},this.checked)" style="width:16px;height:16px;cursor:pointer">
+      <input type="text" value="${item.texto}" onchange="updateItemTextoPC('${seccion}',${i},this.value)"
+        style="flex:1;border:none;background:transparent;font-size:13px;color:var(--navy);outline:none;cursor:text">
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+        <span style="font-size:11px;color:var(--text-muted)">Peso%</span>
+        <input type="number" value="${item.peso}" min="0" max="100"
+          onchange="updateItemPesoPC('${seccion}',${i},this.value)"
+          style="width:52px;padding:3px 6px;border:1px solid var(--navy-border);border-radius:6px;font-size:12px;text-align:center">
+      </div>
+      <button onclick="eliminarItemPC('${seccion}',${i})" style="border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0 4px">✕</button>
+    </div>
+  `).join('');
+  renderTotalPesoPC();
+}
+
+function toggleItemPC(sec, i, val) {
+  const p = getPerfilCargo(_cargoEditando);
+  p[sec][i].activo = val;
+  actualizarSalarioPonderado();
+}
+function updateItemTextoPC(sec, i, val) {
+  const p = getPerfilCargo(_cargoEditando);
+  p[sec][i].texto = val;
+}
+function updateItemPesoPC(sec, i, val) {
+  const p = getPerfilCargo(_cargoEditando);
+  p[sec][i].peso = parseFloat(val)||0;
+  renderTotalPesoPC();
+  actualizarSalarioPonderado();
+}
+function eliminarItemPC(sec, i) {
+  const p = getPerfilCargo(_cargoEditando);
+  p[sec].splice(i,1);
+  renderChecklistPC('pc-'+sec, p[sec], sec);
+}
+function agregarItemPC(sec) {
+  const p = getPerfilCargo(_cargoEditando);
+  const secMap = {tecnicas:'t',blandas:'b',personalidad:'p',aprendizaje:'a'};
+  p[sec].push({ id: secMap[sec]+'_'+Date.now(), texto:'Nueva competencia', peso:5, activo:true });
+  renderChecklistPC('pc-'+sec, p[sec], sec);
+}
+
+function renderTotalPesoPC() {
+  const p = getPerfilCargo(_cargoEditando);
+  const all = [...p.tecnicas,...p.blandas,...p.personalidad,...p.aprendizaje];
+  const total = all.filter(x=>x.activo).reduce((s,x)=>s+(x.peso||0),0);
+  const el = document.getElementById('pc-total-peso');
+  if (!el) return;
+  el.textContent = total + '%';
+  el.style.color = total === 100 ? 'var(--green)' : total > 100 ? 'var(--red)' : 'var(--amber)';
+}
+
+// ── CALCULADORA SALARIAL ─────────────────────────────────────
+function actualizarSalarioPonderado() {
+  const salMin = parseFloat(document.getElementById('pc-sal-min')?.value)||0;
+  const salMax = parseFloat(document.getElementById('pc-sal-max')?.value)||0;
+  if (!salMin || !salMax) {
+    const el = document.getElementById('pc-sal-calculado');
+    if (el) el.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Define el rango salarial para calcular</span>';
+    return;
+  }
+
+  const perfil = getPerfilCargo(_cargoEditando);
+  const all    = [...perfil.tecnicas,...perfil.blandas,...perfil.personalidad,...perfil.aprendizaje].filter(x=>x.activo);
+  const totalPeso = all.reduce((s,x)=>s+(x.peso||0),0);
+  if (!totalPeso) return;
+
+  // Leer scores del slider (0-100 por ítem)
+  let sumaWScore = 0;
+  all.forEach(item => {
+    const slider = document.getElementById('slider_'+item.id);
+    const score  = slider ? parseFloat(slider.value)/100 : 0.7; // default 70%
+    sumaWScore += score * (item.peso / totalPeso);
+  });
+
+  // Ajustes opcionales (% acumulados sobre el salario base calculado)
+  const adjVida       = parseFloat(document.getElementById('pc-adj-vida')?.value      || 0);
+  const adjEscasez    = parseFloat(document.getElementById('pc-adj-escasez')?.value   || 0);
+  const adjPresupuesto= parseFloat(document.getElementById('pc-adj-presupuesto')?.value|| 0);
+  const totalAdj      = adjVida + adjEscasez + adjPresupuesto;
+
+  const salBase  = Math.round(salMin + (salMax - salMin) * sumaWScore);
+  const salFinal = Math.round(salBase * (1 + totalAdj/100));
+  const salFinalClamped = Math.min(salMax * 1.15, Math.max(salMin * 0.85, salFinal)); // ±15% del rango
+  const pct      = Math.round(sumaWScore * 100);
+  const posRango = Math.min(100, Math.max(0, Math.round(((salFinalClamped - salMin)/(salMax - salMin))*100)));
+
+  const adjLabel = totalAdj !== 0
+    ? `<span style="font-size:11px;color:${totalAdj>0?'var(--green)':'var(--amber)'}">
+         (${totalAdj>0?'+':''}${totalAdj}% ajuste → base $${salBase.toLocaleString('es-CO')})
+       </span>`
+    : '';
+
+  const el = document.getElementById('pc-sal-calculado');
+  if (!el) return;
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">Puntaje ponderado</div>
+        <div style="font-size:22px;font-weight:800;color:var(--navy)">${pct}%</div>
+      </div>
+      <div style="flex:1;min-width:140px">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Posición en el rango</div>
+        <div style="height:8px;border-radius:4px;background:#e5e7eb;position:relative">
+          <div style="height:8px;border-radius:4px;background:var(--navy);width:${posRango}%;transition:width .3s"></div>
+          <div style="position:absolute;top:-4px;left:${Math.min(96,Math.max(2,posRango))}%;transform:translateX(-50%);
+               width:16px;height:16px;border-radius:50%;background:var(--navy);border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.2)"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:4px">
+          <span>$${salMin.toLocaleString('es-CO')}</span>
+          <span>$${salMax.toLocaleString('es-CO')}</span>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">💰 Salario sugerido</div>
+        <div style="font-size:24px;font-weight:800;color:var(--green)">$${salFinalClamped.toLocaleString('es-CO')}</div>
+        <div style="font-size:11px;margin-top:2px">${adjLabel}</div>
+        <div style="font-size:10px;color:var(--text-muted)">
+          ${salFinalClamped > (salMin+salMax)/2 ? '↑ Sobre el promedio del rango' : '↓ Bajo el promedio del rango'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSlidersPC() {
+  const perfil = getPerfilCargo(_cargoEditando);
+  const all    = [...perfil.tecnicas,...perfil.blandas,...perfil.personalidad,...perfil.aprendizaje].filter(x=>x.activo);
+  const el     = document.getElementById('pc-sliders');
+  if (!el) return;
+  if (!all.length) { el.innerHTML = '<div class="text-muted text-sm">Activa al menos un criterio para evaluar</div>'; return; }
+  el.innerHTML = all.map(item => `
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--navy);font-weight:500">${item.texto}</span>
+        <span style="color:var(--text-muted)">${item.peso}% peso · <span id="lbl_${item.id}">70</span>% score</span>
+      </div>
+      <input type="range" id="slider_${item.id}" min="0" max="100" value="70"
+        style="width:100%;accent-color:var(--navy)"
+        oninput="document.getElementById('lbl_${item.id}').textContent=this.value; actualizarSalarioPonderado()">
+    </div>
+  `).join('');
+  actualizarSalarioPonderado();
+}
+
+function savePerfilCargo() {
+  const perfil = getPerfilCargo(_cargoEditando);
+  perfil.salMin       = parseFloat(document.getElementById('pc-sal-min').value)||0;
+  perfil.salMax       = parseFloat(document.getElementById('pc-sal-max').value)||0;
+  perfil.formacion    = document.getElementById('pc-formacion').value.trim();
+  perfil.experiencia  = document.getElementById('pc-experiencia').value.trim();
+  perfil.herramientas = document.getElementById('pc-herramientas').value.trim();
+
+  // Validar pesos
+  const all = [...perfil.tecnicas,...perfil.blandas,...perfil.personalidad,...perfil.aprendizaje];
+  const total = all.filter(x=>x.activo).reduce((s,x)=>s+(x.peso||0),0);
+  if (total !== 100) {
+    showNotif('⚠️ Los pesos de los criterios activos deben sumar exactamente 100%. Actualmente suman ' + total + '%.', 'error');
+    return;
+  }
+  savePerfilesCargo();
+  closeModal('modal-perfil-cargo');
+  showNotif('✅ Perfil de "' + _cargoEditando + '" guardado');
+  renderPerfilesCargo();
+}
+
+window.openPerfilCargo      = openPerfilCargo;
+window.savePerfilCargo      = savePerfilCargo;
+window.renderPerfilesCargo  = renderPerfilesCargo;
+window.agregarItemPC        = agregarItemPC;
+window.eliminarItemPC       = eliminarItemPC;
+window.toggleItemPC         = toggleItemPC;
+window.updateItemTextoPC    = updateItemTextoPC;
+window.updateItemPesoPC     = updateItemPesoPC;
+window.actualizarSalarioPonderado = actualizarSalarioPonderado;
+window.renderSlidersPC      = renderSlidersPC;
+
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: HORARIOS DE EMPLEADOS
+// ═══════════════════════════════════════════════════════════════
+const TIPOS_HORARIO = {
+  fijo:     'Fijo (entrada/salida definida)',
+  flexible: 'Flexible (sin hora fija)',
+  rotativo: 'Rotativo (turnos)',
+};
+const DIAS_SEMANA = ['L','M','X','J','V','S','D'];
+const DIAS_LABEL  = { L:'Lunes',M:'Martes',X:'Miércoles',J:'Jueves',V:'Viernes',S:'Sábado',D:'Domingo' };
+
+function getHorarioEmp(empId) {
+  return SC.horarios[empId] || {
+    tipo: 'fijo', diasLaborales: ['L','M','X','J','V'],
+    entrada: '08:00', salida: '17:00', horasSemana: 48,
+    descanso: 60, descripcion: '',
+  };
+}
+function saveHorarioLocal() {
+  try { localStorage.setItem('sc_horarios', JSON.stringify(SC.horarios)); } catch(e) {}
+}
+
+function renderHorarioEmp(emp, container) {
+  if (!can('write') && SC.user?.role !== 'lider_rrhh') {
+    container.innerHTML = '<div class="text-muted p-4">Sin permisos para ver horarios.</div>'; return;
+  }
+  const h = getHorarioEmp(emp.id);
+  const diasChecks = DIAS_SEMANA.map(d =>
+    `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 8px;border-radius:6px;border:1.5px solid ${h.diasLaborales.includes(d)?'var(--navy)':'var(--navy-border)'};background:${h.diasLaborales.includes(d)?'var(--navy)':'transparent'};color:${h.diasLaborales.includes(d)?'#fff':'var(--navy)'}">
+      <input type="checkbox" ${h.diasLaborales.includes(d)?'checked':''} data-dia="${d}" onchange="toggleDiaHorario('${emp.id}',this)" style="display:none">
+      <span style="font-weight:700;font-size:13px">${d}</span>
+      <span style="font-size:10px">${DIAS_LABEL[d].slice(0,3)}</span>
+    </label>`
+  ).join('');
+
+  container.innerHTML = `
+    <div class="section-header mb-4">
+      <div class="section-title" style="font-size:16px">🕐 Horario <span>Laboral</span></div>
+      ${can('write') ? `<button class="btn btn-primary btn-sm" onclick="saveHorario('${emp.id}')">💾 Guardar Horario</button>` : ''}
+    </div>
+    <div class="glass-card p-5 mb-4">
+      <div class="form-grid mb-4">
+        <div class="form-group">
+          <label class="form-label">Tipo de Horario</label>
+          <select class="form-select" id="hor-tipo" onchange="toggleHorarioFields('${emp.id}')">
+            ${Object.entries(TIPOS_HORARIO).map(([k,v])=>`<option value="${k}" ${h.tipo===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Horas Semanales</label>
+          <input class="form-input" id="hor-horas" type="number" value="${h.horasSemana||48}" min="1" max="60">
+        </div>
+      </div>
+      <div id="hor-fijo-fields" style="${h.tipo==='fijo'?'':'display:none'}">
+        <div class="form-group mb-3">
+          <label class="form-label">Días laborales</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${diasChecks}</div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Hora de Entrada</label>
+            <input class="form-input" id="hor-entrada" type="time" value="${h.entrada||'08:00'}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Hora de Salida</label>
+            <input class="form-input" id="hor-salida" type="time" value="${h.salida||'17:00'}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Descanso (min)</label>
+            <input class="form-input" id="hor-descanso" type="number" value="${h.descanso||60}" min="0" max="120">
+          </div>
+        </div>
+      </div>
+      <div id="hor-flexible-fields" style="${h.tipo!=='fijo'?'':'display:none'}">
+        <div class="form-group">
+          <label class="form-label">Descripción del Horario</label>
+          <textarea class="form-textarea" id="hor-descripcion" rows="3"
+            placeholder="Ej: Turno rotativo 6am-2pm / 2pm-10pm / 10pm-6am. Definir con coordinador de área...">${h.descripcion||''}</textarea>
+        </div>
+      </div>
+    </div>
+    ${h.tipo === 'fijo' ? `
+    <div class="glass-card p-4">
+      <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:8px">📊 Resumen del horario</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px">
+        <span>📅 Días: <strong>${h.diasLaborales.join('-')}</strong></span>
+        <span>⏰ Entrada: <strong>${h.entrada}</strong></span>
+        <span>🔚 Salida: <strong>${h.salida}</strong></span>
+        <span>☕ Descanso: <strong>${h.descanso} min</strong></span>
+        <span>📈 Horas/semana: <strong>${h.horasSemana}h</strong></span>
+      </div>
+    </div>` : ''}
+  `;
+}
+
+function toggleDiaHorario(empId, checkbox) {
+  const dia = checkbox.dataset.dia;
+  const h = getHorarioEmp(empId);
+  if (!SC.horarios[empId]) SC.horarios[empId] = h;
+  if (checkbox.checked) {
+    if (!h.diasLaborales.includes(dia)) h.diasLaborales.push(dia);
+  } else {
+    h.diasLaborales = h.diasLaborales.filter(d => d !== dia);
+  }
+  // Re-render visually without full reload
+  const lbl = checkbox.closest('label');
+  if (lbl) {
+    lbl.style.background  = checkbox.checked ? 'var(--navy)' : 'transparent';
+    lbl.style.color       = checkbox.checked ? '#fff' : 'var(--navy)';
+    lbl.style.borderColor = checkbox.checked ? 'var(--navy)' : 'var(--navy-border)';
+  }
+}
+
+function toggleHorarioFields(empId) {
+  const tipo = document.getElementById('hor-tipo')?.value;
+  document.getElementById('hor-fijo-fields').style.display    = tipo === 'fijo' ? '' : 'none';
+  document.getElementById('hor-flexible-fields').style.display = tipo !== 'fijo' ? '' : 'none';
+}
+
+function saveHorario(empId) {
+  const tipo = document.getElementById('hor-tipo')?.value || 'fijo';
+  const existing = getHorarioEmp(empId);
+  SC.horarios[empId] = {
+    tipo,
+    diasLaborales: existing.diasLaborales || ['L','M','X','J','V'],
+    entrada:     document.getElementById('hor-entrada')?.value    || '08:00',
+    salida:      document.getElementById('hor-salida')?.value     || '17:00',
+    descanso:    parseInt(document.getElementById('hor-descanso')?.value||'60'),
+    horasSemana: parseInt(document.getElementById('hor-horas')?.value||'48'),
+    descripcion: document.getElementById('hor-descripcion')?.value|| '',
+  };
+  saveHorarioLocal();
+  showNotif('🕐 Horario guardado ✅');
+  const emp = SC.empleados.find(e => e.id === empId);
+  if (emp) renderHorarioEmp(emp, document.getElementById('emp-detail-content'));
+}
+
+window.renderHorarioEmp   = renderHorarioEmp;
+window.saveHorario        = saveHorario;
+window.toggleDiaHorario   = toggleDiaHorario;
+window.toggleHorarioFields= toggleHorarioFields;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: DESCUENTOS, PRÉSTAMOS Y ANTICIPOS
+// ═══════════════════════════════════════════════════════════════
+function saveDescuentosLocal() {
+  try { localStorage.setItem('sc_descuentos', JSON.stringify(SC.descuentos)); } catch(e) {}
+}
+
+function renderDescuentos() {
+  const el = document.getElementById('descuentos-content');
+  if (!el) return;
+  const ftipo   = document.getElementById('desc-filtro-tipo')?.value   || '';
+  const festado = document.getElementById('desc-filtro-estado')?.value || '';
+  let lista = SC.descuentos.filter(d => {
+    if (ftipo   && d.tipo   !== ftipo)   return false;
+    if (festado && d.estado !== festado) return false;
+    return true;
+  }).sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''));
+
+  const tipoLabel = { prestamo:'💰 Préstamo', anticipo:'📅 Anticipo', deduccion:'📉 Deducción',
+    descuento_voluntario:'✍️ Desc. Voluntario', libranza:'🏦 Libranza', otro:'📝 Otro' };
+  const estadoLabel = { pendiente_aprobacion:'⏳ Pendiente Aprobación', aprobado:'✅ Aprobado',
+    activo:'🔵 Activo', pagado:'✔️ Pagado', rechazado:'❌ Rechazado' };
+
+  if (!lista.length) {
+    el.innerHTML = '<div class="glass-card p-6 text-center text-muted">No hay descuentos registrados.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="glass-card p-4">
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Empleado</th><th>Tipo</th><th>Monto</th><th>Cuotas</th><th>Cuota/período</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead>
+      <tbody>
+        ${lista.map(d => {
+          const emp = SC.empleados.find(e => e.id === d.empId);
+          const cuota = d.cuotas > 0 ? Math.round(d.monto / d.cuotas) : d.monto;
+          const pagadas = d.cuotasPagadas || 0;
+          return `<tr>
+            <td style="font-weight:600">${emp?.name||'—'}</td>
+            <td>${tipoLabel[d.tipo]||d.tipo}</td>
+            <td style="font-weight:600">$${(d.monto||0).toLocaleString('es-CO')}</td>
+            <td>${d.cuotas>1?`${pagadas}/${d.cuotas}`:'—'}</td>
+            <td>$${cuota.toLocaleString('es-CO')}</td>
+            <td><span class="badge ${d.estado==='aprobado'||d.estado==='activo'?'badge-green':d.estado==='rechazado'?'badge-red':'badge-grey'}">${estadoLabel[d.estado]||d.estado}</span></td>
+            <td class="text-sm text-muted">${d.fecha||'—'}</td>
+            <td>
+              ${d.estado==='pendiente_aprobacion' && (SC.user?.role==='superadmin'||SC.user?.role==='gerencia')
+                ? `<button class="btn btn-ghost btn-sm" onclick="aprobarDescuento('${d.id}')">✅</button>
+                   <button class="btn btn-danger btn-sm" onclick="rechazarDescuento('${d.id}')">❌</button>` : ''}
+              ${d.estado==='activo' && can('write')
+                ? `<button class="btn btn-ghost btn-sm" onclick="registrarCuotaDesc('${d.id}')">💳 Cuota</button>` : ''}
+              ${can('write') ? `<button class="btn btn-ghost btn-sm" onclick="eliminarDescuento('${d.id}')">🗑</button>` : ''}
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+
+function renderDescuentosEmp(emp, container) {
+  const lista = SC.descuentos.filter(d => d.empId === emp.id)
+    .sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''));
+  const tipoLabel = { prestamo:'💰 Préstamo', anticipo:'📅 Anticipo', deduccion:'📉 Deducción',
+    descuento_voluntario:'✍️ Desc. Voluntario', libranza:'🏦 Libranza', otro:'📝 Otro' };
+  const totalActivo = lista.filter(d => d.estado==='activo'||d.estado==='aprobado')
+    .reduce((s,d) => s + (d.monto - (d.cuotasPagadas||0) * Math.round(d.monto/(d.cuotas||1))), 0);
+
+  container.innerHTML = `
+    <div class="section-header mb-4">
+      <div class="section-title" style="font-size:16px">💳 Descuentos & <span>Préstamos</span></div>
+      ${can('write') ? `<button class="btn btn-primary btn-sm" onclick="openNuevoDescuentoEmp('${emp.id}')">+ Nuevo</button>` : ''}
+    </div>
+    ${totalActivo > 0 ? `<div class="info-box mb-4" style="border-left:4px solid var(--amber)">
+      💰 Saldo pendiente de descuentos activos: <strong>$${totalActivo.toLocaleString('es-CO')}</strong>
+    </div>` : ''}
+    ${lista.length === 0 ? '<div class="text-muted text-sm p-4">Sin descuentos o préstamos registrados.</div>' :
+      lista.map(d => {
+        const cuota = d.cuotas > 0 ? Math.round(d.monto / d.cuotas) : d.monto;
+        const pagadas = d.cuotasPagadas || 0;
+        const pct = d.cuotas > 0 ? Math.round((pagadas / d.cuotas) * 100) : (d.estado==='pagado'?100:0);
+        return `<div class="perm-card mb-3">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+            <div>
+              <div style="font-weight:700;font-size:13px">${tipoLabel[d.tipo]||d.tipo}</div>
+              <div class="text-sm text-muted">$${(d.monto||0).toLocaleString('es-CO')} total · Cuota: $${cuota.toLocaleString('es-CO')} · ${d.descripcion||''}</div>
+              <div class="text-xs text-muted">${d.fecha||''}</div>
+            </div>
+            <span class="badge ${d.estado==='aprobado'||d.estado==='activo'?'badge-green':d.estado==='rechazado'?'badge-red':'badge-grey'}">${d.estado}</span>
+          </div>
+          ${d.cuotas > 1 ? `<div style="margin-top:8px">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:3px">
+              <span>Cuotas pagadas</span><span>${pagadas}/${d.cuotas} (${pct}%)</span>
+            </div>
+            <div style="height:6px;border-radius:3px;background:#e5e7eb">
+              <div style="height:6px;border-radius:3px;background:var(--green);width:${pct}%"></div>
+            </div>
+          </div>` : ''}
+        </div>`;
+      }).join('')}
+  `;
+}
+
+function openNuevoDescuento() {
+  const sel = document.getElementById('desc-emp');
+  sel.innerHTML = SC.empleados.filter(e=>e.status==='activo')
+    .map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  document.getElementById('desc-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('desc-descripcion').value = '';
+  document.getElementById('desc-monto').value = '';
+  document.getElementById('desc-cuotas').value = '1';
+  document.getElementById('desc-modal-title').textContent = '💳 Nuevo Descuento / Préstamo';
+  toggleDescuentoFields();
+  openModal('modal-descuento');
+}
+function openNuevoDescuentoEmp(empId) {
+  openNuevoDescuento();
+  document.getElementById('desc-emp').value = empId;
+}
+function toggleDescuentoFields() {
+  const tipo = document.getElementById('desc-tipo')?.value || 'prestamo';
+  const esPrestamo = tipo === 'prestamo' || tipo === 'libranza';
+  document.getElementById('desc-prestamo-fields').style.display = '';
+  document.getElementById('desc-aprobacion-nota').style.display = esPrestamo ? '' : 'none';
+  calcCuotaDesc();
+}
+function calcCuotaDesc() {
+  const monto  = parseFloat(document.getElementById('desc-monto')?.value||'0');
+  const cuotas = parseInt(document.getElementById('desc-cuotas')?.value||'1');
+  const cuota  = cuotas > 0 ? Math.round(monto / cuotas) : monto;
+  const el = document.getElementById('desc-cuota-calc');
+  if (el) el.value = cuota > 0 ? '$' + cuota.toLocaleString('es-CO') : '—';
+}
+function saveDescuento() {
+  const empId = document.getElementById('desc-emp').value;
+  const tipo  = document.getElementById('desc-tipo').value;
+  const monto = parseFloat(document.getElementById('desc-monto').value)||0;
+  const cuotas= parseInt(document.getElementById('desc-cuotas').value)||1;
+  const desc  = document.getElementById('desc-descripcion').value.trim();
+  const fecha = document.getElementById('desc-fecha').value;
+  if (!empId||!monto||!desc||!fecha) { showNotif('Completa todos los campos','error'); return; }
+
+  const esPrestamo = tipo === 'prestamo' || tipo === 'libranza';
+  const estado = esPrestamo ? 'pendiente_aprobacion' : 'activo';
+
+  SC.descuentos.push({
+    id: 'd' + Date.now(),
+    empId, tipo, monto, cuotas,
+    cuotasPagadas: 0,
+    descripcion: desc,
+    fecha,
+    estado,
+    aprobadoPor: null,
+    creadoPor: SC.user?.name || '',
+  });
+  saveDescuentosLocal();
+  closeModal('modal-descuento');
+  showNotif(esPrestamo ? '⏳ Préstamo registrado — pendiente de aprobación' : '💳 Descuento registrado ✅');
+  if (SC.currentView === 'descuentos') renderDescuentos();
+}
+function aprobarDescuento(id) {
+  const d = SC.descuentos.find(x=>x.id===id);
+  if (!d) return;
+  d.estado = 'activo';
+  d.aprobadoPor = SC.user?.name;
+  saveDescuentosLocal();
+  showNotif('✅ Préstamo aprobado');
+  renderDescuentos();
+}
+function rechazarDescuento(id) {
+  const d = SC.descuentos.find(x=>x.id===id);
+  if (!d) return;
+  d.estado = 'rechazado';
+  saveDescuentosLocal();
+  showNotif('❌ Préstamo rechazado');
+  renderDescuentos();
+}
+function registrarCuotaDesc(id) {
+  const d = SC.descuentos.find(x=>x.id===id);
+  if (!d) return;
+  d.cuotasPagadas = (d.cuotasPagadas||0) + 1;
+  if (d.cuotasPagadas >= d.cuotas) d.estado = 'pagado';
+  saveDescuentosLocal();
+  showNotif('💳 Cuota registrada — ' + d.cuotasPagadas + '/' + d.cuotas);
+  renderDescuentos();
+}
+function eliminarDescuento(id) {
+  if (!confirm('¿Eliminar este descuento?')) return;
+  SC.descuentos = SC.descuentos.filter(x=>x.id!==id);
+  saveDescuentosLocal();
+  renderDescuentos();
+}
+
+window.renderDescuentos     = renderDescuentos;
+window.renderDescuentosEmp  = renderDescuentosEmp;
+window.openNuevoDescuento   = openNuevoDescuento;
+window.openNuevoDescuentoEmp= openNuevoDescuentoEmp;
+window.saveDescuento        = saveDescuento;
+window.aprobarDescuento     = aprobarDescuento;
+window.rechazarDescuento    = rechazarDescuento;
+window.registrarCuotaDesc   = registrarCuotaDesc;
+window.eliminarDescuento    = eliminarDescuento;
+window.toggleDescuentoFields= toggleDescuentoFields;
+window.calcCuotaDesc        = calcCuotaDesc;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: NOVEDADES DIARIAS (Admin/RH + Lider Área)
+// ═══════════════════════════════════════════════════════════════
+function saveNovedadesAreaLocal() {
+  try { localStorage.setItem('sc_novedades_area', JSON.stringify(SC.novedadesArea)); } catch(e) {}
+}
+
+const TIPO_NOVEDAD_LABEL = {
+  ausencia:'🔴 Ausencia', tardanza:'⏰ Tardanza', salida_temprana:'🏃 Salida temprana',
+  hora_extra:'⭐ Hora extra', dominical:'🌟 Dominical/Festivo',
+  nocturno:'🌙 Nocturno', permiso:'📋 Permiso', incapacidad:'🏥 Incapacidad', otro:'📝 Otro',
+};
+const NOVEDAD_COLOR = {
+  ausencia:'var(--red)', tardanza:'var(--amber)', salida_temprana:'var(--amber)',
+  hora_extra:'var(--green)', dominical:'#9333ea', nocturno:'#1d4ed8',
+  permiso:'var(--blue)', incapacidad:'var(--amber)', otro:'var(--text-muted)',
+};
+
+function renderNovedadesDiarias() {
+  const el = document.getElementById('novedades-diarias-content');
+  if (!el) return;
+
+  const hoy    = new Date().toISOString().split('T')[0];
+  const fecha  = document.getElementById('nd-fecha-filtro')?.value || hoy;
+  const areaF  = document.getElementById('nd-area-filtro')?.value || '';
+
+  // Poblar select de áreas si está vacío
+  const areasSel = document.getElementById('nd-area-filtro');
+  if (areasSel && areasSel.options.length <= 1) {
+    SC.areas.forEach(a => areasSel.insertAdjacentHTML('beforeend',
+      `<option value="${a.id}">${a.icon} ${a.name}</option>`));
+  }
+
+  // Novedades del día (de todos los módulos + novedadesArea)
+  const novsArea = SC.novedadesArea.filter(n => n.fecha === fecha);
+  const permisosDia = SC.permisos.filter(p => p.inicio <= fecha && (p.fin||p.inicio) >= fecha);
+  const incapsDia   = SC.incapacidades.filter(i => {
+    if (!i.fechaInicio) return false;
+    const fin = new Date(i.fechaInicio); fin.setDate(fin.getDate() + (i.dias||1) - 1);
+    return i.fechaInicio <= fecha && fin.toISOString().split('T')[0] >= fecha;
+  });
+  const vacsDia = SC.vacaciones.filter(v => v.estado==='aprobado' && v.inicio <= fecha && v.fin >= fecha);
+
+  // Empleados activos filtrados por área
+  let emps = SC.empleados.filter(e => e.status === 'activo');
+  if (areaF) emps = emps.filter(e => String(e.areaId) === areaF);
+
+  // Resumen estadístico
+  const totalEmps    = emps.length;
+  const enVac        = emps.filter(e => vacsDia.some(v=>v.empId===e.id)).length;
+  const enIncap      = emps.filter(e => incapsDia.some(i=>i.empId===e.id)).length;
+  const conPermiso   = emps.filter(e => permisosDia.some(p=>p.empId===e.id&&p.status==='aprobado')).length;
+  const conNovedad   = emps.filter(e => novsArea.some(n=>n.empId===e.id)).length;
+
+  el.innerHTML = `
+    <div class="stats-grid mb-4" style="grid-template-columns:repeat(5,1fr)">
+      <div class="stat-card"><div class="stat-label">Total Empleados</div><div class="stat-value">${totalEmps}</div></div>
+      <div class="stat-card"><div class="stat-label">🏖 Vacaciones</div><div class="stat-value" style="color:var(--blue)">${enVac}</div></div>
+      <div class="stat-card"><div class="stat-label">🏥 Incapacitados</div><div class="stat-value" style="color:var(--amber)">${enIncap}</div></div>
+      <div class="stat-card"><div class="stat-label">📋 Con Permiso</div><div class="stat-value" style="color:var(--navy)">${conPermiso}</div></div>
+      <div class="stat-card"><div class="stat-label">📝 Novedades</div><div class="stat-value" style="color:var(--green)">${conNovedad}</div></div>
+    </div>
+    <div class="glass-card p-4">
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Empleado</th><th>Área</th><th>Estado del día</th><th>Horario</th><th>Novedad reportada</th></tr></thead>
+        <tbody>
+          ${emps.map(emp => {
+            const area    = SC.areas.find(a => a.id === emp.areaId);
+            const vac     = vacsDia.find(v => v.empId === emp.id);
+            const incap   = incapsDia.find(i => i.empId === emp.id);
+            const perm    = permisosDia.find(p => p.empId === emp.id && p.status === 'aprobado');
+            const novs    = novsArea.filter(n => n.empId === emp.id);
+            const horario = SC.horarios[emp.id];
+            const horStr  = horario?.tipo === 'fijo'
+              ? `${horario.entrada}–${horario.salida} (${horario.diasLaborales?.join('')})`
+              : horario?.tipo === 'flexible' ? 'Flexible' : horario?.tipo === 'rotativo' ? 'Rotativo' : '—';
+            let estadoDia = '<span style="color:var(--green)">✅ Normal</span>';
+            if (vac)  estadoDia = '<span style="color:var(--blue)">🏖 Vacaciones</span>';
+            if (incap) estadoDia = `<span style="color:var(--amber)">🏥 Incapacitado (${incap.dias}d)</span>`;
+            if (perm)  estadoDia = `<span style="color:var(--navy)">📋 ${tipoPermisoLabel(perm.tipo)}</span>`;
+            const novsStr = novs.length
+              ? novs.map(n => `<span style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};color:#fff;padding:2px 7px;border-radius:99px;font-size:11px;margin-right:4px">${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}${n.horas?' '+n.horas+'h':''}</span>`).join('')
+              : '<span class="text-muted" style="font-size:12px">Sin novedad</span>';
+            return `<tr>
+              <td style="font-weight:600">${emp.name}</td>
+              <td class="text-sm text-muted">${area?.icon||''} ${area?.name||'—'}</td>
+              <td>${estadoDia}</td>
+              <td style="font-size:12px;color:var(--text-muted)">${horStr}</td>
+              <td>${novsStr}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+}
+
+// ── Novedades Área (Líder) ────────────────────────────────────
+function renderNovedadesAreaCalendar() {
+  const el = document.getElementById('novedades-area-calendar');
+  if (!el) return;
+  const areaId  = SC.user?.areaId;
+  const misEmps = SC.empleados.filter(e => areaId ? e.areaId === areaId : true);
+
+  // Calendario del mes actual
+  const hoy   = new Date();
+  const año   = hoy.getFullYear();
+  const mes   = hoy.getMonth();
+  const dias  = new Date(año, mes+1, 0).getDate();
+  const primerDia = new Date(año, mes, 1).getDay();
+  const mesStr = hoy.toLocaleString('es-CO', { month:'long', year:'numeric' });
+
+  // Cabecera del calendario
+  const cabDias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  let calGrid = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:12px">
+    ${cabDias.map(d=>`<div style="text-align:center;font-size:11px;font-weight:700;color:var(--text-muted);padding:4px">${d}</div>`).join('')}
+  `;
+  // Celdas vacías al inicio
+  for (let i = 0; i < primerDia; i++) calGrid += '<div></div>';
+  // Días
+  for (let d = 1; d <= dias; d++) {
+    const fechaStr = `${año}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const novsDelDia = SC.novedadesArea.filter(n => n.fecha === fechaStr && misEmps.some(e=>e.id===n.empId));
+    const esHoy = d === hoy.getDate();
+    calGrid += `<div onclick="openNuevaNovedadAreaFecha('${fechaStr}')"
+      style="border:1.5px solid ${esHoy?'var(--navy)':'var(--navy-border)'};border-radius:8px;padding:6px;
+             min-height:52px;cursor:pointer;background:${esHoy?'rgba(17,31,77,.05)':'transparent'};
+             transition:background .15s" onmouseover="this.style.background='rgba(17,31,77,.08)'"
+             onmouseout="this.style.background='${esHoy?'rgba(17,31,77,.05)':'transparent'}'">
+      <div style="font-size:12px;font-weight:${esHoy?'800':'600'};color:${esHoy?'var(--navy)':'inherit'};margin-bottom:3px">${d}</div>
+      ${novsDelDia.slice(0,3).map(n=>`<div style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};border-radius:3px;padding:1px 4px;font-size:9px;color:#fff;margin-bottom:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
+        ${SC.empleados.find(e=>e.id===n.empId)?.name?.split(' ')[0]||'?'} · ${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}
+      </div>`).join('')}
+      ${novsDelDia.length>3?`<div style="font-size:9px;color:var(--text-muted)">+${novsDelDia.length-3} más</div>`:''}
+    </div>`;
+  }
+  calGrid += '</div>';
+
+  el.innerHTML = `
+    <div class="glass-card p-4 mb-4">
+      <div style="font-weight:700;font-size:16px;color:var(--navy);text-transform:capitalize;margin-bottom:12px">
+        📅 ${mesStr}
+      </div>
+      ${calGrid}
+    </div>
+    <div class="glass-card p-4">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">Novedades recientes</div>
+      ${SC.novedadesArea.filter(n=>misEmps.some(e=>e.id===n.empId)).slice(-20).reverse().map(n=>{
+        const emp = SC.empleados.find(e=>e.id===n.empId);
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--navy-border)">
+          <div>
+            <span style="font-weight:600;font-size:13px">${emp?.name||'—'}</span>
+            <span style="font-size:11px;color:var(--text-muted);margin-left:8px">${n.fecha}</span>
+            <div><span style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};color:#fff;padding:2px 7px;border-radius:99px;font-size:11px">${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}${n.horas?' · '+n.horas+'h':''}</span></div>
+          </div>
+          ${can('write')?`<button onclick="eliminarNovedadArea('${n.id}')" style="border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:16px">×</button>`:''}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function openNuevaNovedadArea() { openNuevaNovedadAreaFecha(new Date().toISOString().split('T')[0]); }
+function openNuevaNovedadAreaFecha(fecha) {
+  const areaId  = SC.user?.areaId;
+  const misEmps = SC.empleados.filter(e => (areaId ? e.areaId===areaId : true) && e.status==='activo');
+  const sel = document.getElementById('nav-emp');
+  sel.innerHTML = misEmps.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  document.getElementById('nav-fecha').value = fecha;
+  document.getElementById('nav-horas').value = '';
+  document.getElementById('nav-descripcion').value = '';
+  openModal('modal-novedad-area');
+}
+
+function saveNovedadArea() {
+  const empId = document.getElementById('nav-emp').value;
+  const fecha = document.getElementById('nav-fecha').value;
+  const tipo  = document.getElementById('nav-tipo').value;
+  const horas = parseFloat(document.getElementById('nav-horas').value)||null;
+  const desc  = document.getElementById('nav-descripcion').value.trim();
+  if (!empId||!fecha||!tipo) { showNotif('Completa los campos requeridos','error'); return; }
+  SC.novedadesArea.push({
+    id: 'na' + Date.now(),
+    empId, fecha, tipo, horas, descripcion: desc,
+    reportadoPor: SC.user?.name || '',
+    areaId: SC.user?.areaId || null,
+  });
+  saveNovedadesAreaLocal();
+  closeModal('modal-novedad-area');
+  showNotif('📅 Novedad reportada ✅');
+  if (SC.currentView === 'novedades-area')    renderNovedadesAreaCalendar();
+  if (SC.currentView === 'novedades-diarias') renderNovedadesDiarias();
+}
+
+function eliminarNovedadArea(id) {
+  SC.novedadesArea = SC.novedadesArea.filter(n => n.id !== id);
+  saveNovedadesAreaLocal();
+  renderNovedadesAreaCalendar();
+}
+
+window.renderNovedadesDiarias      = renderNovedadesDiarias;
+window.renderNovedadesAreaCalendar = renderNovedadesAreaCalendar;
+window.openNuevaNovedadArea        = openNuevaNovedadArea;
+window.openNuevaNovedadAreaFecha   = openNuevaNovedadAreaFecha;
+window.saveNovedadArea             = saveNovedadArea;
+window.eliminarNovedadArea         = eliminarNovedadArea;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: BIOMÉTRICO Y MALLA SIN MARCA
+// ═══════════════════════════════════════════════════════════════
+let _bioData = [];
+
+function openCargarBiometrico() {
+  _bioData = [];
+  document.getElementById('bio-file-lbl').textContent = '📂 Arrastra el archivo biométrico aquí o haz clic';
+  document.getElementById('bio-preview').innerHTML = '';
+  document.getElementById('bio-btn-procesar').style.display = 'none';
+  const hoy = new Date();
+  document.getElementById('bio-fecha-ini').value = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+  document.getElementById('bio-fecha-fin').value = hoy.toISOString().split('T')[0];
+  openModal('modal-biometrico');
+}
+
+function handleBioFile(e) {
+  const file = e.target.files[0]; if (!file) return;
+  document.getElementById('bio-file-lbl').textContent = '⏳ Procesando ' + file.name + '...';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      if (file.name.endsWith('.csv')) {
+        _bioData = parseBioCSV(ev.target.result);
+      } else {
+        // Excel: usar XLSX si está disponible
+        if (typeof XLSX !== 'undefined') {
+          const wb = XLSX.read(ev.target.result, {type:'array', cellDates:true});
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+          _bioData = parseBioRows(rows);
+        } else {
+          showNotif('SheetJS no disponible. Usa CSV.', 'error'); return;
+        }
+      }
+      renderBioPreview();
+    } catch(err) { showNotif('Error leyendo archivo: ' + err.message, 'error'); }
+  };
+  if (file.name.endsWith('.csv')) reader.readAsText(ev => {}, 'utf-8');
+  reader.readAsArrayBuffer(file);
+}
+function handleBioDrop(e) {
+  e.preventDefault();
+  document.getElementById('bio-file').files = e.dataTransfer.files;
+  handleBioFile({ target: { files: e.dataTransfer.files } });
+}
+
+function parseBioCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l=>l.trim());
+  if (!lines.length) return [];
+  const sep = (text.match(/;/g)||[]).length > (text.match(/,/g)||[]).length ? ';' : ',';
+  const headers = lines[0].split(sep).map(h=>h.trim().toLowerCase());
+  return lines.slice(1).map(line => {
+    const vals = line.split(sep);
+    const obj = {};
+    headers.forEach((h,i) => { obj[h] = (vals[i]||'').trim(); });
+    return normBioRow(obj);
+  }).filter(r => r.cedula);
+}
+function parseBioRows(rows) {
+  if (!rows.length) return [];
+  const headers = rows[0].map(h=>String(h||'').trim().toLowerCase());
+  return rows.slice(1).filter(r=>r.some(v=>v)).map(r => {
+    const obj = {};
+    headers.forEach((h,i) => { obj[h] = r[i] != null ? String(r[i]).trim() : ''; });
+    return normBioRow(obj);
+  }).filter(r => r.cedula);
+}
+function normBioRow(obj) {
+  // Mapeo flexible de columnas del biométrico
+  const cedula = obj['cedula']||obj['documento']||obj['cc']||obj['id']||obj['empleado id']||'';
+  const nombre = obj['nombre']||obj['name']||obj['empleado']||'';
+  const fecha  = normalizarFecha(obj['fecha']||obj['date']||obj['dia']||'');
+  const entrada= obj['entrada']||obj['hora entrada']||obj['clock in']||obj['ingreso']||'';
+  const salida = obj['salida']||obj['hora salida']||obj['clock out']||obj['egreso']||'';
+  return { cedula: String(cedula).replace(/[.\s,]/g,''), nombre, fecha, entrada, salida };
+}
+
+function renderBioPreview() {
+  const el = document.getElementById('bio-preview');
+  if (!_bioData.length) { el.innerHTML = '<div class="text-muted text-sm">Sin datos válidos</div>'; return; }
+  document.getElementById('bio-file-lbl').textContent = '✅ ' + _bioData.length + ' registros cargados';
+  document.getElementById('bio-btn-procesar').style.display = '';
+  el.innerHTML = `<div class="info-box" style="font-size:12px">
+    ✅ ${_bioData.length} registros biométricos listos para procesar.
+    Empleados únicos: ${[...new Set(_bioData.map(r=>r.cedula))].length}
+  </div>`;
+}
+
+function procesarBiometrico() {
+  const fechaIni = document.getElementById('bio-fecha-ini').value;
+  const fechaFin = document.getElementById('bio-fecha-fin').value;
+  // Cruzar con novedadesArea y empleados para detectar inconsistencias
+  const resultado = [];
+  const cedulas = [...new Set(_bioData.map(r=>r.cedula))];
+  cedulas.forEach(ced => {
+    const emp = SC.empleados.find(e => String(e.cedula||'').replace(/[.\s,]/g,'') === ced);
+    const marcas = _bioData.filter(r => r.cedula === ced && r.fecha >= fechaIni && r.fecha <= fechaFin);
+    const novsEmp = SC.novedadesArea.filter(n => n.empId === emp?.id && n.fecha >= fechaIni && n.fecha <= fechaFin);
+    const incapsEmp = SC.incapacidades.filter(i => i.empId === emp?.id);
+    // Detectar marcas sin novedad y viceversa
+    marcas.forEach(m => {
+      const tieneNov = novsEmp.some(n => n.fecha === m.fecha);
+      const tieneIncap = incapsEmp.some(i => {
+        const fin = new Date(i.fechaInicio); fin.setDate(fin.getDate() + (i.dias||1) - 1);
+        return i.fechaInicio <= m.fecha && fin.toISOString().split('T')[0] >= m.fecha;
+      });
+      resultado.push({ emp: emp?.name||ced, fecha: m.fecha, entrada: m.entrada, salida: m.salida, novedad: tieneNov ? '✅' : tieneIncap ? '🏥' : '—' });
+    });
+  });
+  // Mostrar resultado
+  document.getElementById('bio-preview').innerHTML = `
+    <div style="max-height:300px;overflow-y:auto">
+    <table class="data-table" style="font-size:11px">
+      <thead><tr><th>Empleado</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Novedad</th></tr></thead>
+      <tbody>${resultado.slice(0,200).map(r=>`<tr>
+        <td>${r.emp}</td><td>${r.fecha}</td><td>${r.entrada}</td><td>${r.salida}</td>
+        <td style="text-align:center">${r.novedad}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div class="text-xs text-muted mt-2">${resultado.length} registros procesados${resultado.length>200?' (mostrando primeros 200)':''}</div>`;
+  showNotif('✅ Biométrico procesado — ' + resultado.length + ' registros');
+}
+
+// ── Malla sin marca ─────────────────────────────────────────
+function openCargarMalla() {
+  const sel = document.getElementById('malla-emp');
+  sel.innerHTML = SC.empleados.filter(e=>e.status==='activo')
+    .map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  const hoy = new Date();
+  document.getElementById('malla-periodo').value = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+  generarMallaGrid();
+  openModal('modal-malla');
+}
+function generarMallaGrid() {
+  const periodo = document.getElementById('malla-periodo')?.value || '';
+  if (!periodo) return;
+  const [anio, mes] = periodo.split('-').map(Number);
+  const diasMes = new Date(anio, mes, 0).getDate();
+  const el = document.getElementById('malla-grid');
+  if (!el) return;
+  const tiposH = ['normal','hora_extra','dominical','nocturno','ausencia','permiso','incapacidad'];
+  const tiposL  = { normal:'Normal',hora_extra:'H.Extra',dominical:'Dom/Fest',nocturno:'Noct.',ausencia:'Ausencia',permiso:'Permiso',incapacidad:'Incapacidad' };
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+    <table class="data-table" style="font-size:11px;min-width:${diasMes*52+120}px">
+      <thead>
+        <tr>
+          <th style="min-width:100px">Tipo</th>
+          ${Array.from({length:diasMes},(_,i)=>`<th style="min-width:48px;text-align:center">${i+1}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${tiposH.map(tipo=>`<tr>
+          <td style="font-weight:600;font-size:11px">${tiposL[tipo]}</td>
+          ${Array.from({length:diasMes},(_,i)=>{
+            const fecha=`${anio}-${String(mes).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`;
+            const dow = new Date(fecha).getDay();
+            const esFest = dow===0||dow===6;
+            return `<td style="padding:2px;background:${esFest&&tipo==='normal'?'rgba(0,0,0,.04)':''}">
+              <input type="number" id="malla_${tipo}_${i+1}" min="0" max="24" step="0.5"
+                placeholder="${tipo==='normal'?'8':''}"
+                style="width:100%;padding:3px;border:1px solid var(--navy-border);border-radius:4px;text-align:center;font-size:11px">
+            </td>`;
+          }).join('')}
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+function saveMalla() {
+  const empId   = document.getElementById('malla-emp').value;
+  const periodo = document.getElementById('malla-periodo').value;
+  if (!empId || !periodo) { showNotif('Selecciona empleado y período','error'); return; }
+  const [anio, mes] = periodo.split('-').map(Number);
+  const diasMes = new Date(anio, mes, 0).getDate();
+  const tipos = ['normal','hora_extra','dominical','nocturno','ausencia','permiso','incapacidad'];
+  const malla = {};
+  tipos.forEach(tipo => {
+    malla[tipo] = [];
+    for (let d = 1; d <= diasMes; d++) {
+      const v = parseFloat(document.getElementById(`malla_${tipo}_${d}`)?.value||'0');
+      malla[tipo].push(v);
+    }
+  });
+  if (!SC.mallas) SC.mallas = {};
+  if (!SC.mallas[empId]) SC.mallas[empId] = {};
+  SC.mallas[empId][periodo] = malla;
+  try { localStorage.setItem('sc_mallas', JSON.stringify(SC.mallas)); } catch(e) {}
+  closeModal('modal-malla');
+  showNotif('📋 Malla guardada para ' + periodo + ' ✅');
+}
+
+window.openCargarBiometrico   = openCargarBiometrico;
+window.handleBioFile          = handleBioFile;
+window.handleBioDrop          = handleBioDrop;
+window.procesarBiometrico     = procesarBiometrico;
+window.openCargarMalla        = openCargarMalla;
+window.generarMallaGrid       = generarMallaGrid;
+window.saveMalla              = saveMalla;
+
+// ── SECCIÓN PERFIL DE CARGO EN DETALLE EMPLEADO ──────────────
+function buildPerfilCargoEmpHTML(emp) {
+  // Solo visible para roles admin
+  if (SC.user?.role === 'empleado') return '';
+  if (SC.user?.role === 'gerencia') return '';  // gerencia puede ver solo lectura si se quiere habilitar
+  const perfil = SC.perfilesCargo[emp.cargo];
+  if (!perfil) {
+    return `<div class="glass-card p-4 mt-4" style="border-left:4px solid #e5e7eb">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--navy)">🎯 Perfil del Cargo: ${emp.cargo}</div>
+          <div class="text-sm text-muted mt-1">Este cargo aún no tiene perfil definido.</div>
+        </div>
+        ${can('write') ? `<button class="btn btn-ghost btn-sm" onclick="showView('perfiles-cargo');openPerfilCargo('${emp.cargo.replace(/'/g,"\\'")}')">
+          + Crear Perfil
+        </button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  const salario    = emp.salario || 0;
+  const salMin     = perfil.salMin || 0;
+  const salMax     = perfil.salMax || 0;
+  const enRango    = salMin > 0 && salMax > 0 && salario >= salMin && salario <= salMax;
+  const bajoRango  = salMin > 0 && salario < salMin && salario > 0;
+  const sobreRango = salMax > 0 && salario > salMax;
+  const posicion   = (salMin > 0 && salMax > salMin)
+    ? Math.min(100, Math.max(0, Math.round(((salario - salMin) / (salMax - salMin)) * 100)))
+    : null;
+
+  const rangoColor = enRango ? 'var(--green)' : bajoRango ? 'var(--amber)' : sobreRango ? 'var(--red)' : 'var(--text-muted)';
+  const rangoLabel = enRango ? '✅ Dentro del rango' : bajoRango ? '⚠️ Por debajo del mínimo' : sobreRango ? '🔴 Por encima del máximo' : '—';
+
+  const allItems = [
+    ...(perfil.tecnicas||[]).map(i=>({...i, cat:'Técnica'})),
+    ...(perfil.blandas||[]).map(i=>({...i, cat:'Blanda'})),
+    ...(perfil.personalidad||[]).map(i=>({...i, cat:'Personalidad'})),
+    ...(perfil.aprendizaje||[]).map(i=>({...i, cat:'Aprendizaje'})),
+  ].filter(i => i.activo);
+
+  return `<div class="glass-card p-4 mt-4" style="border-left:4px solid var(--navy)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-weight:700;font-size:14px;color:var(--navy)">🎯 Perfil del Cargo: ${emp.cargo}</div>
+        <div class="text-xs text-muted mt-1">Rango: $${salMin.toLocaleString('es-CO')} – $${salMax.toLocaleString('es-CO')}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12px;font-weight:600;color:${rangoColor}">${rangoLabel}</span>
+        ${can('write') ? `<button class="btn btn-ghost btn-sm" onclick="openPerfilCargo('${emp.cargo.replace(/'/g,"\\'")}')">✏️ Editar Perfil</button>` : ''}
+      </div>
+    </div>
+
+    ${posicion !== null ? `
+    <div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:4px">
+        <span>Posición salarial en el rango</span>
+        <span style="font-weight:600;color:${rangoColor}">${posicion}%</span>
+      </div>
+      <div style="height:8px;border-radius:4px;background:#e5e7eb;position:relative">
+        <div style="height:8px;border-radius:4px;background:var(--navy);width:${posicion}%;transition:width .3s"></div>
+        <div style="position:absolute;top:-4px;left:${Math.min(96,Math.max(2,posicion))}%;transform:translateX(-50%);
+             width:16px;height:16px;border-radius:50%;background:${rangoColor};border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.2)"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:3px">
+        <span>$${salMin.toLocaleString('es-CO')}</span>
+        <span style="font-weight:600">Actual: $${salario.toLocaleString('es-CO')}</span>
+        <span>$${salMax.toLocaleString('es-CO')}</span>
+      </div>
+    </div>` : ''}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      ${perfil.formacion ? `<div style="padding:8px 10px;background:rgba(17,31,77,.04);border-radius:8px">
+        <div style="font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📚 Formación</div>
+        <div style="font-size:12px;color:var(--navy)">${perfil.formacion}</div>
+      </div>` : ''}
+      ${perfil.experiencia ? `<div style="padding:8px 10px;background:rgba(17,31,77,.04);border-radius:8px">
+        <div style="font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">💼 Experiencia</div>
+        <div style="font-size:12px;color:var(--navy)">${perfil.experiencia}</div>
+      </div>` : ''}
+      ${perfil.herramientas ? `<div style="padding:8px 10px;background:rgba(17,31,77,.04);border-radius:8px">
+        <div style="font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🛠 Herramientas</div>
+        <div style="font-size:12px;color:var(--navy)">${perfil.herramientas}</div>
+      </div>` : ''}
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${allItems.map(item => `
+        <span style="background:rgba(17,31,77,.07);padding:4px 10px;border-radius:99px;font-size:11px;color:var(--navy)">
+          ${item.texto} <span style="color:var(--text-muted);font-size:10px">(${item.peso}%)</span>
+        </span>`).join('')}
+    </div>
+
+    ${can('write') ? `
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--navy-border)">
+      <button class="btn btn-ghost btn-sm" onclick="abrirCalculadoraSalarialEmp('${emp.id}')">
+        🧮 Calcular salario sugerido para este empleado
+      </button>
+    </div>` : ''}
+  </div>`;
+}
+
+function abrirCalculadoraSalarialEmp(empId) {
+  const emp = SC.empleados.find(e => e.id === empId);
+  if (!emp || !SC.perfilesCargo[emp.cargo]) {
+    showNotif('Define primero el perfil del cargo', 'error'); return;
+  }
+  openPerfilCargo(emp.cargo);
+  setTimeout(() => { renderSlidersPC(); }, 300);
+}
+window.buildPerfilCargoEmpHTML      = buildPerfilCargoEmpHTML;
+window.abrirCalculadoraSalarialEmp  = abrirCalculadoraSalarialEmp;
+
 function renderAreas() {
   const tb = document.getElementById('areas-tbody');
   tb.innerHTML = '';
@@ -4474,13 +5755,18 @@ function scoreBarHtml(score) {
 }
 
 function statusBadge(s) {
-  const map = { pendiente:'badge-grey', evaluacion:'badge-amber', aprobado:'badge-green', rechazado:'badge-red', activo:'badge-green', inactivo:'badge-red', retirado:'badge-red', sancionado:'badge-amber', cerrado:'badge-grey', en_proceso:'badge-amber', archivado:'badge-grey', apto:'badge-green', no_apto:'badge-red', en_vacaciones:'badge-blue' };
-  const labels = { pendiente:'Pendiente', evaluacion:'Evaluación', aprobado:'Aprobado', rechazado:'Rechazado', activo:'Activo', inactivo:'Inactivo', retirado:'Retirado', sancionado:'Sancionado', cerrado:'Cerrado', en_proceso:'En Proceso', archivado:'Archivado', disfrutado:'Disfrutado', apto:'Apto', no_apto:'No Apto', en_vacaciones:'En Vacaciones' };
+  const map = { pendiente:'badge-grey', evaluacion:'badge-amber', aprobado:'badge-green', rechazado:'badge-red', activo:'badge-green', inactivo:'badge-red', retirado:'badge-red', sancionado:'badge-amber', cerrado:'badge-grey', en_proceso:'badge-amber', archivado:'badge-grey', apto:'badge-green', no_apto:'badge-red', en_vacaciones:'badge-blue', incapacitado:'badge-amber', at:'badge-red' };
+  const labels = { pendiente:'Pendiente', evaluacion:'Evaluación', aprobado:'Aprobado', rechazado:'Rechazado', activo:'Activo', inactivo:'Inactivo', retirado:'Retirado', sancionado:'Sancionado', cerrado:'Cerrado', en_proceso:'En Proceso', archivado:'Archivado', disfrutado:'Disfrutado', apto:'Apto', no_apto:'No Apto', en_vacaciones:'🏖 Vacaciones', incapacitado:'🏥 Incapacitado', at:'🚨 Accidente Trabajo' };
   return `<span class="badge ${map[s]||'badge-grey'}">${labels[s]||s}</span>`;
 }
 
 function tipoPermisoLabel(t) {
-  const map = { calamidad:'Calamidad Doméstica', medico:'Cita Médica', personal:'Asunto Personal', luto:'Luto', maternidad:'Maternidad/Paternidad', horas:'Permiso por Horas', otro:'Otro' };
+  const map = {
+    calamidad:'Calamidad Doméstica', medico:'Cita Médica', personal:'Asunto Personal',
+    luto:'Luto', maternidad:'Maternidad/Paternidad', horas:'Permiso por Horas', otro:'Otro',
+    licencia_remunerada:'Licencia Remunerada', licencia_no_remunerada:'Licencia No Remunerada',
+    licencia_maternidad:'Licencia Maternidad (17 sem)', licencia_paternidad:'Licencia Paternidad (8 días)',
+  };
   return map[t]||t;
 }
 
