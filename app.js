@@ -282,8 +282,8 @@ const EMPRESAS_SEED = [
 
 const AREAS_SEED = [
   { id:1,  icon:'🔧', name:'Taller & Mecánica',              desc:'Special Pits.',
-    positions:['Mecánico General','Técnico de Diagnóstico','Jefe de Taller','Auxiliar de Taller','Auxiliar de Lavado','Promotor','Ingeniero Mecanico'],
-    subareas:['Mecanica','Almacen','Lavado','Datailing','Otro'] },
+    positions:['Director Postventa','Almacenista','Mecánico General','Técnico de Mantenimiento','Jefe de Taller','Auxiliar de Taller','Auxiliar de Lavado','Promotor','Ingeniero Mecanico'],
+    subareas:['Mecanica','Almacen','Lavado','Datailing','Otro','Taller'] },
   { id:2,  icon:'💼', name:'Ventas & Comercial',              desc:'Gestión de ventas y relaciones con clientes.',
     positions:['Asesor Comercial','Director de Ventas','Lider de ventas','Promotor'],
     subareas:['Special nuevos','Special Usados'] },
@@ -294,31 +294,31 @@ const AREAS_SEED = [
     positions:['Desarrollador Full-Stack','Director TI','Soporte TI'],
     subareas:[] },
   { id:5,  icon:'💰', name:'Finanzas & Contabilidad',         desc:'Gestión financiera y contabilidad.',
-    positions:['Contador','Analista Financiero','Auxiliar Contable'],
+    positions:['Contador','Analista Contable','Auxiliar Contable','Coordinador Contable','Gerente Contable','Cajero'],
     subareas:[] },
   { id:6,  icon:'👥', name:'Recursos Humanos & HSEQ',         desc:'Selección y gestión del talento humano.',
-    positions:['Lider RRHH','Analista RRHH','Abogada Laboral','Lider HSEQ'],
+    positions:['Lider RRHH','Analista RRHH','Lider HSEQ','Analista SST','Coordinador HSEQ','Lider RRHH & HSEQ'],
     subareas:['RRHH','HSEQ','SIG'] },
   { id:7,  icon:'📣', name:'Marketing & Medios',              desc:'Estrategia de marca y comunicación.',
-    positions:['Director de Marketing','Community Manager','Diseñador Gráfico'],
+    positions:['Director de Marketing','Community Manager','Diseñador Gráfico','Analista Marketing','Director Creativo'],
     subareas:[] },
   { id:8,  icon:'🛡️', name:'Financiamiento y Seguros',        desc:'Venta de Seguros y Financiacion.',
-    positions:['Asesor comercial','Gestor de Garantías','Auditor Interno'],
+    positions:['Asesor comercial','Gestor de Garantías','Auditor Interno','Director Seguros'],
     subareas:[] },
   { id:9,  icon:'⚖️', name:'Legal & Cumplimiento',            desc:'Asesoría jurídica y cumplimiento normativo.',
-    positions:['Abogado Corporativo','Analista Legal','Oficial de Cumplimiento'],
+    positions:['Abogado','Analista Legal','Abogada Laboralista','Oficial de Cumplimiento'],
     subareas:[] },
   { id:10, icon:'🏗️', name:'Infraestructura',                 desc:'Mantenimiento de instalaciones y activos.',
-    positions:['Jefe de Mantenimiento','Técnico de Instalaciones','Auxiliar de servicios administrativos'],
+    positions:['Jefe de Mantenimiento','Técnico de Instalaciones','Auxiliar de servicios administrativos','Todero','Electricista'],
     subareas:[] },
   { id:11, icon:'🎓', name:'Academy',                          desc:'Desarrollo de competencias y entrenamiento.',
-    positions:['Director de Academia','Instructor Técnico','Capacitador'],
+    positions:['Director de Academy','Instructor Técnico','Capacitador','Formador'],
     subareas:[] },
   { id:12, icon:'🚗', name:'Operaciones',                      desc:'Administración del parque automotriz.',
-    positions:['Director de Operaciones','Coordinador de Operaciones','Lider de Operaciones','Analista de Operaciones','Conductor'],
+    positions:['Director de Operaciones','Coordinador de Operaciones','Lider de Operaciones','Analista de Operaciones','Conductor','Analista de Seguimiento'],
     subareas:[] },
   { id:13, icon:'📊', name:'Gerencia General',                 desc:'Alta dirección y estrategia corporativa.',
-    positions:['Director Ejecutivo','Gerente General','Asistente de Gerencia'],
+    positions:['Director Ejecutivo','Gerente General','Asistente de Gerencia','Asistente Administrativo','CEO'],
     subareas:[] },
 ];
 
@@ -2398,7 +2398,7 @@ function processImportRows(rows, fileName) {
     // Normalizar fecha de ingreso (soporta serial Excel, DD/MM/YYYY, YYYY-MM-DD, etc.)
     if (emp.fechaIngreso) emp.fechaIngreso = normalizarFecha(emp.fechaIngreso);
     emp.salario = parseInt(String(emp.salario||'0').replace(/[^0-9]/g,''))||0;
-    const cmap={indefinido:'indefinido',fijo:'fijo',obra:'obra',aprendizaje:'aprendizaje'};
+    const cmap={indefinido:'indefinido',fijo:'fijo',obra:'obra',aprendizaje:'Tercerizado'};
     emp.contratoTipo = cmap[(emp.contratoTipo||'').toLowerCase()]||'indefinido';
     const smap={activo:'activo',retirado:'retirado',sancionado:'sancionado'};
     emp.status = smap[(emp.status||'').toLowerCase()]||'activo';
