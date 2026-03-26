@@ -366,7 +366,7 @@ let SB_OK = false;
 
 // Helper: llamada a Supabase REST API
 async function sbFetch(table, method='GET', body=null, filters='', extraHeaders={}) {
-  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') return null;
+  if (!SB_URL) return null;
   try {
     const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
       method,
@@ -394,43 +394,52 @@ async function sbFetch(table, method='GET', body=null, filters='', extraHeaders=
 
 // ─── CARGAR DATOS DESDE SUPABASE ─────────────────────────────
 async function loadFromSupabase() {
-  if (!SB_URL || SB_URL === 'https://qivcmhjlmbgeeajfuxyv.supabase.co') {
-    console.log('Supabase no configurado — usando datos locales');
-    return false;
-  }
+  if (!SB_URL) { return false; }
 
-  showLoadingBanner('Cargando datos desde la base de datos...');
+  showLoadingBanner('Cargando datos desde Supabase...');
 
   try {
-    const [emps, perms, incaps, vacs, discs, cands, bodega] = await Promise.all([
-      sbFetch('empleados', 'GET', null, '?select=*&order=created_at.asc'),
-      sbFetch('permisos',  'GET', null, '?select=*&order=created_at.asc'),
-      sbFetch('incapacidades','GET',null,'?select=*&order=created_at.asc'),
-      sbFetch('vacaciones','GET', null, '?select=*&order=created_at.asc'),
-      sbFetch('disciplinarios','GET',null,'?select=*&order=created_at.asc'),
-      sbFetch('candidatos','GET', null, '?select=*&order=created_at.asc'),
-      sbFetch('bodega',    'GET', null, '?select=*&order=created_at.asc'),
-    ]);
+    // Cargar cada tabla individualmente para que un error en una no bloquee las demás
+    const emps  = await sbFetch('empleados',      'GET', null, '?select=*&order=created_at.asc');
+    const perms = await sbFetch('permisos',        'GET', null, '?select=*&order=created_at.asc');
+    const incaps= await sbFetch('incapacidades',   'GET', null, '?select=*&order=created_at.asc');
+    const vacs  = await sbFetch('vacaciones',      'GET', null, '?select=*&order=created_at.asc');
+    const discs = await sbFetch('disciplinarios',  'GET', null, '?select=*&order=created_at.asc');
+    const cands = await sbFetch('candidatos',      'GET', null, '?select=*&order=created_at.asc');
+    const bod   = await sbFetch('bodega',          'GET', null, '?select=*&order=created_at.asc');
 
+    // Si empleados respondió (aunque sea vacío), Supabase está OK
     if (emps !== null) {
       SC.empleados      = emps.map(dbToEmp);
-      SC.permisos       = (perms||[]).map(dbToPerm);
-      SC.incapacidades  = (incaps||[]).map(dbToIncap);
-      SC.vacaciones     = (vacs||[]).map(dbToVac);
-      SC.disciplinarios = (discs||[]).map(dbToDisc);
-      SC.candidatos     = (cands||[]).map(dbToCand);
-      SC.bodega         = (bodega||[]).map(dbToBodega);
+      SC.permisos       = (perms  ||[]).map(dbToPerm);
+      SC.incapacidades  = (incaps ||[]).map(dbToIncap);
+      SC.vacaciones     = (vacs   ||[]).map(dbToVac);
+      SC.disciplinarios = (discs  ||[]).map(dbToDisc);
+      SC.candidatos     = (cands  ||[]).map(dbToCand);
+      SC.bodega         = (bod    ||[]).map(dbToBodega);
       SB_OK = true;
       hideLoadingBanner();
-      console.log('✅ Datos cargados desde Supabase:', emps.length, 'empleados');
-      // Sincronizar a Sheets solo si hay empleados reales
-      if (emps.length > 0) {
-        setTimeout(() => { if(GAPI_CONFIG.connected) syncAllToSheets(); }, 2000);
+      console.log('✅ Supabase OK —', SC.empleados.length, 'empleados cargados');
+      // Reconstruir usuarios de empleados en memoria
+      SC.empleados.forEach(emp => {
+        const cedNorm = String(emp.cedula||'').replace(/[.\s,]/g,'');
+        if (cedNorm && !USERS.find(u => u.user === cedNorm)) {
+          USERS.push({
+            id: 'u_' + emp.id,
+            user: cedNorm, pass: cedNorm,
+            name: emp.name, role: 'empleado',
+            roleName: 'Empleado', canWrite: true, empId: emp.id,
+          });
+        }
+      });
+      persistUsers();
+      if (SC.empleados.length > 0) {
+        setTimeout(() => { if(GAPI_CONFIG.connected) syncAllToSheets(); }, 3000);
       }
       return true;
     }
   } catch(e) {
-    console.warn('Error cargando Supabase:', e);
+    console.warn('Error conectando Supabase:', e.message || e);
   }
 
   hideLoadingBanner();
@@ -581,9 +590,7 @@ async function sbSavePermiso(p) {
     status:p.status||'pendiente', file_name:p.fileName||null,
     fecha:p.fecha||'', fecha_hora:p.fechaHora||'',
   };
-  const exists = await sbFetch('permisos','GET',null,`?id=eq.${p.id}`);
-  if (exists && exists.length > 0) await sbFetch('permisos','PATCH',row,`?id=eq.${p.id}`);
-  else await sbFetch('permisos','POST',row);
+  await sbFetch('permisos','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 async function sbSaveIncap(i) {
   if (!SB_OK) return;
@@ -593,9 +600,7 @@ async function sbSaveIncap(i) {
     status:i.status||'pendiente', requiere_epicrisis:i.requiereEpicrisis||false,
     file_name:i.fileName||null, epicrisis_name:i.epicrisisName||null, fecha:i.fecha||'',
   };
-  const exists = await sbFetch('incapacidades','GET',null,`?id=eq.${i.id}`);
-  if (exists && exists.length > 0) await sbFetch('incapacidades','PATCH',row,`?id=eq.${i.id}`);
-  else await sbFetch('incapacidades','POST',row);
+  await sbFetch('incapacidades','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 async function sbSaveVac(v) {
   if (!SB_OK) return;
@@ -604,9 +609,7 @@ async function sbSaveVac(v) {
     dias:v.dias, obs:v.obs||'', estado:v.estado||'pendiente',
     fecha_solicitud:v.fechaSolicitud||'',
   };
-  const exists = await sbFetch('vacaciones','GET',null,`?id=eq.${v.id}`);
-  if (exists && exists.length > 0) await sbFetch('vacaciones','PATCH',row,`?id=eq.${v.id}`);
-  else await sbFetch('vacaciones','POST',row);
+  await sbFetch('vacaciones','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 async function sbSaveDisc(d) {
   if (!SB_OK) return;
@@ -617,9 +620,7 @@ async function sbSaveDisc(d) {
     notificado:d.notificado||false, respuesta_emp:d.respuestaEmp||'',
     creado_por:d.creadoPor||'', fecha_creacion:d.fechaCreacion||'',
   };
-  const exists = await sbFetch('disciplinarios','GET',null,`?id=eq.${d.id}`);
-  if (exists && exists.length > 0) await sbFetch('disciplinarios','PATCH',row,`?id=eq.${d.id}`);
-  else await sbFetch('disciplinarios','POST',row);
+  await sbFetch('disciplinarios','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 async function sbSaveCand(c) {
   if (!SB_OK) return;
@@ -629,9 +630,7 @@ async function sbSaveCand(c) {
     status:c.status||'pendiente', exp:c.exp||'', score:c.score||null,
     notes:c.notes||'', fecha:c.date||'',
   };
-  const exists = await sbFetch('candidatos','GET',null,`?id=eq.${c.id}`);
-  if (exists && exists.length > 0) await sbFetch('candidatos','PATCH',row,`?id=eq.${c.id}`);
-  else await sbFetch('candidatos','POST',row);
+  await sbFetch('candidatos','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 async function sbSaveBodega(b) {
   if (!SB_OK) return;
@@ -639,9 +638,7 @@ async function sbSaveBodega(b) {
     id:b.id, name:b.name, cat:b.cat, descripcion:b.desc||'',
     fecha:b.fecha||'', file_name:b.fileName||null,
   };
-  const exists = await sbFetch('bodega','GET',null,`?id=eq.${b.id}`);
-  if (exists && exists.length > 0) await sbFetch('bodega','PATCH',row,`?id=eq.${b.id}`);
-  else await sbFetch('bodega','POST',row);
+  await sbFetch('bodega','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 
 // ─── BANNERS DE ESTADO ────────────────────────────────────────
@@ -740,15 +737,15 @@ async function init() {
   const sbLoaded = await loadFromSupabase();
 
   if (!sbLoaded) {
-    // Fallback: datos demo locales
-    console.log('Usando datos demo locales (Supabase no disponible)');
-    SC.empleados     = EMPLEADOS_SEED.map(e => ({...e, docs:{...e.docs}, contratos:[...e.contratos], nomina:[...e.nomina], extractos:[...e.extractos]}));
-    SC.candidatos    = [...CANDIDATOS_SEED];
-    SC.bodega        = [...BODEGA_SEED];
-    SC.permisos      = [...PERMISOS_SEED];
-    SC.incapacidades = [...INCAP_SEED];
+    // Sin Supabase: iniciar con datos vacíos
+    console.log('Supabase no disponible — sin datos');
+    SC.empleados      = [];
+    SC.candidatos     = [];
+    SC.bodega         = [...BODEGA_SEED];
+    SC.permisos       = [];
+    SC.incapacidades  = [];
     SC.disciplinarios = [];
-    SC.vacaciones    = [];
+    SC.vacaciones     = [];
   }
 
   // Restaurar sesión activa
@@ -1213,16 +1210,27 @@ function renderDashboard() {
 
 // ─── EMPLEADOS ────────────────────────────────────────────
 function renderEmpleados() {
-  const q = (document.getElementById('search-emp')?.value||'').toLowerCase();
-  const fa = document.getElementById('filter-area')?.value;
-  const fe = document.getElementById('filter-empresa')?.value;
+  const q  = (document.getElementById('search-emp')?.value||'').toLowerCase();
+  const fa = document.getElementById('filter-area')?.value    || '';
+  const fe = document.getElementById('filter-empresa')?.value || '';
+  const fs = document.getElementById('filter-status')?.value  || '';
 
   let filtered = SC.empleados.filter(e => {
-    if (q && !e.name.toLowerCase().includes(q) && !e.cedula.includes(q)) return false;
+    if (q  && !e.name.toLowerCase().includes(q) && !(e.cedula||'').includes(q) && !(e.cargo||'').toLowerCase().includes(q)) return false;
     if (fa && String(e.areaId) !== fa) return false;
     if (fe && e.empresaId !== fe) return false;
+    if (fs && (e.status||'activo') !== fs) return false;
     return true;
   });
+
+  // Mostrar contador de resultados
+  const counter = document.getElementById('emp-counter');
+  if (counter) {
+    const total = SC.empleados.length;
+    counter.textContent = filtered.length === total
+      ? total + ' empleados'
+      : filtered.length + ' de ' + total + ' empleados';
+  }
 
   const grid = document.getElementById('empleados-grid');
   if (!filtered.length) {
