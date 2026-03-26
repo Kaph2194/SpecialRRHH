@@ -801,24 +801,29 @@ function doLoginEmpleado() {
     return;
   }
 
-  // Buscar en USERS (usuario = cédula limpia)
+  // Buscar usuario persistido (puede tener contraseña cambiada)
   let found = USERS.find(x => x.role === 'empleado' && x.user === cedNorm);
 
-  // Si no está en USERS (cargó desde Supabase pero no hay user local), crear dinámicamente
+  // Si no está en USERS, crear dinámicamente desde SC.empleados
   if (!found) {
-    const emp = SC.empleados.find(e => normalizeCedula(e.cedula) === cedNorm);
+    // Puede haber múltiples registros con la misma cédula (recontrataciones)
+    // Prioridad: activo > sancionado > más reciente retirado
+    const todos = SC.empleados.filter(e => normalizeCedula(e.cedula) === cedNorm);
+    const emp = todos.find(e => e.status === 'activo')
+             || todos.find(e => e.status === 'sancionado')
+             || todos.sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''))[0];
     if (emp) {
       found = {
         id:       'u_' + emp.id,
         user:     cedNorm,
-        pass:     cedNorm,   // contraseña inicial = cédula
+        pass:     cedNorm,
         name:     emp.name,
         role:     'empleado',
         roleName: 'Empleado',
         canWrite: true,
         empId:    emp.id,
+        cedula:   cedNorm,
       };
-      // Guardar en USERS y persistir para próximas sesiones
       if (!USERS.find(u => u.user === cedNorm)) {
         USERS.push(found);
         persistUsers();
@@ -1489,10 +1494,17 @@ function saveEmpleado() {
     }
     SC._editEmpId = null;
   } else {
-    // Create mode
+    // Create mode — verificar si ya existe contrato activo en misma empresa
+    const cedNormCreate = cedula.replace(/[^a-zA-Z0-9]/g,'');
+    const dupActivoMismaEmp = SC.empleados.find(e =>
+      e.cedula === cedula && e.empresaId === empresaId && e.status === 'activo'
+    );
+    if (dupActivoMismaEmp) {
+      showNotif('Este empleado ya tiene un contrato ACTIVO en esta empresa. Edita el registro existente.', 'error');
+      return;
+    }
     const newEmpId = 'e' + Date.now();
-    // Usuario: cédula limpia (solo números y letras, sin puntos ni espacios)
-    const userLogin = cedula.replace(/[^a-zA-Z0-9]/g,'');
+    const userLogin = cedNormCreate;
     // Guardar foto si se subió
     const empFoto = SC._pendingEmpFoto || null;
     SC._pendingEmpFoto = null;
@@ -1524,20 +1536,25 @@ function saveEmpleado() {
       areaFisica:         document.getElementById('em-area-fisica')?.value||'',
     });
     // Crear usuario automáticamente
-    const existeUser = USERS.find(u => u.user === userLogin);
+    const existeUser = USERS.find(u => u.user === userLogin && u.role === 'empleado');
     if (!existeUser) {
+      // Primera vez que este empleado se registra
       USERS.push({
         id:       'u' + Date.now(),
-        user:     userLogin,       // usuario = cédula limpia
-        pass:     userLogin,       // contraseña = cédula limpia (empleado debe cambiarla)
+        user:     userLogin,
+        pass:     userLogin,   // contraseña inicial = cédula
         name:     name,
         role:     'empleado',
         roleName: 'Empleado',
         canWrite: true,
         empId:    newEmpId,
       });
-      persistUsers();
+    } else {
+      // Ya tiene usuario (recontratación) — actualizar empId al nuevo contrato activo
+      existeUser.empId = newEmpId;
+      existeUser.name  = name;
     }
+    persistUsers();
     showNotif(`Empleado "${name}" registrado ✅ · Usuario: ${userLogin} · Contraseña: ${userLogin}`);
     showCredsModal(name, userLogin);
     // Si venía de un candidato, archivarlo y verificar cupo
@@ -2302,7 +2319,12 @@ function processImportRows(rows, fileName) {
     if(emp.pctArl && arlMap[emp.pctArl.trim().toLowerCase()]) {
       emp.pctArl = arlMap[emp.pctArl.trim().toLowerCase()];
     }
-    if(SC.empleados.find(e=>e.cedula===emp.cedula)) emp._warnings.push('Cédula ya existe — se actualizará');
+    const empsMismaCed = SC.empleados.filter(e=>e.cedula===emp.cedula);
+    if(empsMismaCed.length > 0) {
+      const mismEmpresa = empsMismaCed.find(x=>x.empresaId===(emp.empresaId||null));
+      if(mismEmpresa) emp._warnings.push('Ya existe en esta empresa — se actualizará');
+      else emp._warnings.push('Recontratación: se creará nuevo registro (empresa diferente)');
+    }
     return emp;
   });
 
@@ -2352,34 +2374,50 @@ function confirmImport() {
   const validos = (SC._importPreview||[]).filter(e=>!e._errores.length);
   let nuevos=0, actualizados=0;
   validos.forEach(e=>{
-    const dup = SC.empleados.find(x=>x.cedula===e.cedula);
+    const cedNorm = String(e.cedula||'').replace(/[.\s,]/g,'');
     const data={
       name:e.name, cedula:e.cedula, email:e.email||'', phone:e.phone||'',
       areaId:e.areaId||null, cargo:e.cargo||'', empresaId:e.empresaId||null,
       fechaIngreso:e.fechaIngreso||'', contratoTipo:e.contratoTipo,
       salario:e.salario||0, dir:e.dir||'', status:e.status,
-      // Seguridad Social
       eps:e.eps||'', afp:e.afp||'', arl:e.arl||'',
       pctArl:e.pctArl||'', cajaCom:e.cajaCom||'', fondoCes:e.fondoCes||'',
-      // Bancario
       banco:e.banco||'', numeroCuenta:e.numeroCuenta||'', tipoCuenta:e.tipoCuenta||'',
-      // Beneficios
       subsidioTransporte: e.subsidioTransporte !== undefined ? e.subsidioTransporte : true,
       dotacion:           e.dotacion           !== undefined ? e.dotacion           : true,
       areaFisica:         e.areaFisica||'',
     };
-    if (dup) {
-      Object.assign(dup, data);
-      sbSaveEmpleado(dup);   // ← guardar actualización en Supabase
+
+    // Buscar vinculación exacta: misma cédula Y misma empresa
+    const dupExacto = SC.empleados.find(x =>
+      x.cedula === e.cedula && x.empresaId === (e.empresaId||null)
+    );
+    // También buscar vinculación activa con esa cédula (cualquier empresa)
+    const dupActivo = SC.empleados.find(x =>
+      x.cedula === e.cedula && x.status === 'activo'
+    );
+
+    if (dupExacto) {
+      // Misma empresa → actualizar el registro existente
+      Object.assign(dupExacto, data);
+      sbSaveEmpleado(dupExacto);
+      // Actualizar empId en USERS si el usuario ya existe
+      const userObj = USERS.find(u => u.user === cedNorm && u.role === 'empleado');
+      if (userObj && dupActivo?.id === dupExacto.id) userObj.empId = dupExacto.id;
       actualizados++;
     } else {
+      // Nueva vinculación (empresa diferente o primera vez)
+      // Preservar contraseña si el empleado ya tenía usuario
+      const existingUser = USERS.find(u => u.user === cedNorm && u.role === 'empleado');
       const newId  = 'e' + Date.now() + (Math.random()*1000|0);
       const newEmp = {id:newId, ...data, docs:{}, contratos:[], nomina:[], extractos:[], fotoData:null};
       SC.empleados.push(newEmp);
-      sbSaveEmpleado(newEmp);   // ← guardar nuevo en Supabase
-      // Crear usuario con cédula como contraseña
-      const uLogin = e.cedula.replace(/[^a-zA-Z0-9]/g,'');
-      if (!USERS.find(u => u.user === uLogin)) {
+      sbSaveEmpleado(newEmp);
+      const uLogin = cedNorm;
+      if (existingUser) {
+        // Ya tiene usuario — actualizar empId solo si está activo
+        if (data.status === 'activo') existingUser.empId = newId;
+      } else {
         USERS.push({id:'u'+Date.now()+(Math.random()*100|0), user:uLogin, pass:uLogin,
           name:e.name, role:'empleado', roleName:'Empleado', canWrite:true, empId:newId});
       }
@@ -3201,6 +3239,41 @@ function saveIncapacidad() {
 // ─── PORTAL EMPLEADO ─────────────────────────────────────
 let currentPortalTab = 'perfil';
 
+// Construye el HTML del historial de vinculaciones anteriores del empleado
+function buildHistorialHtml(emp) {
+  const historial = SC.empleados
+    .filter(e => e.cedula === emp.cedula && e.id !== emp.id)
+    .sort((a, b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
+  if (!historial.length) return '';
+
+  const statusBadgeH = s => {
+    if (s === 'retirado')   return '<span class="badge badge-grey">Retirado</span>';
+    if (s === 'activo')     return '<span class="badge badge-green">Activo</span>';
+    if (s === 'sancionado') return '<span class="badge badge-red">Sancionado</span>';
+    return '<span class="badge">' + s + '</span>';
+  };
+
+  const rows = historial.map(h => {
+    const hEmpresa = SC.empresas.find(em => em.id === h.empresaId);
+    return '<div style="display:flex;justify-content:space-between;align-items:center;' +
+           'padding:10px 0;border-bottom:1px solid var(--navy-border)">' +
+      '<div>' +
+        '<div style="font-weight:600;font-size:13px">' + h.cargo + ' &mdash; ' + (hEmpresa?.name||'—') + '</div>' +
+        '<div class="text-xs text-muted">Ingreso: ' + (h.fechaIngreso||'—') +
+          (h.fechaRetiro ? ' &nbsp;·&nbsp; Retiro: ' + h.fechaRetiro : '') + '</div>' +
+      '</div>' +
+      statusBadgeH(h.status||'activo') +
+    '</div>';
+  }).join('');
+
+  return '<div class="glass-card p-5 mt-4">' +
+    '<div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">' +
+      '📋 Historial de Vinculaciones' +
+    '</div>' +
+    rows +
+  '</div>';
+}
+
 function renderPortal(tab) {
   currentPortalTab = tab;
   document.querySelectorAll('#view-portal .tab').forEach(t => t.className = 'tab');
@@ -3238,10 +3311,12 @@ function renderPortal(tab) {
           ${infoRow('Cédula', emp.cedula)}${infoRow('Email', emp.email)}${infoRow('Teléfono', emp.phone)}${infoRow('Dirección', emp.dir)}
         </div>
         <div class="glass-card p-5">
-          <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:14px">Datos Laborales</div>
+          <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:14px">Vinculación Actual</div>
           ${infoRow('Área', area?.name||'—')}${infoRow('Cargo', emp.cargo)}${infoRow('Empresa', empresa?.name||'—')}${infoRow('Ingreso', emp.fechaIngreso)}${infoRow('Tipo Contrato', emp.contratoTipo)}${infoRow('Salario', '$ '+(emp.salario||0).toLocaleString('es-CO'))}
         </div>
-      </div>`;
+      </div>
+      ${buildHistorialHtml(emp)}
+      `;
   }
   else if (tab === 'docs') {
     if (!emp) { content.innerHTML = '<div class="text-muted">No se encontró empleado.</div>'; return; }
