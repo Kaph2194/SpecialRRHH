@@ -349,6 +349,7 @@
         <div class="tab" onclick="portalTab('permisos',this)">🗓 Mis Permisos</div>
         <div class="tab" onclick="portalTab('incap',this)">🏥 Mis Incapacidades</div>
         <div class="tab" onclick="portalTab('disciplinarios',this)">⚖️ Disciplinarios</div>
+        <div class="tab" onclick="portalTab('contratos',this)">📄 Mis Contratos</div>
         <div class="tab" onclick="portalTab('vacaciones',this)">🏖 Mis Vacaciones</div>
         <div class="tab" onclick="portalTab('bodega',this)">🗄 Bodega</div>
       </div>
@@ -565,6 +566,11 @@
       </div>
       <div id="novedades-diarias-content"></div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- MALLA DE TURNOS (Líder de Área)                  -->
+    <!-- No necesita contenedor propio — usa view-novedades-area -->
+    <!-- ═══════════════════════════════════════════════ -->
 
     <!-- ═══════════════════════════════════════════════ -->
     <!-- NOVEDADES ÁREA (Líder de Área)                   -->
@@ -1761,7 +1767,7 @@
 
 <!-- Modal Gestión de Usuarios Admin -->
 <div class="modal-overlay" id="modal-user-mgmt">
-  <div class="modal" style="max-width:640px">
+  <div class="modal" style="max-width:780px;max-height:90vh;overflow-y:auto">
     <div class="modal-header">
       <div>
         <div class="modal-title">👤 Gestión de Usuarios</div>
@@ -2068,9 +2074,14 @@ function updateTratamientoPermiso() {
   } else {
     if (notaEl) notaEl.style.display = 'none';
   }
-  // Solo admins/RH ven este campo
+  // Solo admins/RH ven estos campos
   const role = window.SC?.user?.role;
-  if (grupoEl) grupoEl.style.display = (role === 'empleado') ? 'none' : '';
+  const soloRH = (role !== 'empleado');
+  if (grupoEl) grupoEl.style.display = soloRH ? '' : 'none';
+  const descGrp = document.getElementById('perm-descontable-group');
+  if (descGrp) descGrp.style.display = soloRH ? '' : 'none';
+  const notaEl2 = document.getElementById('perm-tratamiento-nota');
+  if (notaEl2 && !soloRH) notaEl2.style.display = 'none';
 }
 
 function toggleIncapAT() {
@@ -2105,10 +2116,11 @@ function togglePermisoHoras() {
   document.getElementById('perm-horas-fields').style.display = esPorHoras ? '' : 'none';
   // Descontable: only show for admin/analista roles (hidden for employees who don't have access to this)
   const descGroup = document.getElementById('perm-descontable-group');
-  if (descGroup) {
-    const role = window.SC?.user?.role;
-    descGroup.style.display = (role === 'empleado') ? 'none' : '';
-  }
+  const roleU = window.SC?.user?.role;
+  const soloRH2 = roleU !== 'empleado';
+  if (descGroup) descGroup.style.display = soloRH2 ? '' : 'none';
+  const tratGrp = document.getElementById('perm-tratamiento-group');
+  if (tratGrp) tratGrp.style.display = soloRH2 ? '' : 'none';
 }
 // Call on modal open too
 function initPermisoModal() {

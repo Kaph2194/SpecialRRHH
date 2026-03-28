@@ -1017,9 +1017,14 @@ function buildSidebar() {
   if (u.role === 'lider_area') {
     addNavItem(nav, '👥', 'Mi Equipo', 'empleados');
     addNavSep(nav, 'NOVEDADES');
-    addNavItem(nav, '📅', 'Reportar Novedades', 'novedades-area');
+    addNavItem(nav, '📅', 'Planeador del Área', 'novedades-area');
+    addNavSep(nav, 'INFORMACIÓN');
     addNavItem(nav, '🗓', 'Permisos del Área', 'permisos-admin');
     addNavItem(nav, '🏥', 'Incapacidades', 'incapacidades-admin');
+    addNavItem(nav, '🏖', 'Vacaciones del Área', 'vacaciones-admin');
+    addNavItem(nav, '⚖️', 'Disciplinarios', 'disciplinarios');
+    addNavSep(nav, 'NÓMINA');
+    addNavItem(nav, '📋', 'Mi Malla de Turnos', 'malla-area');
     return;
   }
   addNavItem(nav, '🗓', 'Permisos', 'permisos-admin');
@@ -1110,6 +1115,7 @@ function showView(viewId) {
   else if (viewId === 'perfiles-cargo')    { renderPerfilesCargo(); }
   else if (viewId === 'novedades-diarias') { renderNovedadesDiarias(); }
   else if (viewId === 'novedades-area')    { renderNovedadesAreaCalendar(); }
+  else if (viewId === 'malla-area')        { showView('novedades-area'); renderMallaArea(); }
   else if (viewId === 'descuentos')        { renderDescuentos(); }
   else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('w')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
@@ -1269,7 +1275,13 @@ function renderEmpleados() {
   const fe = document.getElementById('filter-empresa')?.value || '';
   const fs = document.getElementById('filter-status')?.value  || '';
 
+  // Lider de área solo ve su equipo
+  const esLiderArea  = SC.user?.role === 'lider_area';
+  const miAreaId     = SC.user?.areaId ? String(SC.user.areaId) : null;
+
   let filtered = SC.empleados.filter(e => {
+    // Restricción de área para lider_area
+    if (esLiderArea && miAreaId && String(e.areaId) !== miAreaId) return false;
     if (q  && !e.name.toLowerCase().includes(q) && !(e.cedula||'').includes(q) && !(e.cargo||'').toLowerCase().includes(q)) return false;
     if (fa && String(e.areaId) !== fa) return false;
     if (fe && e.empresaId !== fe) return false;
@@ -1460,7 +1472,11 @@ window.sbSaveDisc = sbSaveDisc;
 window.sbSaveCand = sbSaveCand;
 window.sbSaveBodega = sbSaveBodega;
 
-window.openUserMgmt = openUserMgmt;
+window.openUserMgmt       = openUserMgmt;
+window.agregarLiderArea       = agregarLiderArea;
+window.toggleNuevoLiderFields = toggleNuevoLiderFields;
+window.guardarNuevoLider  = guardarNuevoLider;
+window.eliminarLiderArea  = eliminarLiderArea;
 window.saveUserAdmin = saveUserAdmin;
 window.loadSavedAdminUsers = loadSavedAdminUsers;
 
@@ -1650,6 +1666,12 @@ function openEmpleadoDetail(empId) {
   SC.currentEmpId = empId;
   const emp = SC.empleados.find(e => e.id === empId);
   if (!emp) return;
+  // Lider de área solo puede ver empleados de su área
+  if (SC.user?.role === 'lider_area' && SC.user?.areaId) {
+    if (String(emp.areaId) !== String(SC.user.areaId)) {
+      showNotif('Solo puedes ver empleados de tu área', 'error'); return;
+    }
+  }
 
   document.getElementById('emp-detail-name').textContent = emp.name;
   const area = SC.areas.find(a => a.id === emp.areaId);
@@ -1673,8 +1695,23 @@ function openEmpleadoDetail(empId) {
       ${can('write') ? `<button class="btn btn-ghost btn-sm" onclick="openEditEmpModal('${emp.id}')">✏️ Editar</button>` : ''}
     </div>`;
 
-  // Reset tabs
-  document.querySelectorAll('#emp-tabs .tab').forEach((t,i) => t.className = i===0?'tab active':'tab');
+  // Ajustar pestañas visibles según rol
+  const esLider = SC.user?.role === 'lider_area';
+  const tabsVisibles = {
+    info: true, carpeta: !esLider, contratos: !esLider, nomina: !esLider,
+    permisos: true, incapacidades: true, vacaciones: true,
+    disc: true, horario: true, descuentos: !esLider,
+  };
+  document.querySelectorAll('#emp-tabs .tab').forEach(t => {
+    const onclick = t.getAttribute('onclick') || '';
+    const match   = onclick.match(/empTab\('(\w+)'/);
+    const tabKey  = match ? match[1] : null;
+    t.style.display = (tabKey && tabsVisibles[tabKey] === false) ? 'none' : '';
+    t.className = 'tab';
+  });
+  // Seleccionar primera pestaña visible
+  const primeraTab = document.querySelector('#emp-tabs .tab:not([style*="none"])');
+  if (primeraTab) primeraTab.className = 'tab active';
   currentEmpTab = 'info';
   renderEmpTab('info');
   showView('empleado-detail');
@@ -2952,7 +2989,16 @@ function renderPermisosAdmin() {
   const tb = document.getElementById('permisos-admin-tbody');
   if (!SC.permisos.length) { tb.innerHTML = '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos registrados.</td></tr>'; return; }
   tb.innerHTML = '';
-  SC.permisos.forEach(p => {
+  // Filtrar por área si es lider_area
+  const esLA_p = SC.user?.role === 'lider_area';
+  const miArea_p = SC.user?.areaId ? String(SC.user.areaId) : null;
+  const permsFiltrados = SC.permisos.filter(p => {
+    if (!esLA_p || !miArea_p) return true;
+    const emp2 = SC.empleados.find(e => e.id === p.empId);
+    return emp2 && String(emp2.areaId) === miArea_p;
+  });
+  if (!permsFiltrados.length) { tb.innerHTML = '<tr><td colspan="8" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos en tu área.</td></tr>'; return; }
+  permsFiltrados.forEach(p => {
     const emp = SC.empleados.find(e => e.id === p.empId);
     const fechaHora = p.esPorHoras
       ? `${p.inicio} · ${p.horaInicio||''}–${p.horaFin||''}`
@@ -3207,9 +3253,10 @@ function savePermiso() {
 
   const finFinal = esPorHoras ? fechaHoras : (finReg || inicioReg);
   const diasVal  = esPorHoras ? (calcHoras(horaI, horaF) + 'h') : calcDias(inicioReg, finFinal);
-  const descontable  = document.getElementById('perm-descontable')?.value || 'si';
-  const tratamiento  = document.getElementById('perm-tratamiento')?.value || 'pendiente';
-  // Licencias remuneradas nunca descuentan
+  // Tratamiento y descontable: solo lo define RH/Admin
+  const esEmpleado   = SC.user?.role === 'empleado';
+  const descontable  = esEmpleado ? 'pendiente' : (document.getElementById('perm-descontable')?.value || 'pendiente');
+  const tratamiento  = esEmpleado ? 'pendiente' : (document.getElementById('perm-tratamiento')?.value  || 'pendiente');
   const esLicencia   = ['licencia_remunerada','licencia_maternidad','licencia_paternidad','licencia_no_remunerada'].includes(tipo);
 
   // For NON-horas: hora is captured but permiso is by day
@@ -3260,7 +3307,15 @@ function renderIncapAdmin() {
   const tb = document.getElementById('incap-admin-tbody');
   if (!SC.incapacidades.length) { tb.innerHTML = '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:24px">No hay incapacidades.</td></tr>'; return; }
   tb.innerHTML = '';
-  SC.incapacidades.forEach(i => {
+  const esLA_i = SC.user?.role === 'lider_area';
+  const miArea_i = SC.user?.areaId ? String(SC.user.areaId) : null;
+  const incapsFiltradas = SC.incapacidades.filter(i => {
+    if (!esLA_i || !miArea_i) return true;
+    const emp2 = SC.empleados.find(e => e.id === i.empId);
+    return emp2 && String(emp2.areaId) === miArea_i;
+  });
+  if (!incapsFiltradas.length) { tb.innerHTML = '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:24px">No hay incapacidades en tu área.</td></tr>'; return; }
+  incapsFiltradas.forEach(i => {
     const emp = SC.empleados.find(e => e.id === i.empId);
     const alertEpic = i.requiereEpicrisis && !i.epicrisisData ? '<span class="badge badge-red" style="margin-left:4px">Sin epicrisis</span>' : '';
     tb.insertAdjacentHTML('beforeend', `
@@ -3575,11 +3630,80 @@ function renderPortal(tab) {
     });
     content.innerHTML = html;
   }
+  else if (tab === 'contratos') {
+    // El empleado puede ver sus contratos/documentos laborales
+    const contratos = emp.contratos || [];
+    let html = `<div class="section-header mb-4">
+      <div class="section-title" style="font-size:16px">📄 Mis <span>Contratos</span></div>
+    </div>`;
+    if (!contratos.length) {
+      html += '<div class="info-box text-sm">No tienes contratos cargados aún. Comunícate con RRHH si necesitas una copia.</div>';
+    } else {
+      contratos.forEach((c, idx) => {
+        const tieneArchivo = c.driveUrl || c.driveFileId || c.fileData;
+        html += `<div class="perm-card mb-3" style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:28px">📄</div>
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:14px">${c.nombre || c.tipo || 'Contrato'}</div>
+            <div class="text-sm text-muted">${c.fecha || ''} ${c.obs ? '· ' + c.obs : ''}</div>
+          </div>
+          ${tieneArchivo
+            ? `<button class="btn btn-ghost btn-sm" onclick="viewDocFromList('${emp.id}','contratos',${idx})">👁️ Ver</button>`
+            : '<span class="badge badge-grey">Sin archivo</span>'}
+        </div>`;
+      });
+    }
+    content.innerHTML = html;
+  }
   else if (tab === 'vacaciones') {
-    const vacs = SC.vacaciones.filter(v => v.empId === SC.user?.empId);
-    let html = `<div class="section-header mb-4"><div class="section-title" style="font-size:16px">🏖 Mis <span>Vacaciones</span></div><button class="btn btn-primary btn-sm" onclick="openVacacionesModal('${SC.user?.empId}')">+ Solicitar</button></div>`;
-    if (!vacs.length) html += '<div class="text-sm text-muted p-4">No tienes períodos de vacaciones registrados.</div>';
-    vacs.forEach(v => { html += `<div class="perm-card flex justify-between items-center flex-wrap gap-3"><div><div style="font-weight:600">🏖 ${v.inicio} → ${v.fin}</div><div class="text-sm text-muted">${v.dias} días · ${v.fechaSolicitud}</div>${v.obs?`<div class="text-sm">${v.obs}</div>`:''}</div>${statusBadge(v.estado)}</div>`; });
+    const empP  = SC.empleados.find(e => e.id === empId);
+    const vacI  = empP ? calcVacInfo(empP) : { diasCausados:0, diasTomados:0, diasDisponibles:0, diasEnProceso:0 };
+    const vacs  = SC.vacaciones.filter(v => v.empId === empId);
+
+    // Tarjetas siempre visibles (independiente del período cumplido)
+    const html = `
+      <div class="section-header mb-4">
+        <div class="section-title" style="font-size:16px">🏖 Mis <span>Vacaciones</span></div>
+        <button class="btn btn-primary btn-sm" onclick="openVacacionesModal('${empId}')">+ Solicitar</button>
+      </div>
+      <!-- Tarjetas resumen siempre visibles -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+        <div class="stat-card" style="padding:14px;border-left:4px solid var(--navy)">
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Días Causados</div>
+          <div style="font-size:28px;font-weight:800;color:var(--navy);margin:4px 0">${vacI.diasCausados}</div>
+          <div style="font-size:11px;color:var(--text-muted)">Total acumulado</div>
+        </div>
+        <div class="stat-card" style="padding:14px;border-left:4px solid var(--green)">
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Días Tomados</div>
+          <div style="font-size:28px;font-weight:800;color:var(--green);margin:4px 0">${vacI.diasTomados}</div>
+          <div style="font-size:11px;color:var(--text-muted)">Disfrutados</div>
+        </div>
+        <div class="stat-card" style="padding:14px;border-left:4px solid ${vacI.diasDisponibles > 0 ? 'var(--blue)' : 'var(--amber)'}">
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Disponibles</div>
+          <div style="font-size:28px;font-weight:800;color:${vacI.diasDisponibles > 0 ? 'var(--blue)' : 'var(--amber)'};margin:4px 0">${vacI.diasDisponibles}</div>
+          <div style="font-size:11px;color:var(--text-muted)">Por tomar</div>
+        </div>
+        ${vacI.diasEnProceso > 0 ? `
+        <div class="stat-card" style="padding:14px;border-left:4px solid var(--amber)">
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px">En Proceso</div>
+          <div style="font-size:28px;font-weight:800;color:var(--amber);margin:4px 0">${vacI.diasEnProceso}</div>
+          <div style="font-size:11px;color:var(--text-muted)">Aprobados / pendientes</div>
+        </div>` : ''}
+      </div>
+      <!-- Historial de solicitudes -->
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:10px">Historial de Solicitudes</div>
+      ${vacs.length === 0
+        ? '<div class="text-sm text-muted">Aún no has solicitado vacaciones.</div>'
+        : vacs.sort((a,b)=>(b.fechaSolicitud||'').localeCompare(a.fechaSolicitud||'')).map(v =>
+            `<div class="perm-card mb-2 flex justify-between items-center flex-wrap gap-3">
+              <div>
+                <div style="font-weight:600">🏖 ${v.inicio} → ${v.fin}</div>
+                <div class="text-sm text-muted">${v.dias} días · Solicitado: ${v.fechaSolicitud||'—'}</div>
+                ${v.obs ? `<div class="text-sm">${v.obs}</div>` : ''}
+              </div>
+              ${statusBadge(v.estado)}
+            </div>`
+          ).join('')}`;
     content.innerHTML = html;
   }
   else if (tab === 'disciplinarios') {
@@ -3703,41 +3827,124 @@ function gerTab(tab, el) {
     const permisosPend = SC.permisos.filter(p=>p.status==='pendiente').length;
     const vacPend      = SC.vacaciones.filter(v=>v.estado==='pendiente').length;
     const incapActivas = SC.incapacidades.filter(i=>i.status==='pendiente').length;
+    // Nuevos módulos
+    const hoy          = new Date().toISOString().split('T')[0];
+    const enVacHoy     = SC.empleados.filter(e => {
+      return SC.vacaciones.some(v=>v.empId===e.id&&v.estado==='aprobado'&&v.inicio<=hoy&&v.fin>=hoy);
+    }).length;
+    const enIncapHoy   = SC.empleados.filter(e => {
+      return SC.incapacidades.some(i => {
+        if(i.empId!==e.id) return false;
+        const fin=new Date(i.fechaInicio); fin.setDate(fin.getDate()+(i.dias||1)-1);
+        return i.fechaInicio<=hoy && fin.toISOString().split('T')[0]>=hoy;
+      });
+    }).length;
+    const prestamosAct = SC.descuentos?.filter(d=>d.tipo==='prestamo'&&d.estado==='activo').length||0;
+    const prestPend    = SC.descuentos?.filter(d=>d.tipo==='prestamo'&&d.estado==='pendiente_aprobacion').length||0;
+    const pctConHorario= empActivos.length ? Math.round(empActivos.filter(e=>SC.horarios[e.id]).length/empActivos.length*100) : 0;
+    const novsHoy      = SC.novedadesArea?.filter(n=>n.fecha===hoy).length||0;
+    const salTotalMes  = empActivos.reduce((s,e)=>s+(e.salario||0),0);
+    const salPromedio  = empActivos.length ? Math.round(salTotalMes/empActivos.length) : 0;
+
+    // Mini donut en SVG para distribución por estado
+    const buildDonutSVG = (segments, size=80) => {
+      const total = segments.reduce((s,sg)=>s+sg.val,0);
+      if(!total) return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#e5e7eb;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-muted)">Sin datos</div>`;
+      let off=0; const r=28, cx=40, cy=40, strokeW=14;
+      const circ=2*Math.PI*r;
+      const arcs=segments.map(sg=>{
+        const pct=sg.val/total; const dash=pct*circ; const gap=circ-dash;
+        const arc=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${sg.color}" stroke-width="${strokeW}"
+          stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${-off*circ}" style="transition:all .6s"/>`;
+        off+=pct; return arc;
+      }).join('');
+      return `<svg width="${size}" height="${size}" viewBox="0 0 80 80" style="transform:rotate(-90deg)">${arcs}<circle cx="40" cy="40" r="21" fill="var(--bg-card)"/></svg>`;
+    };
+
+    const distribEmp = buildDonutSVG([
+      {val:empActivos.length, color:'#22c55e'},
+      {val:empRetirados.length, color:'#ef4444'},
+      {val:empSancionados.length, color:'#f59e0b'},
+    ]);
 
     content.innerHTML = `
-      <div class="stats-grid mb-5">
-        <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-label">Empleados Activos</div><div class="stat-value">${empActivos.length}</div><div class="stat-sub">${empRetirados.length} retirados · ${empSancionados.length} sancionados</div></div>
-        <div class="stat-card"><div class="stat-icon">🔍</div><div class="stat-label">Candidatos</div><div class="stat-value">${candTotal}</div><div class="stat-sub">${candAprobados} aprobados</div></div>
-        <div class="stat-card"><div class="stat-icon">⚖️</div><div class="stat-label">Disciplinarios Activos</div><div class="stat-value" style="color:${discActivos>0?'var(--red)':'var(--navy)'}">${discActivos}</div><div class="stat-sub">En proceso</div></div>
-        <div class="stat-card"><div class="stat-icon">🗓</div><div class="stat-label">Permisos Pendientes</div><div class="stat-value" style="color:${permisosPend>0?'var(--amber)':'var(--navy)'}">${permisosPend}</div><div class="stat-sub">${vacPend} vacaciones · ${incapActivas} incap.</div></div>
-        <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-label">Score Promedio</div><div class="stat-value">${avg!=null?avg+'%':'—'}</div><div class="stat-sub">Candidatos evaluados</div></div>
+      <!-- Fila 1: KPIs principales -->
+      <div class="stats-grid mb-4">
+        <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-label">Empleados Activos</div><div class="stat-value">${empActivos.length}</div><div class="stat-sub" style="color:var(--green)">${enVacHoy} de vacaciones hoy · ${enIncapHoy} incapacitados</div></div>
+        <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-label">Nómina Mensual Est.</div><div class="stat-value" style="font-size:18px">$${(salTotalMes/1000000).toFixed(1)}M</div><div class="stat-sub">Prom: $${salPromedio.toLocaleString('es-CO')}</div></div>
+        <div class="stat-card"><div class="stat-icon">⚖️</div><div class="stat-label">Disciplinarios Activos</div><div class="stat-value" style="color:${discActivos>0?'var(--red)':'var(--green)'}">${discActivos}</div><div class="stat-sub">En proceso</div></div>
+        <div class="stat-card"><div class="stat-icon">⏳</div><div class="stat-label">Aprobaciones Pend.</div><div class="stat-value" style="color:var(--amber)">${permisosPend+vacPend+incapActivas+prestPend}</div><div class="stat-sub">${permisosPend} permisos · ${vacPend} vac. · ${incapActivas} incap. · ${prestPend} préstamos</div></div>
+        <div class="stat-card"><div class="stat-icon">📅</div><div class="stat-label">Novedades Hoy</div><div class="stat-value">${novsHoy}</div><div class="stat-sub">Reportadas por líderes</div></div>
+        <div class="stat-card"><div class="stat-icon">💳</div><div class="stat-label">Préstamos Activos</div><div class="stat-value">${prestamosAct}</div><div class="stat-sub">${prestPend} pendientes de aprobación</div></div>
       </div>
-      <div class="two-col mb-5">
+
+      <!-- Fila 2: Distribución empleados + por empresa -->
+      <div class="two-col mb-4">
         <div class="glass-card p-5">
-          <div class="section-title mb-4" style="font-size:14px">👥 Empleados por Empresa</div>
-          ${barChart(SC.empresas.map(e=>({label:e.name, val:SC.empleados.filter(em=>em.empresaId===e.id&&em.status==='activo').length, color:e.color})), empActivos.length)}
+          <div class="section-title mb-4" style="font-size:14px">👥 Estado de la Plantilla</div>
+          <div style="display:flex;align-items:center;gap:20px;margin-bottom:16px">
+            ${distribEmp}
+            <div>
+              ${[['Activos',empActivos.length,'#22c55e'],['Retirados',empRetirados.length,'#ef4444'],['Sancionados',empSancionados.length,'#f59e0b']].map(([l,v,c])=>
+                `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                  <span style="width:10px;height:10px;border-radius:50%;background:${c};display:inline-block;flex-shrink:0"></span>
+                  <span style="font-size:12px">${l}: <strong>${v}</strong></span>
+                </div>`).join('')}
+              <div style="font-size:11px;color:var(--text-muted);margin-top:8px">🕐 ${pctConHorario}% con horario definido</div>
+            </div>
+          </div>
+          ${barChart(SC.empresas.map(e=>({label:e.name.split(' ').slice(0,2).join(' '), val:SC.empleados.filter(em=>em.empresaId===e.id&&em.status==='activo').length, color:e.color})).filter(x=>x.val>0), empActivos.length)}
         </div>
         <div class="glass-card p-5">
-          <div class="section-title mb-4" style="font-size:14px">📋 Empleados por Área</div>
-          ${barChart(SC.areas.slice(0,8).map(a=>({label:a.icon+' '+a.name, val:SC.empleados.filter(e=>e.areaId===a.id&&e.status==='activo').length})), empActivos.length)}
+          <div class="section-title mb-4" style="font-size:14px">🏢 Empleados por Área</div>
+          ${barChart(SC.areas.map(a=>{
+            const cnt = SC.empleados.filter(e=>e.areaId===a.id&&e.status==='activo').length;
+            const pctHor = cnt ? Math.round(SC.empleados.filter(e=>e.areaId===a.id&&e.status==='activo'&&SC.horarios[e.id]).length/cnt*100) : 0;
+            return {label:a.icon+' '+a.name, val:cnt, extra:pctHor+'% horario'};
+          }).filter(x=>x.val>0), empActivos.length)}
         </div>
       </div>
+
+      <!-- Fila 3: Nómina + Alertas -->
+      <div class="two-col mb-4">
+        <div class="glass-card p-5">
+          <div class="section-title mb-4" style="font-size:14px">💰 Distribución Salarial por Área</div>
+          ${barChart(SC.areas.map(a=>{
+            const empsArea = SC.empleados.filter(e=>e.areaId===a.id&&e.status==='activo'&&e.salario>0);
+            const sumaSal  = empsArea.reduce((s,e)=>s+(e.salario||0),0);
+            return {label:a.icon+' '+a.name, val:sumaSal, display:'$'+(sumaSal/1000000).toFixed(1)+'M'};
+          }).filter(x=>x.val>0), salTotalMes)}
+        </div>
+        <div class="glass-card p-5">
+          <div class="section-title mb-4" style="font-size:14px">🚨 Alertas y Pendientes</div>
+          ${[
+            permisosPend>0    ? `<div class="perm-card mb-2" style="border-left:3px solid var(--amber);padding:8px 12px"><div style="font-size:12px;font-weight:600">🗓 ${permisosPend} permisos pendientes de aprobación</div></div>` : '',
+            vacPend>0         ? `<div class="perm-card mb-2" style="border-left:3px solid var(--blue);padding:8px 12px"><div style="font-size:12px;font-weight:600">🏖 ${vacPend} solicitudes de vacaciones pendientes</div></div>` : '',
+            incapActivas>0    ? `<div class="perm-card mb-2" style="border-left:3px solid var(--amber);padding:8px 12px"><div style="font-size:12px;font-weight:600">🏥 ${incapActivas} incapacidades en revisión</div></div>` : '',
+            discActivos>0     ? `<div class="perm-card mb-2" style="border-left:3px solid var(--red);padding:8px 12px"><div style="font-size:12px;font-weight:600">⚖️ ${discActivos} procesos disciplinarios activos</div></div>` : '',
+            prestPend>0       ? `<div class="perm-card mb-2" style="border-left:3px solid var(--red);padding:8px 12px"><div style="font-size:12px;font-weight:600">💳 ${prestPend} préstamos esperan aprobación de Gerencia</div></div>` : '',
+            enVacHoy>0        ? `<div class="perm-card mb-2" style="border-left:3px solid var(--green);padding:8px 12px"><div style="font-size:12px;font-weight:600">🏖 ${enVacHoy} empleados de vacaciones hoy</div></div>` : '',
+            enIncapHoy>0      ? `<div class="perm-card mb-2" style="border-left:3px solid var(--amber);padding:8px 12px"><div style="font-size:12px;font-weight:600">🏥 ${enIncapHoy} empleados incapacitados hoy</div></div>` : '',
+          ].filter(Boolean).join('') || '<div class="text-muted text-sm">✅ Sin alertas pendientes</div>'}
+        </div>
+      </div>
+
+      <!-- Fila 4: Contratos + Actividad -->
       <div class="two-col">
         <div class="glass-card p-5">
-          <div class="section-title mb-4" style="font-size:14px">🏆 Top Candidatos por Score</div>
-          ${[...SC.candidatos].filter(c=>c.score!=null).sort((a,b)=>b.score-a.score).slice(0,5).map((c,i)=>`
-            <div class="flex items-center gap-3 mb-3">
-              <div style="font-weight:800;font-size:16px;color:var(--navy);min-width:20px">${i+1}</div>
-              <div class="avatar" style="width:30px;height:30px;font-size:12px">${c.name[0]}</div>
-              <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</div><div class="text-xs text-muted">${c.cargo}</div></div>
-              ${scoreBarHtml(c.score)}
-            </div>`).join('')||'<div class="text-muted text-sm">Sin evaluaciones aún.</div>'}
+          <div class="section-title mb-4" style="font-size:14px">📄 Tipos de Contrato</div>
+          ${barChart(['indefinido','fijo','obra','aprendizaje'].map(t=>({
+            label:t.charAt(0).toUpperCase()+t.slice(1),
+            val:empActivos.filter(e=>e.contratoTipo===t).length,
+            color:t==='indefinido'?'var(--navy)':t==='fijo'?'var(--blue)':t==='obra'?'var(--amber)':'var(--green)',
+          })).filter(x=>x.val>0), empActivos.length)}
         </div>
         <div class="glass-card p-5">
           <div class="section-title mb-4" style="font-size:14px">📅 Actividad Reciente</div>
           ${[
-            ...SC.permisos.slice(-3).reverse().map(p=>{const e=SC.empleados.find(x=>x.id===p.empId); return `<div class="flex items-center gap-2 mb-2"><span style="font-size:18px">🗓</span><div style="flex:1"><div style="font-size:12px;font-weight:500">${e?.name||'—'}</div><div class="text-xs text-muted">Permiso · ${p.inicio}</div></div>${statusBadge(p.status)}</div>`;}),
-            ...SC.incapacidades.slice(-2).reverse().map(i=>{const e=SC.empleados.find(x=>x.id===i.empId); return `<div class="flex items-center gap-2 mb-2"><span style="font-size:18px">🏥</span><div style="flex:1"><div style="font-size:12px;font-weight:500">${e?.name||'—'}</div><div class="text-xs text-muted">Incapacidad · ${i.fechaInicio}</div></div>${statusBadge(i.status)}</div>`;}),
+            ...SC.permisos.slice(-3).reverse().map(p=>{const e=SC.empleados.find(x=>x.id===p.empId); return `<div class="flex items-center gap-2 mb-2"><span style="font-size:18px">🗓</span><div style="flex:1"><div style="font-size:12px;font-weight:500">${e?.name||'—'}</div><div class="text-xs text-muted">${tipoPermisoLabel(p.tipo)} · ${p.inicio}</div></div>${statusBadge(p.status)}</div>`;}),
+            ...SC.incapacidades.slice(-2).reverse().map(i=>{const e=SC.empleados.find(x=>x.id===i.empId); return `<div class="flex items-center gap-2 mb-2"><span style="font-size:18px">🏥</span><div style="flex:1"><div style="font-size:12px;font-weight:500">${e?.name||'—'}</div><div class="text-xs text-muted">${i.tipoIncap==='accidente_trabajo'?'🚨 AT':'Incapacidad'} · ${i.fechaInicio} · ${i.dias}d</div></div>${statusBadge(i.status)}</div>`;}),
+            ...((SC.novedadesArea||[]).slice(-3).reverse().map(n=>{const e=SC.empleados.find(x=>x.id===n.empId); return `<div class="flex items-center gap-2 mb-2"><span style="font-size:18px">${TIPO_NOVEDAD_LABEL[n.tipo]?.split(' ')[0]||'📝'}</span><div style="flex:1"><div style="font-size:12px;font-weight:500">${e?.name||'—'}</div><div class="text-xs text-muted">${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo} · ${n.fecha}</div></div></div>`;})),
           ].join('')||'<div class="text-muted text-sm">Sin actividad reciente.</div>'}
         </div>
       </div>`;
@@ -4121,7 +4328,14 @@ function renderDisciplinarios() {
   const tb = document.getElementById('disc-tbody');
   if (!tb) return;
   tb.innerHTML = '';
-  SC.disciplinarios.forEach(d => {
+  const esLA_d = SC.user?.role === 'lider_area';
+  const miArea_d = SC.user?.areaId ? String(SC.user.areaId) : null;
+  const discFiltrados = SC.disciplinarios.filter(d => {
+    if (!esLA_d || !miArea_d) return true;
+    const emp2 = SC.empleados.find(e => e.id === d.empId);
+    return emp2 && String(emp2.areaId) === miArea_d;
+  });
+  discFiltrados.forEach(d => {
     const emp = SC.empleados.find(e => e.id === d.empId);
     const tipo = TIPOS_DISCIPLINARIO[d.tipo]||{label:d.tipo,icon:'📋'};
     tb.insertAdjacentHTML('beforeend', `<tr>
@@ -5159,78 +5373,185 @@ function renderNovedadesDiarias() {
 }
 
 // ── Novedades Área (Líder) ────────────────────────────────────
+function getMisEmps() {
+  const areaId = SC.user?.areaId;
+  return SC.empleados.filter(e =>
+    e.status !== 'retirado' && (areaId ? String(e.areaId) === String(areaId) : true)
+  ).sort((a,b) => a.name.localeCompare(b.name, 'es'));
+}
+
+// ── Variables de navegación del planeador ────────────────────
+let _planYear  = new Date().getFullYear();
+let _planMonth = new Date().getMonth(); // 0-based
+
+function navPlan(delta) {
+  _planMonth += delta;
+  if (_planMonth < 0)  { _planMonth = 11; _planYear--; }
+  if (_planMonth > 11) { _planMonth = 0;  _planYear++; }
+  renderNovedadesAreaCalendar();
+}
+
+// ── Planeador principal ──────────────────────────────────────
 function renderNovedadesAreaCalendar() {
   const el = document.getElementById('novedades-area-calendar');
   if (!el) return;
-  const areaId  = SC.user?.areaId;
-  const misEmps = SC.empleados.filter(e => areaId ? e.areaId === areaId : true);
 
-  // Calendario del mes actual
-  const hoy   = new Date();
-  const año   = hoy.getFullYear();
-  const mes   = hoy.getMonth();
-  const dias  = new Date(año, mes+1, 0).getDate();
-  const primerDia = new Date(año, mes, 1).getDay();
-  const mesStr = hoy.toLocaleString('es-CO', { month:'long', year:'numeric' });
+  const misEmps    = getMisEmps();
+  const area       = SC.areas.find(a => String(a.id) === String(SC.user?.areaId));
+  const diasMes    = new Date(_planYear, _planMonth + 1, 0).getDate();
+  const hoy        = new Date();
+  const esEsteMes  = hoy.getFullYear() === _planYear && hoy.getMonth() === _planMonth;
+  const mesStr     = new Date(_planYear, _planMonth, 1).toLocaleString('es-CO', { month:'long', year:'numeric' });
 
-  // Cabecera del calendario
-  const cabDias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  let calGrid = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:12px">
-    ${cabDias.map(d=>`<div style="text-align:center;font-size:11px;font-weight:700;color:var(--text-muted);padding:4px">${d}</div>`).join('')}
-  `;
-  // Celdas vacías al inicio
-  for (let i = 0; i < primerDia; i++) calGrid += '<div></div>';
-  // Días
-  for (let d = 1; d <= dias; d++) {
-    const fechaStr = `${año}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const novsDelDia = SC.novedadesArea.filter(n => n.fecha === fechaStr && misEmps.some(e=>e.id===n.empId));
-    const esHoy = d === hoy.getDate();
-    calGrid += `<div onclick="openNuevaNovedadAreaFecha('${fechaStr}')"
-      style="border:1.5px solid ${esHoy?'var(--navy)':'var(--navy-border)'};border-radius:8px;padding:6px;
-             min-height:52px;cursor:pointer;background:${esHoy?'rgba(17,31,77,.05)':'transparent'};
-             transition:background .15s" onmouseover="this.style.background='rgba(17,31,77,.08)'"
-             onmouseout="this.style.background='${esHoy?'rgba(17,31,77,.05)':'transparent'}'">
-      <div style="font-size:12px;font-weight:${esHoy?'800':'600'};color:${esHoy?'var(--navy)':'inherit'};margin-bottom:3px">${d}</div>
-      ${novsDelDia.slice(0,3).map(n=>`<div style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};border-radius:3px;padding:1px 4px;font-size:9px;color:#fff;margin-bottom:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
-        ${SC.empleados.find(e=>e.id===n.empId)?.name?.split(' ')[0]||'?'} · ${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}
-      </div>`).join('')}
-      ${novsDelDia.length>3?`<div style="font-size:9px;color:var(--text-muted)">+${novsDelDia.length-3} más</div>`:''}
-    </div>`;
-  }
-  calGrid += '</div>';
+  // Construir cabecera de días
+  const diasHdr = Array.from({length: diasMes}, (_, i) => {
+    const d    = i + 1;
+    const dow  = new Date(_planYear, _planMonth, d).getDay();
+    const esFin= dow === 0 || dow === 6;
+    const esH  = esEsteMes && d === hoy.getDate();
+    return `<th style="min-width:36px;text-align:center;font-size:10px;padding:4px 2px;
+              background:${esH?'var(--navy)':esFin?'rgba(0,0,0,.06)':'transparent'};
+              color:${esH?'#fff':esFin?'var(--text-muted)':'var(--navy)'};
+              border-radius:${esH?'4px':'0'};font-weight:${esH?800:600}">
+      <div>${['D','L','M','X','J','V','S'][dow]}</div>
+      <div style="font-size:12px">${d}</div>
+    </th>`;
+  }).join('');
+
+  // Construir filas por empleado
+  const filas = misEmps.map(emp => {
+    const cells = Array.from({length: diasMes}, (_, i) => {
+      const d       = i + 1;
+      const fecha   = `${_planYear}-${String(_planMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dow     = new Date(_planYear, _planMonth, d).getDay();
+      const esFin   = dow === 0 || dow === 6;
+
+      // Buscar estado del día
+      const novs    = SC.novedadesArea.filter(n => n.empId === emp.id && n.fecha === fecha);
+      const vac     = SC.vacaciones.find(v => v.empId===emp.id && v.estado==='aprobado' && v.inicio<=fecha && v.fin>=fecha);
+      const perm    = SC.permisos.find(p => p.empId===emp.id && p.status==='aprobado' && p.inicio<=fecha && (p.fin||p.inicio)>=fecha);
+      const incap   = SC.incapacidades.find(i2 => {
+        if (i2.empId !== emp.id) return false;
+        const fin2 = new Date(i2.fechaInicio); fin2.setDate(fin2.getDate()+(i2.dias||1)-1);
+        return i2.fechaInicio<=fecha && fin2.toISOString().split('T')[0]>=fecha;
+      });
+      const horario = SC.horarios[emp.id];
+      const diaLaboral = !horario || horario.diasLaborales?.includes(['D','L','M','X','J','V','S'][dow]);
+
+      let cellBg = esFin ? 'rgba(0,0,0,.04)' : 'transparent';
+      let cellContent = '';
+
+      if (vac)   { cellBg='rgba(59,130,246,.15)'; cellContent='<div style="font-size:8px;color:#1d4ed8;font-weight:700;text-align:center">🏖</div>'; }
+      if (incap) { cellBg='rgba(217,119,6,.15)';  cellContent='<div style="font-size:8px;color:#92400e;font-weight:700;text-align:center">🏥</div>'; }
+      if (perm)  { cellBg='rgba(17,31,77,.12)';   cellContent='<div style="font-size:8px;color:var(--navy);font-weight:700;text-align:center">📋</div>'; }
+
+      if (novs.length) {
+        const n0 = novs[0];
+        const col = NOVEDAD_COLOR[n0.tipo]||'#888';
+        cellBg = col + '30';
+        const ico = {ausencia:'🔴',tardanza:'⏰',salida_temprana:'🏃',hora_extra:'⭐',dominical:'🌟',nocturno:'🌙',permiso:'📋',incapacidad:'🏥',otro:'📝'}[n0.tipo]||'📝';
+        cellContent = `<div style="font-size:9px;text-align:center;font-weight:700;color:${col}">${ico}${novs.length>1?'+'+novs.length:''}</div>`;
+      }
+
+      const esHoy2 = esEsteMes && d===hoy.getDate();
+      return `<td onclick="openNuevaNovedadAreaFecha('${fecha}','${emp.id}')"
+        title="${fecha} — ${emp.name.split(' ')[0]}"
+        style="background:${cellBg};border:1px solid var(--navy-border);cursor:pointer;
+               padding:2px;min-width:36px;height:32px;vertical-align:middle;
+               outline:${esHoy2?'2px solid var(--navy)':'none'};outline-offset:-1px;
+               transition:background .1s"
+        onmouseover="this.style.background='rgba(17,31,77,.12)'"
+        onmouseout="this.style.background='${cellBg}'">${cellContent}</td>`;
+    }).join('');
+
+    const empStatus = getEmpStatus(emp);
+    const statusDot = empStatus==='en_vacaciones'?'🏖':empStatus==='incapacitado'?'🏥':empStatus==='activo'?'🟢':'🔴';
+    const hor = SC.horarios[emp.id];
+    const horStr = hor?.tipo==='fijo' ? `${hor.entrada||''}–${hor.salida||''}` : hor?.tipo||'—';
+
+    return `<tr>
+      <td style="min-width:160px;padding:4px 8px;border-right:2px solid var(--navy-border);position:sticky;left:0;background:var(--bg-card);z-index:2">
+        <div style="font-weight:600;font-size:12px;color:var(--navy)">${statusDot} ${emp.name.split(' ').slice(0,2).join(' ')}</div>
+        <div style="font-size:10px;color:var(--text-muted)">${emp.cargo} · ${horStr}</div>
+      </td>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  // Leyenda de colores
+  const leyenda = Object.entries(NOVEDAD_COLOR).map(([k,c]) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;font-size:11px">
+      <span style="width:10px;height:10px;border-radius:50%;background:${c};display:inline-block"></span>
+      ${TIPO_NOVEDAD_LABEL[k]||k}
+    </span>`
+  ).join('');
 
   el.innerHTML = `
-    <div class="glass-card p-4 mb-4">
-      <div style="font-weight:700;font-size:16px;color:var(--navy);text-transform:capitalize;margin-bottom:12px">
-        📅 ${mesStr}
+    <div class="section-header mb-3">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn btn-ghost btn-sm" onclick="navPlan(-1)">◀</button>
+        <div style="font-weight:700;font-size:16px;color:var(--navy);text-transform:capitalize;min-width:180px;text-align:center">${mesStr}</div>
+        <button class="btn btn-ghost btn-sm" onclick="navPlan(1)">▶</button>
+        <button class="btn btn-ghost btn-sm" onclick="_planYear=new Date().getFullYear();_planMonth=new Date().getMonth();renderNovedadesAreaCalendar()">Hoy</button>
       </div>
-      ${calGrid}
+      <button class="btn btn-primary btn-sm" onclick="openNuevaNovedadArea()">+ Novedad</button>
     </div>
-    <div class="glass-card p-4">
-      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">Novedades recientes</div>
-      ${SC.novedadesArea.filter(n=>misEmps.some(e=>e.id===n.empId)).slice(-20).reverse().map(n=>{
-        const emp = SC.empleados.find(e=>e.id===n.empId);
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--navy-border)">
-          <div>
-            <span style="font-weight:600;font-size:13px">${emp?.name||'—'}</span>
-            <span style="font-size:11px;color:var(--text-muted);margin-left:8px">${n.fecha}</span>
-            <div><span style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};color:#fff;padding:2px 7px;border-radius:99px;font-size:11px">${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}${n.horas?' · '+n.horas+'h':''}</span></div>
-          </div>
-          ${can('write')?`<button onclick="eliminarNovedadArea('${n.id}')" style="border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:16px">×</button>`:''}
-        </div>`;
-      }).join('')}
+
+    <div class="info-box mb-3" style="font-size:11px;padding:8px 12px">${leyenda}
+      <span style="margin-left:8px;font-size:10px;color:var(--text-muted)">· Clic en cualquier celda para registrar novedad</span>
+    </div>
+
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid var(--navy-border)">
+      <table style="border-collapse:collapse;width:100%;table-layout:fixed">
+        <thead>
+          <tr>
+            <th style="min-width:160px;background:var(--navy);color:#fff;padding:8px;font-size:11px;text-align:left;position:sticky;left:0;z-index:3">
+              ${area ? area.icon+' '+area.name : 'Mi Equipo'} (${misEmps.length})
+            </th>
+            ${diasHdr}
+          </tr>
+        </thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>
+
+    <!-- Novedades del mes debajo del planeador -->
+    <div class="glass-card p-4 mt-4">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:10px">📋 Detalle de Novedades del Mes</div>
+      ${(() => {
+        const iniMes = `${_planYear}-${String(_planMonth+1).padStart(2,'0')}-01`;
+        const finMes = `${_planYear}-${String(_planMonth+1).padStart(2,'0')}-${String(diasMes).padStart(2,'0')}`;
+        const novsM  = SC.novedadesArea.filter(n =>
+          misEmps.some(e=>e.id===n.empId) && n.fecha>=iniMes && n.fecha<=finMes
+        ).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+        if (!novsM.length) return '<div class="text-muted text-sm">Sin novedades registradas este mes.</div>';
+        return novsM.map(n=>{
+          const emp2 = SC.empleados.find(e=>e.id===n.empId);
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--navy-border)">
+            <div>
+              <span style="font-weight:600;font-size:13px">${emp2?.name||'—'}</span>
+              <span style="font-size:11px;color:var(--text-muted);margin:0 8px">${n.fecha}</span>
+              <span style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};color:#fff;padding:2px 8px;border-radius:99px;font-size:11px">${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}${n.horas?' · '+n.horas+'h':''}</span>
+              ${n.descripcion?`<span style="font-size:11px;color:var(--text-muted);margin-left:6px">${n.descripcion}</span>`:''}
+            </div>
+            <button onclick="eliminarNovedadArea('${n.id}')" style="border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1">×</button>
+          </div>`;
+        }).join('');
+      })()}
     </div>`;
 }
 
-function openNuevaNovedadArea() { openNuevaNovedadAreaFecha(new Date().toISOString().split('T')[0]); }
-function openNuevaNovedadAreaFecha(fecha) {
-  const areaId  = SC.user?.areaId;
-  const misEmps = SC.empleados.filter(e => (areaId ? e.areaId===areaId : true) && e.status==='activo');
+function openNuevaNovedadArea() {
+  openNuevaNovedadAreaFecha(new Date().toISOString().split('T')[0], null);
+}
+function openNuevaNovedadAreaFecha(fecha, empIdPreset) {
+  const misEmps = getMisEmps();
   const sel = document.getElementById('nav-emp');
-  sel.innerHTML = misEmps.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  sel.innerHTML = misEmps.map(e=>`<option value="${e.id}" ${e.id===empIdPreset?'selected':''}>${e.name}</option>`).join('');
   document.getElementById('nav-fecha').value = fecha;
   document.getElementById('nav-horas').value = '';
   document.getElementById('nav-descripcion').value = '';
+  document.getElementById('nav-tipo').value = 'tardanza';
   openModal('modal-novedad-area');
 }
 
@@ -5242,22 +5563,23 @@ function saveNovedadArea() {
   const desc  = document.getElementById('nav-descripcion').value.trim();
   if (!empId||!fecha||!tipo) { showNotif('Completa los campos requeridos','error'); return; }
   SC.novedadesArea.push({
-    id: 'na' + Date.now(),
+    id: 'na'+Date.now(),
     empId, fecha, tipo, horas, descripcion: desc,
-    reportadoPor: SC.user?.name || '',
-    areaId: SC.user?.areaId || null,
+    reportadoPor: SC.user?.name||'',
+    areaId: SC.user?.areaId||null,
   });
   saveNovedadesAreaLocal();
   closeModal('modal-novedad-area');
   showNotif('📅 Novedad reportada ✅');
-  if (SC.currentView === 'novedades-area')    renderNovedadesAreaCalendar();
-  if (SC.currentView === 'novedades-diarias') renderNovedadesDiarias();
+  if (SC.currentView==='novedades-area')    renderNovedadesAreaCalendar();
+  if (SC.currentView==='novedades-diarias') renderNovedadesDiarias();
 }
 
 function eliminarNovedadArea(id) {
-  SC.novedadesArea = SC.novedadesArea.filter(n => n.id !== id);
+  SC.novedadesArea = SC.novedadesArea.filter(n=>n.id!==id);
   saveNovedadesAreaLocal();
-  renderNovedadesAreaCalendar();
+  if (SC.currentView==='novedades-area')    renderNovedadesAreaCalendar();
+  if (SC.currentView==='novedades-diarias') renderNovedadesDiarias();
 }
 
 window.renderNovedadesDiarias      = renderNovedadesDiarias;
@@ -5266,6 +5588,7 @@ window.openNuevaNovedadArea        = openNuevaNovedadArea;
 window.openNuevaNovedadAreaFecha   = openNuevaNovedadAreaFecha;
 window.saveNovedadArea             = saveNovedadArea;
 window.eliminarNovedadArea         = eliminarNovedadArea;
+window.navPlan                     = navPlan;
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -5459,6 +5782,160 @@ function saveMalla() {
   closeModal('modal-malla');
   showNotif('📋 Malla guardada para ' + periodo + ' ✅');
 }
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: MALLA DE TURNOS (Lider de Área)
+// ═══════════════════════════════════════════════════════════════
+function renderMallaArea() {
+  const viewEl = document.getElementById('view-novedades-area');
+  // Reutilizamos el contenedor de la vista novedades-area para malla-area
+  // usando un div separado que se muestra en la misma vista
+  const el = document.getElementById('novedades-area-calendar');
+  if (!el) return;
+
+  const misEmps = getMisEmps();
+  const hoy     = new Date();
+  const periodo = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+
+  el.innerHTML = `
+    <div class="section-header mb-4">
+      <div class="section-title" style="font-size:16px">📋 Malla de <span>Turnos del Área</span></div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-sm" onclick="abrirCargaMallaExcel()">📂 Cargar Excel</button>
+      </div>
+    </div>
+    <div class="info-box mb-4" style="font-size:12px">
+      💡 Puedes subir tu malla de turnos en Excel para que RRHH haga el cruce con el biométrico y determine las novedades de nómina (horas extra, dominicales, nocturnos, etc).
+    </div>
+    <div class="glass-card p-4 mb-4">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">Cargar Malla en Excel</div>
+      <div class="drop-zone" style="padding:24px;text-align:center" ondragover="event.preventDefault()" ondrop="handleMallaExcelDrop(event)">
+        <input type="file" id="malla-excel-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleMallaExcelFile(event)">
+        <div style="font-size:32px;margin-bottom:8px">📊</div>
+        <div style="font-weight:600;margin-bottom:4px">Arrastra tu archivo Excel de turnos aquí</div>
+        <div class="text-sm text-muted mb-3">Formato: empleado, fecha, turno/hora entrada, hora salida</div>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('malla-excel-file').click()">Seleccionar archivo Excel</button>
+      </div>
+      <div id="malla-excel-preview" style="margin-top:12px"></div>
+    </div>
+    <div class="glass-card p-4">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">📅 Mallas guardadas</div>
+      ${misEmps.map(emp => {
+        const mallas = SC.mallas?.[emp.id] || {};
+        const periodos = Object.keys(mallas).sort().reverse();
+        if (!periodos.length) return `<div style="padding:8px 0;border-bottom:1px solid var(--navy-border);font-size:13px;color:var(--text-muted)">${emp.name} — Sin malla registrada</div>`;
+        return periodos.map(p => {
+          const m = mallas[p];
+          const totalNorm = (m.normal||[]).reduce((s,h)=>s+h,0);
+          const totalExtra= (m.hora_extra||[]).reduce((s,h)=>s+h,0);
+          const totalDom  = (m.dominical||[]).reduce((s,h)=>s+h,0);
+          const totalNoct = (m.nocturno||[]).reduce((s,h)=>s+h,0);
+          return `<div style="padding:10px 0;border-bottom:1px solid var(--navy-border)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <span style="font-weight:600;font-size:13px">${emp.name}</span>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:8px">${p}</span>
+              </div>
+              <div style="display:flex;gap:12px;font-size:12px">
+                ${totalNorm?`<span>⏱ ${totalNorm}h normales</span>`:''}
+                ${totalExtra?`<span style="color:var(--green)">⭐ ${totalExtra}h extra</span>`:''}
+                ${totalDom?`<span style="color:#9333ea">🌟 ${totalDom}h dom</span>`:''}
+                ${totalNoct?`<span style="color:#1d4ed8">🌙 ${totalNoct}h noct</span>`:''}
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+      }).join('')}
+    </div>`;
+}
+
+function abrirCargaMallaExcel() {
+  document.getElementById('malla-excel-file')?.click();
+}
+
+function handleMallaExcelFile(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      let rows;
+      if (file.name.endsWith('.csv')) {
+        const text = new TextDecoder().decode(ev.target.result);
+        const sep  = (text.match(/;/g)||[]).length > (text.match(/,/g)||[]).length ? ';' : ',';
+        const lines = text.split(/\r?\n/).filter(l=>l.trim());
+        const hdrs  = lines[0].split(sep).map(h=>h.trim().toLowerCase());
+        rows = lines.slice(1).map(l => {
+          const vals=l.split(sep); const o={};
+          hdrs.forEach((h,i)=>{ o[h]=(vals[i]||'').trim(); });
+          return o;
+        });
+      } else if (typeof XLSX !== 'undefined') {
+        const wb = XLSX.read(ev.target.result, {type:'array', cellDates:true});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+        const hdrs = data[0].map(h=>String(h||'').trim().toLowerCase());
+        rows = data.slice(1).filter(r=>r.some(v=>v)).map(r=>{
+          const o={}; hdrs.forEach((h,i)=>{ o[h]=r[i]!=null?String(r[i]).trim():''; });
+          return o;
+        });
+      } else { showNotif('SheetJS no disponible, usa CSV', 'error'); return; }
+
+      // Parsear y guardar
+      let guardados = 0;
+      rows.forEach(row => {
+        const cedula  = String(row['cedula']||row['cc']||row['documento']||row['empleado']||'').replace(/[.\s,]/g,'');
+        const fecha   = normalizarFecha(row['fecha']||row['date']||row['dia']||'');
+        const entrada = row['entrada']||row['hora entrada']||row['turno entrada']||'';
+        const salida  = row['salida'] ||row['hora salida'] ||row['turno salida'] ||'';
+        const tipo    = (row['tipo']||row['turno']||'normal').toLowerCase();
+
+        if (!cedula || !fecha) return;
+        const emp = SC.empleados.find(e => String(e.cedula||'').replace(/[.\s,]/g,'') === cedula);
+        if (!emp) return;
+
+        const periodo = fecha.slice(0,7); // YYYY-MM
+        if (!SC.mallas) SC.mallas = {};
+        if (!SC.mallas[emp.id]) SC.mallas[emp.id] = {};
+        if (!SC.mallas[emp.id][periodo]) {
+          const dias = new Date(parseInt(periodo.split('-')[0]), parseInt(periodo.split('-')[1]), 0).getDate();
+          SC.mallas[emp.id][periodo] = { normal:Array(dias).fill(0), hora_extra:Array(dias).fill(0), dominical:Array(dias).fill(0), nocturno:Array(dias).fill(0), ausencia:Array(dias).fill(0), permiso:Array(dias).fill(0), incapacidad:Array(dias).fill(0) };
+        }
+        const dia = parseInt(fecha.split('-')[2]) - 1;
+        // Calcular horas trabajadas si hay entrada/salida
+        if (entrada && salida) {
+          const [hi,mi] = entrada.split(':').map(Number);
+          const [hf,mf] = salida.split(':').map(Number);
+          let horas = (hf*60+mf - hi*60-mi) / 60;
+          if (horas < 0) horas += 24;
+          const dow = new Date(_planYear||new Date().getFullYear(), parseInt(periodo.split('-')[1])-1, dia+1).getDay();
+          if (dow===0) SC.mallas[emp.id][periodo].dominical[dia] = +(horas.toFixed(1));
+          else if (hi >= 21 || hf <= 6) SC.mallas[emp.id][periodo].nocturno[dia] = +(horas.toFixed(1));
+          else SC.mallas[emp.id][periodo].normal[dia] = +(horas.toFixed(1));
+        } else if (tipo.includes('extra')) {
+          SC.mallas[emp.id][periodo].hora_extra[dia] = parseFloat(row['horas']||row['h']||'0');
+        }
+        guardados++;
+      });
+
+      try { localStorage.setItem('sc_mallas', JSON.stringify(SC.mallas)); } catch(e2) {}
+      const prev = document.getElementById('malla-excel-preview');
+      if (prev) prev.innerHTML = `<div class="info-box" style="background:rgba(22,163,74,.08);border-color:var(--green);font-size:12px">✅ Malla procesada — ${guardados} registros guardados de ${rows.length} filas.</div>`;
+      showNotif('📋 Malla de turnos importada ✅ — ' + guardados + ' registros');
+    } catch(err) { showNotif('Error procesando archivo: ' + err.message, 'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function handleMallaExcelDrop(e) {
+  e.preventDefault();
+  document.getElementById('malla-excel-file').files = e.dataTransfer.files;
+  handleMallaExcelFile({ target: { files: e.dataTransfer.files } });
+}
+
+window.renderMallaArea        = renderMallaArea;
+window.abrirCargaMallaExcel   = abrirCargaMallaExcel;
+window.handleMallaExcelFile   = handleMallaExcelFile;
+window.handleMallaExcelDrop   = handleMallaExcelDrop;
+
 
 window.openCargarBiometrico   = openCargarBiometrico;
 window.handleBioFile          = handleBioFile;
@@ -6989,10 +7466,16 @@ function loadSavedPasswords() {
 
 // ─── GESTIÓN DE USUARIOS ADMIN ────────────────────────────
 function openUserMgmt() {
-  const roles = ['superadmin','analista_rrhh','lider_rrhh','gerencia'];
   const container = document.getElementById('user-mgmt-list');
   if (!container) return;
   container.innerHTML = '';
+
+  // ── Sección: Roles administrativos ──
+  const roles = ['superadmin','analista_rrhh','lider_rrhh','gerencia'];
+  container.insertAdjacentHTML('beforeend', `
+    <div style="font-weight:700;font-size:13px;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid var(--navy-border)">
+      🔐 Roles Administrativos
+    </div>`);
   roles.forEach(role => {
     const u = USERS.find(x => x.role === role);
     if (!u) return;
@@ -7026,47 +7509,240 @@ function openUserMgmt() {
         <button class="btn btn-primary btn-sm" onclick="saveUserAdmin('${u.id}')">💾 Actualizar</button>
       </div>`);
   });
+
+  // ── Sección: Líderes de Área ──
+  const lideres = USERS.filter(u => u.role === 'lider_area');
+  const areasOpts = SC.areas.map(a => `<option value="${a.id}">${a.icon} ${a.name}</option>`).join('');
+
+  container.insertAdjacentHTML('beforeend', `
+    <div style="font-weight:700;font-size:13px;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin:20px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--navy-border)">
+      👥 Líderes de Área
+      <button class="btn btn-primary btn-sm" style="float:right;margin-top:-4px" onclick="agregarLiderArea()">+ Nuevo Líder</button>
+    </div>
+    <div id="lideres-list">${lideres.length===0 ? '<div class="text-muted text-sm p-3">Sin líderes de área registrados.</div>' : ''}</div>
+    <div id="form-nuevo-lider" style="display:none" class="glass-card p-4 mb-3">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">➕ Asignar Líder de Área</div>
+      <div class="form-group mb-3">
+        <label class="form-label">Seleccionar empleado del sistema *</label>
+        <select class="form-select" id="nl-emp-sel" onchange="toggleNuevoLiderFields()">
+          <option value="__nuevo__">— Crear usuario nuevo (no empleado) —</option>
+          ${SC.empleados.filter(e=>e.status==='activo').sort((a,b)=>a.name.localeCompare(b.name,'es')).map(e=>`<option value="${e.id}">${e.name} (${e.cargo})</option>`).join('')}
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">El empleado usará su número de cédula como usuario y contraseña inicial.</div>
+      </div>
+      <div class="form-group mb-3">
+        <label class="form-label">Área asignada *</label>
+        <select class="form-select" id="nl-area">${areasOpts}</select>
+      </div>
+      <div id="nl-campos-nuevousuario" style="display:none">
+        <div class="form-grid">
+          <div class="form-group mb-2">
+            <label class="form-label">Nombre completo *</label>
+            <input class="form-input" id="nl-nombre" placeholder="Nombre del líder">
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label">Usuario (login) *</label>
+            <input class="form-input" id="nl-user" placeholder="Ej: lider.taller">
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label">Contraseña *</label>
+            <input class="form-input" id="nl-pass" type="password" placeholder="Mínimo 6 caracteres">
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="guardarNuevoLider()">✅ Asignar como Líder</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-nuevo-lider').style.display='none'">Cancelar</button>
+      </div>
+    </div>`);
+
+  // Renderizar líderes existentes
+  const listaEl = container.querySelector('#lideres-list');
+  lideres.forEach(u => {
+    const area = SC.areas.find(a => String(a.id) === String(u.areaId));
+    listaEl.insertAdjacentHTML('beforeend', `
+      <div class="glass-card p-4 mb-3">
+        <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--navy)">${u.name}</div>
+            <div class="text-xs text-muted">Usuario: ${u.user} · Área: ${area ? area.icon+' '+area.name : '⚠️ Sin área asignada'}</div>
+          </div>
+          <div class="flex gap-2">
+            <span class="badge badge-navy">Líder de Área</span>
+            <button class="btn btn-danger btn-sm" onclick="eliminarLiderArea('${u.id}')">🗑</button>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group mb-2">
+            <label class="form-label">Nombre</label>
+            <input class="form-input" id="um-name-${u.id}" value="${u.name}">
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label">Usuario</label>
+            <input class="form-input" id="um-user-${u.id}" value="${u.user}">
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label">Nueva Contraseña</label>
+            <input class="form-input" id="um-pass-${u.id}" type="password" placeholder="Dejar vacío = sin cambio">
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label">Área asignada</label>
+            <select class="form-select" id="um-area-${u.id}">
+              ${SC.areas.map(a=>`<option value="${a.id}" ${String(a.id)===String(u.areaId)?'selected':''}>${a.icon} ${a.name}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveUserAdmin('${u.id}',true)">💾 Actualizar</button>
+      </div>`);
+  });
+
   openModal('modal-user-mgmt');
 }
 
-function saveUserAdmin(userId) {
+function agregarLiderArea() {
+  document.getElementById('form-nuevo-lider').style.display = '';
+  document.getElementById('nl-emp-sel').focus();
+  toggleNuevoLiderFields();
+}
+function toggleNuevoLiderFields() {
+  const val = document.getElementById('nl-emp-sel')?.value;
+  const campos = document.getElementById('nl-campos-nuevousuario');
+  if (campos) campos.style.display = (val === '__nuevo__') ? '' : 'none';
+}
+
+function guardarNuevoLider() {
+  const empSel = document.getElementById('nl-emp-sel')?.value;      // empleado existente
+  const nombre = document.getElementById('nl-nombre')?.value.trim();
+  const user   = document.getElementById('nl-user')?.value.trim();
+  const pass   = document.getElementById('nl-pass')?.value;
+  const areaId = document.getElementById('nl-area')?.value;
+
+  if (!areaId) { showNotif('Selecciona un área','error'); return; }
+
+  if (empSel && empSel !== '__nuevo__') {
+    // Promover empleado existente como líder
+    const emp = SC.empleados.find(e => e.id === empSel);
+    if (!emp) { showNotif('Empleado no encontrado','error'); return; }
+    const cedNorm = String(emp.cedula||'').replace(/[.\s,]/g,'');
+    // Buscar si ya tiene usuario
+    let userObj = USERS.find(u => u.user === cedNorm && u.role === 'empleado');
+    if (userObj) {
+      // Promover a lider_area sin perder su acceso como empleado
+      userObj.role     = 'lider_area';
+      userObj.roleName = 'Líder de Área';
+      userObj.areaId   = parseInt(areaId)||areaId;
+      userObj.empId    = emp.id;
+    } else {
+      const nuevoId = 'ul_' + emp.id;
+      userObj = { id:nuevoId, user:cedNorm, pass:cedNorm, name:emp.name,
+                  role:'lider_area', roleName:'Líder de Área',
+                  canWrite:true, areaId:parseInt(areaId)||areaId, empId:emp.id };
+      USERS.push(userObj);
+    }
+    persistUsers();
+    try {
+      const saved = JSON.parse(localStorage.getItem('sc_users')||'[]');
+      const idx = saved.findIndex(u=>u.id===userObj.id);
+      const entry = {...userObj};
+      if (idx>=0) saved[idx]={...saved[idx],...entry}; else saved.push(entry);
+      localStorage.setItem('sc_users', JSON.stringify(saved));
+    } catch(e) {}
+    const area = SC.areas.find(a => String(a.id) === String(areaId));
+    showNotif(`✅ ${emp.name} asignado como Líder de ${area?.name||areaId}. Login: ${cedNorm}`);
+    openUserMgmt();
+    return;
+  }
+
+  // Crear usuario nuevo (no empleado)
+  if (!nombre||!user||!pass) { showNotif('Completa todos los campos','error'); return; }
+  if (pass.length < 6) { showNotif('Contraseña mínimo 6 caracteres','error'); return; }
+  if (USERS.find(u => u.user === user)) { showNotif('Ese usuario ya existe','error'); return; }
+  const nuevoId = 'ul_' + Date.now();
+  USERS.push({ id:nuevoId, user, pass, name:nombre, role:'lider_area',
+               roleName:'Líder de Área', canWrite:true, areaId:parseInt(areaId)||areaId });
+  persistUsers();
+  try {
+    const saved = JSON.parse(localStorage.getItem('sc_users')||'[]');
+    saved.push({ id:nuevoId, name:nombre, user, pass, role:'lider_area', areaId:parseInt(areaId)||areaId });
+    localStorage.setItem('sc_users', JSON.stringify(saved));
+  } catch(e) {}
+  const area = SC.areas.find(a => String(a.id) === String(areaId));
+  showNotif(`✅ Líder "${nombre}" creado para ${area?.name||areaId}`);
+  openUserMgmt();
+}
+
+function eliminarLiderArea(userId) {
+  if (!confirm('¿Eliminar este líder de área?')) return;
+  const idx = USERS.findIndex(u => u.id === userId);
+  if (idx >= 0) USERS.splice(idx, 1);
+  persistUsers();
+  try {
+    const saved = JSON.parse(localStorage.getItem('sc_users')||'[]').filter(u => u.id !== userId);
+    localStorage.setItem('sc_users', JSON.stringify(saved));
+  } catch(e) {}
+  showNotif('Líder eliminado ✅');
+  openUserMgmt();
+}
+
+function saveUserAdmin(userId, esLider = false) {
   const u = USERS.find(x => x.id === userId);
   if (!u) return;
-  const newName = document.getElementById(`um-name-${userId}`)?.value.trim();
-  const newUser = document.getElementById(`um-user-${userId}`)?.value.trim();
-  const newPass = document.getElementById(`um-pass-${userId}`)?.value;
-  const newPass2= document.getElementById(`um-pass2-${userId}`)?.value;
+  const newName  = document.getElementById(`um-name-${userId}`)?.value.trim();
+  const newUser  = document.getElementById(`um-user-${userId}`)?.value.trim();
+  const newPass  = document.getElementById(`um-pass-${userId}`)?.value;
+  const newPass2 = document.getElementById(`um-pass2-${userId}`)?.value;
+  const newArea  = document.getElementById(`um-area-${userId}`)?.value;
   if (!newName || !newUser) { showNotif('Nombre y usuario son obligatorios', 'error'); return; }
   if (newPass && newPass !== newPass2) { showNotif('Las contraseñas no coinciden', 'error'); return; }
-  if (newPass && newPass.length < 6) { showNotif('Contraseña mínimo 6 caracteres', 'error'); return; }
-  // Verificar que el usuario no esté duplicado
+  if (newPass && newPass.length < 6)  { showNotif('Contraseña mínimo 6 caracteres', 'error'); return; }
   const dup = USERS.find(x => x.user === newUser && x.id !== userId);
   if (dup) { showNotif('Ese nombre de usuario ya existe', 'error'); return; }
   u.name = newName;
   u.user = newUser;
-  if (newPass) u.pass = newPass;
-  // Persistir
+  if (newPass)  u.pass   = newPass;
+  if (newArea)  u.areaId = parseInt(newArea)||newArea;
   try {
     const saved = JSON.parse(localStorage.getItem('sc_users')||'[]');
     const idx = saved.findIndex(x => x.id === userId);
-    const entry = { id: userId, name: newName, user: newUser, ...(newPass ? {pass: newPass} : {}) };
+    const entry = {
+      id: userId, name: newName, user: newUser,
+      ...(newPass ? {pass: newPass} : {}),
+      ...(newArea ? {areaId: parseInt(newArea)||newArea} : {}),
+    };
     if (idx >= 0) saved[idx] = {...saved[idx], ...entry};
     else saved.push(entry);
     localStorage.setItem('sc_users', JSON.stringify(saved));
   } catch(e) {}
-  showNotif(`Usuario "${newUser}" actualizado ✅`);
-  // Si el usuario activo cambió sus propios datos, actualizar sesión
+  if (u.role === 'lider_area') persistUsers();
+  showNotif(`✅ Usuario "${newUser}" actualizado`);
   if (SC.user?.id === userId) {
-    SC.user.name = newName;
-    SC.user.user = newUser;
+    SC.user.name   = newName;
+    SC.user.user   = newUser;
+    if (newArea) SC.user.areaId = parseInt(newArea)||newArea;
     document.getElementById('sf-name').textContent = newName;
     sessionStorage.setItem('sc_user', JSON.stringify(SC.user));
   }
-  openUserMgmt(); // Refrescar la lista
+  openUserMgmt();
 }
 
 // Extender loadSavedPasswords para también cargar usuario/nombre
 function loadSavedAdminUsers() {
+  try {
+    // Restaurar también líderes de área guardados
+    const savedUsers = JSON.parse(localStorage.getItem('sc_users')||'[]');
+    savedUsers.filter(s => s.role === 'lider_area').forEach(s => {
+      if (!USERS.find(u => u.id === s.id)) {
+        USERS.push({
+          id: s.id, user: s.user, pass: s.pass, name: s.name,
+          role: 'lider_area', roleName: 'Líder de Área',
+          canWrite: true, areaId: s.areaId,
+        });
+      } else {
+        const u = USERS.find(u => u.id === s.id);
+        if (s.areaId !== undefined) u.areaId = s.areaId;
+      }
+    });
+  } catch(e) {}
   try {
     const saved = JSON.parse(localStorage.getItem('sc_users')||'[]');
     saved.forEach(s => {
