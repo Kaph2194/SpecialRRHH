@@ -1117,6 +1117,7 @@ function showView(viewId) {
   else if (viewId === 'novedades-area')    { renderNovedadesAreaCalendar(); }
   else if (viewId === 'malla-area')        { showView('novedades-area'); renderMallaArea(); }
   else if (viewId === 'descuentos')        { renderDescuentos(); }
+  else if (viewId === 'vacaciones-admin')  { renderVacacionesAdmin(); }
   else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('w')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
   else if (viewId === 'drive-config') { openDrivePanel(); showView('dashboard'); }
@@ -5294,82 +5295,275 @@ const NOVEDAD_COLOR = {
   permiso:'var(--blue)', incapacidad:'var(--amber)', otro:'var(--text-muted)',
 };
 
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: VACACIONES DEL ÁREA (Líder)
+// ═══════════════════════════════════════════════════════════════
+function renderVacacionesAdmin() {
+  const el = document.getElementById('vacaciones-admin-content');
+  if (!el) return;
+  const misEmps = getMisEmps();
+  const hoy     = new Date().toISOString().split('T')[0];
+
+  // Tarjetas resumen del área
+  const totalEmps   = misEmps.length;
+  const enVacHoy    = misEmps.filter(e => SC.vacaciones.some(v => v.empId===e.id && v.estado==='aprobado' && v.inicio<=hoy && v.fin>=hoy)).length;
+  const pendientes  = SC.vacaciones.filter(v => misEmps.some(e=>e.id===v.empId) && v.estado==='pendiente').length;
+  const aprobadas   = SC.vacaciones.filter(v => misEmps.some(e=>e.id===v.empId) && v.estado==='aprobado').length;
+
+  // Tarjetas por empleado
+  const filas = misEmps.map(emp => {
+    const vI = calcVacInfo(emp);
+    const enVac = SC.vacaciones.some(v => v.empId===emp.id && v.estado==='aprobado' && v.inicio<=hoy && v.fin>=hoy);
+    const historial = SC.vacaciones.filter(v => v.empId===emp.id).sort((a,b)=>(b.fechaSolicitud||'').localeCompare(a.fechaSolicitud||'')).slice(0,3);
+
+    return `<div class="glass-card p-4 mb-3">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="emp-avatar" style="width:40px;height:40px;font-size:16px">${emp.name[0]}</div>
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--navy)">${emp.name}</div>
+            <div class="text-sm text-muted">${emp.cargo}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="text-align:center;padding:8px 14px;background:rgba(17,31,77,.06);border-radius:8px">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Causados</div>
+            <div style="font-size:20px;font-weight:800;color:var(--navy)">${vI.diasCausados}</div>
+          </div>
+          <div style="text-align:center;padding:8px 14px;background:rgba(22,163,74,.08);border-radius:8px">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Tomados</div>
+            <div style="font-size:20px;font-weight:800;color:var(--green)">${vI.diasTomados}</div>
+          </div>
+          <div style="text-align:center;padding:8px 14px;background:${vI.diasDisponibles>0?'rgba(59,130,246,.08)':'rgba(245,158,11,.08)'};border-radius:8px">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Disponibles</div>
+            <div style="font-size:20px;font-weight:800;color:${vI.diasDisponibles>0?'var(--blue)':'var(--amber)'}">${vI.diasDisponibles}</div>
+          </div>
+          ${enVac ? '<span class="badge badge-blue" style="align-self:center">🏖 En vacaciones</span>' : ''}
+        </div>
+      </div>
+      ${historial.length ? `
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--navy-border)">
+        ${historial.map(v => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0">
+          <span style="color:var(--text-muted)">${v.inicio} → ${v.fin} (${v.dias}d)</span>
+          ${statusBadge(v.estado)}
+        </div>`).join('')}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+      <div class="stat-card"><div class="stat-label">Empleados en área</div><div class="stat-value">${totalEmps}</div></div>
+      <div class="stat-card"><div class="stat-label">🏖 De vacaciones hoy</div><div class="stat-value" style="color:var(--blue)">${enVacHoy}</div></div>
+      <div class="stat-card"><div class="stat-label">⏳ Solicitudes pendientes</div><div class="stat-value" style="color:var(--amber)">${pendientes}</div></div>
+      <div class="stat-card"><div class="stat-label">✅ Períodos aprobados</div><div class="stat-value" style="color:var(--green)">${aprobadas}</div></div>
+    </div>
+    ${filas || '<div class="text-muted text-sm p-4">Sin empleados en el área.</div>'}`;
+}
+window.renderVacacionesAdmin = renderVacacionesAdmin;
+
 function renderNovedadesDiarias() {
   const el = document.getElementById('novedades-diarias-content');
   if (!el) return;
 
-  const hoy    = new Date().toISOString().split('T')[0];
-  const fecha  = document.getElementById('nd-fecha-filtro')?.value || hoy;
-  const areaF  = document.getElementById('nd-area-filtro')?.value || '';
+  const hoy         = new Date().toISOString().split('T')[0];
+  const fechaDesde  = document.getElementById('nd-fecha-desde')?.value || hoy;
+  const fechaHasta  = document.getElementById('nd-fecha-hasta')?.value || hoy;
+  const areaF       = document.getElementById('nd-area-filtro')?.value  || '';
+  const tipoF       = document.getElementById('nd-tipo-filtro')?.value  || '';
 
-  // Poblar select de áreas si está vacío
+  // Inicializar date pickers si están vacíos
+  const dsd = document.getElementById('nd-fecha-desde');
+  const dha = document.getElementById('nd-fecha-hasta');
+  if (dsd && !dsd.value) dsd.value = hoy;
+  if (dha && !dha.value) dha.value = hoy;
+
+  // Poblar select áreas
   const areasSel = document.getElementById('nd-area-filtro');
   if (areasSel && areasSel.options.length <= 1) {
     SC.areas.forEach(a => areasSel.insertAdjacentHTML('beforeend',
       `<option value="${a.id}">${a.icon} ${a.name}</option>`));
   }
 
-  // Novedades del día (de todos los módulos + novedadesArea)
-  const novsArea = SC.novedadesArea.filter(n => n.fecha === fecha);
-  const permisosDia = SC.permisos.filter(p => p.inicio <= fecha && (p.fin||p.inicio) >= fecha);
-  const incapsDia   = SC.incapacidades.filter(i => {
-    if (!i.fechaInicio) return false;
-    const fin = new Date(i.fechaInicio); fin.setDate(fin.getDate() + (i.dias||1) - 1);
-    return i.fechaInicio <= fecha && fin.toISOString().split('T')[0] >= fecha;
-  });
-  const vacsDia = SC.vacaciones.filter(v => v.estado==='aprobado' && v.inicio <= fecha && v.fin >= fecha);
+  // Rango de fechas
+  const fechas = [];
+  const d = new Date(fechaDesde);
+  const dFin = new Date(fechaHasta);
+  while (d <= dFin && fechas.length < 31) {
+    fechas.push(d.toISOString().split('T')[0]);
+    d.setDate(d.getDate() + 1);
+  }
+  const esSoloUnDia = fechaDesde === fechaHasta;
 
-  // Empleados activos filtrados por área
+  // Empleados filtrados
   let emps = SC.empleados.filter(e => e.status === 'activo');
   if (areaF) emps = emps.filter(e => String(e.areaId) === areaF);
 
-  // Resumen estadístico
-  const totalEmps    = emps.length;
-  const enVac        = emps.filter(e => vacsDia.some(v=>v.empId===e.id)).length;
-  const enIncap      = emps.filter(e => incapsDia.some(i=>i.empId===e.id)).length;
-  const conPermiso   = emps.filter(e => permisosDia.some(p=>p.empId===e.id&&p.status==='aprobado')).length;
-  const conNovedad   = emps.filter(e => novsArea.some(n=>n.empId===e.id)).length;
+  // Recopilar TODAS las novedades del rango
+  const todasLasNovs = [];
+
+  fechas.forEach(fecha => {
+    const novsArea   = SC.novedadesArea.filter(n => n.fecha === fecha);
+    const permsDia   = SC.permisos.filter(p => p.inicio <= fecha && (p.fin||p.inicio) >= fecha && p.status === 'aprobado');
+    const incapsDia  = SC.incapacidades.filter(i => {
+      if (!i.fechaInicio) return false;
+      const fin = new Date(i.fechaInicio); fin.setDate(fin.getDate() + (i.dias||1) - 1);
+      return i.fechaInicio <= fecha && fin.toISOString().split('T')[0] >= fecha;
+    });
+    const vacsDia    = SC.vacaciones.filter(v => v.estado==='aprobado' && v.inicio <= fecha && v.fin >= fecha);
+
+    emps.forEach(emp => {
+      const novArea  = novsArea.filter(n => n.empId === emp.id);
+      const perm     = permsDia.find(p => p.empId === emp.id);
+      const incap    = incapsDia.find(i => i.empId === emp.id);
+      const vac      = vacsDia.find(v => v.empId === emp.id);
+
+      // Agregar novedades del área
+      novArea.forEach(n => {
+        if (!tipoF || n.tipo === tipoF)
+          todasLasNovs.push({ empId:emp.id, empName:emp.name, fecha, tipo:n.tipo, horas:n.horas, desc:n.descripcion, fuente:'lider', reportadoPor:n.reportadoPor||'' });
+      });
+      // Agregar permisos como novedades
+      if (perm && (!tipoF || tipoF === 'permiso'))
+        todasLasNovs.push({ empId:emp.id, empName:emp.name, fecha, tipo:'permiso', horas:null, desc:tipoPermisoLabel(perm.tipo), fuente:'sistema', tratamiento:perm.tratamiento||'pendiente' });
+      // Incapacidades
+      if (incap && (!tipoF || tipoF === 'incapacidad'))
+        todasLasNovs.push({ empId:emp.id, empName:emp.name, fecha, tipo:'incapacidad', horas:null, desc:incap.diagnostico+' ('+incap.dias+'d)', fuente:'sistema' });
+      // Vacaciones
+      if (vac && (!tipoF || tipoF === 'vacaciones'))
+        todasLasNovs.push({ empId:emp.id, empName:emp.name, fecha, tipo:'vacaciones', horas:null, desc:'Vacaciones aprobadas', fuente:'sistema' });
+    });
+  });
+
+  // KPIs del rango
+  const totalNovs   = todasLasNovs.length;
+  const ausencias   = todasLasNovs.filter(n=>n.tipo==='ausencia').length;
+  const hextras     = todasLasNovs.filter(n=>n.tipo==='hora_extra').length;
+  const tardanzas   = todasLasNovs.filter(n=>n.tipo==='tardanza').length;
+  const incapTot    = todasLasNovs.filter(n=>n.tipo==='incapacidad').length;
+
+  // Cruce con biométrico si hay datos cargados
+  let cruceHtml = '';
+  if (_bioData && _bioData.length > 0) {
+    const cruceRows = [];
+    todasLasNovs.filter(n => n.fuente === 'lider').forEach(nov => {
+      const emp   = SC.empleados.find(e => e.id === nov.empId);
+      const cedNorm = String(emp?.cedula||'').replace(/[\.\s,]/g,'');
+      const marcaBio = _bioData.find(b => b.cedula === cedNorm && b.fecha === nov.fecha);
+      let estado = '⚠️ Sin marca biométrica';
+      let color  = 'var(--amber)';
+      if (marcaBio) {
+        estado = '✅ Coincide con biométrico';
+        color  = 'var(--green)';
+      }
+      cruceRows.push(`<tr>
+        <td style="font-weight:600;font-size:12px">${nov.empName}</td>
+        <td class="text-xs">${nov.fecha}</td>
+        <td><span style="background:${NOVEDAD_COLOR[nov.tipo]||'#888'};color:#fff;padding:2px 7px;border-radius:99px;font-size:11px">${TIPO_NOVEDAD_LABEL[nov.tipo]||nov.tipo}</span></td>
+        <td>${marcaBio ? `${marcaBio.entrada||'—'} → ${marcaBio.salida||'—'}` : '<span class="text-muted text-xs">Sin registro</span>'}</td>
+        <td style="font-weight:600;color:${color}">${estado}</td>
+      </tr>`);
+    });
+    if (cruceRows.length) {
+      cruceHtml = `<div class="glass-card p-4 mt-4">
+        <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:10px">🔍 Cruce Novedades vs Biométrico</div>
+        <div class="table-wrap" style="max-height:300px;overflow-y:auto">
+          <table class="data-table" style="font-size:12px">
+            <thead><tr><th>Empleado</th><th>Fecha</th><th>Novedad</th><th>Marca Biométrica</th><th>Resultado</th></tr></thead>
+            <tbody>${cruceRows.join('')}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+  }
+
+  // Vista: planner por fecha o tabla compacta
+  let plannerHtml = '';
+  if (esSoloUnDia) {
+    // Vista tabla del día
+    plannerHtml = `<div class="glass-card p-4">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:10px">📅 Novedades del ${fechaDesde}</div>
+      ${todasLasNovs.length === 0
+        ? '<div class="text-muted text-sm p-4">Sin novedades en este día.</div>'
+        : `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Empleado</th><th>Área</th><th>Tipo</th><th>Detalle</th><th>Fuente</th><th>Horario</th></tr></thead>
+          <tbody>${todasLasNovs.map(n => {
+            const emp   = SC.empleados.find(e => e.id === n.empId);
+            const area  = SC.areas.find(a => a.id === emp?.areaId);
+            const hor   = SC.horarios[n.empId];
+            const horStr= hor?.tipo==='fijo' ? `${hor.entrada}–${hor.salida}` : hor?.tipo||'—';
+            const fuenteBadge = n.fuente==='lider'
+              ? '<span style="background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">Líder</span>'
+              : '<span style="background:#eff6ff;color:#1e40af;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">Sistema</span>';
+            return `<tr>
+              <td style="font-weight:600">${n.empName}</td>
+              <td class="text-xs text-muted">${area?.icon||''} ${area?.name||'—'}</td>
+              <td><span style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};color:#fff;padding:2px 8px;border-radius:99px;font-size:11px">${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}${n.horas?' · '+n.horas+'h':''}</span></td>
+              <td class="text-xs" style="max-width:180px">${n.desc||'—'}</td>
+              <td>${fuenteBadge}</td>
+              <td class="text-xs text-muted">${horStr}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`}
+    </div>`;
+  } else {
+    // Vista planner: filas por empleado, columnas por fecha
+    const empConNovs = [...new Set(todasLasNovs.map(n => n.empId))];
+    const empsPlanner = emps.filter(e => empConNovs.includes(e.id) || !tipoF);
+
+    const diasHdr = fechas.map(f => {
+      const [, m, d] = f.split('-');
+      const dow = new Date(f).getDay();
+      const esFin = dow===0||dow===6;
+      return `<th style="min-width:42px;text-align:center;font-size:10px;padding:4px 2px;background:${esFin?'rgba(0,0,0,.05)':'transparent'};color:${esFin?'var(--text-muted)':'var(--navy)'};font-weight:700">
+        <div>${['D','L','M','X','J','V','S'][dow]}</div><div>${d}/${m}</div>
+      </th>`;
+    }).join('');
+
+    const filas = empsPlanner.slice(0, 50).map(emp => {
+      const area = SC.areas.find(a => a.id === emp.areaId);
+      const cells = fechas.map(fecha => {
+        const novsEmp = todasLasNovs.filter(n => n.empId === emp.id && n.fecha === fecha);
+        if (!novsEmp.length) return `<td style="border:1px solid var(--navy-border);min-width:42px;height:32px;padding:2px"></td>`;
+        const chips = novsEmp.map(n =>
+          `<div style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};border-radius:3px;padding:1px 3px;font-size:8px;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-bottom:1px" title="${n.empName} · ${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}">${TIPO_NOVEDAD_LABEL[n.tipo]?.split(' ')[0]||'📝'}</div>`
+        ).join('');
+        return `<td style="border:1px solid var(--navy-border);min-width:42px;padding:2px;vertical-align:top">${chips}</td>`;
+      }).join('');
+      return `<tr>
+        <td style="min-width:160px;padding:4px 8px;border-right:2px solid var(--navy-border);position:sticky;left:0;background:var(--bg-card);z-index:2;font-size:12px">
+          <div style="font-weight:600;color:var(--navy)">${emp.name.split(' ').slice(0,2).join(' ')}</div>
+          <div style="font-size:10px;color:var(--text-muted)">${area?.icon||''} ${area?.name||'—'}</div>
+        </td>${cells}
+      </tr>`;
+    }).join('');
+
+    plannerHtml = `<div style="overflow-x:auto;border-radius:10px;border:1px solid var(--navy-border)">
+      <table style="border-collapse:collapse;width:100%;table-layout:fixed">
+        <thead><tr>
+          <th style="min-width:160px;background:var(--navy);color:#fff;padding:8px;font-size:11px;text-align:left;position:sticky;left:0;z-index:3">
+            Empleado (${empsPlanner.length})
+          </th>${diasHdr}
+        </tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">
+      Mostrando ${todasLasNovs.length} novedades en el período${empsPlanner.length>50?' (primeros 50 empleados)':''}
+    </div>`;
+  }
 
   el.innerHTML = `
-    <div class="stats-grid mb-4" style="grid-template-columns:repeat(5,1fr)">
-      <div class="stat-card"><div class="stat-label">Total Empleados</div><div class="stat-value">${totalEmps}</div></div>
-      <div class="stat-card"><div class="stat-label">🏖 Vacaciones</div><div class="stat-value" style="color:var(--blue)">${enVac}</div></div>
-      <div class="stat-card"><div class="stat-label">🏥 Incapacitados</div><div class="stat-value" style="color:var(--amber)">${enIncap}</div></div>
-      <div class="stat-card"><div class="stat-label">📋 Con Permiso</div><div class="stat-value" style="color:var(--navy)">${conPermiso}</div></div>
-      <div class="stat-card"><div class="stat-label">📝 Novedades</div><div class="stat-value" style="color:var(--green)">${conNovedad}</div></div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px">
+      <div class="stat-card"><div class="stat-label">Novedades totales</div><div class="stat-value">${totalNovs}</div></div>
+      <div class="stat-card"><div class="stat-label">🔴 Ausencias</div><div class="stat-value" style="color:var(--red)">${ausencias}</div></div>
+      <div class="stat-card"><div class="stat-label">⏰ Tardanzas</div><div class="stat-value" style="color:var(--amber)">${tardanzas}</div></div>
+      <div class="stat-card"><div class="stat-label">⭐ Horas Extra</div><div class="stat-value" style="color:var(--green)">${hextras}</div></div>
+      <div class="stat-card"><div class="stat-label">🏥 Incapacidades</div><div class="stat-value" style="color:var(--amber)">${incapTot}</div></div>
     </div>
-    <div class="glass-card p-4">
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Empleado</th><th>Área</th><th>Estado del día</th><th>Horario</th><th>Novedad reportada</th></tr></thead>
-        <tbody>
-          ${emps.map(emp => {
-            const area    = SC.areas.find(a => a.id === emp.areaId);
-            const vac     = vacsDia.find(v => v.empId === emp.id);
-            const incap   = incapsDia.find(i => i.empId === emp.id);
-            const perm    = permisosDia.find(p => p.empId === emp.id && p.status === 'aprobado');
-            const novs    = novsArea.filter(n => n.empId === emp.id);
-            const horario = SC.horarios[emp.id];
-            const horStr  = horario?.tipo === 'fijo'
-              ? `${horario.entrada}–${horario.salida} (${horario.diasLaborales?.join('')})`
-              : horario?.tipo === 'flexible' ? 'Flexible' : horario?.tipo === 'rotativo' ? 'Rotativo' : '—';
-            let estadoDia = '<span style="color:var(--green)">✅ Normal</span>';
-            if (vac)  estadoDia = '<span style="color:var(--blue)">🏖 Vacaciones</span>';
-            if (incap) estadoDia = `<span style="color:var(--amber)">🏥 Incapacitado (${incap.dias}d)</span>`;
-            if (perm)  estadoDia = `<span style="color:var(--navy)">📋 ${tipoPermisoLabel(perm.tipo)}</span>`;
-            const novsStr = novs.length
-              ? novs.map(n => `<span style="background:${NOVEDAD_COLOR[n.tipo]||'#888'};color:#fff;padding:2px 7px;border-radius:99px;font-size:11px;margin-right:4px">${TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo}${n.horas?' '+n.horas+'h':''}</span>`).join('')
-              : '<span class="text-muted" style="font-size:12px">Sin novedad</span>';
-            return `<tr>
-              <td style="font-weight:600">${emp.name}</td>
-              <td class="text-sm text-muted">${area?.icon||''} ${area?.name||'—'}</td>
-              <td>${estadoDia}</td>
-              <td style="font-size:12px;color:var(--text-muted)">${horStr}</td>
-              <td>${novsStr}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table></div>
-    </div>`;
+    ${plannerHtml}
+    ${cruceHtml}`;
 }
 
 // ── Novedades Área (Líder) ────────────────────────────────────
@@ -5801,7 +5995,9 @@ function renderMallaArea() {
     <div class="section-header mb-4">
       <div class="section-title" style="font-size:16px">📋 Malla de <span>Turnos del Área</span></div>
       <div class="flex gap-2">
-        <button class="btn btn-ghost btn-sm" onclick="abrirCargaMallaExcel()">📂 Cargar Excel</button>
+        <button class="btn btn-ghost btn-sm" onclick="descargarPlantillaMalla()">📥 Descargar Plantilla</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportarNovedadesCSV()">📤 Exportar Novedades</button>
+        <button class="btn btn-primary btn-sm" onclick="abrirCargaMallaExcel()">📂 Cargar Malla Excel</button>
       </div>
     </div>
     <div class="info-box mb-4" style="font-size:12px">
@@ -5930,6 +6126,65 @@ function handleMallaExcelDrop(e) {
   document.getElementById('malla-excel-file').files = e.dataTransfer.files;
   handleMallaExcelFile({ target: { files: e.dataTransfer.files } });
 }
+
+
+// ═══════════════════════════════════════════════════════════════
+// PLANTILLA MALLA DE TURNOS — Descargar CSV modelo
+// ═══════════════════════════════════════════════════════════════
+function descargarPlantillaMalla() {
+  // Cabecera del CSV
+  const cols = ['cedula','nombre','fecha','turno','hora_entrada','hora_salida','tipo','horas_extra','observacion'];
+  // Filas de ejemplo
+  const ejemplos = [
+    ['1012345678','Juan Pérez','2025-06-02','Mañana','06:00','14:00','normal','0',''],
+    ['1012345678','Juan Pérez','2025-06-03','Tarde','14:00','22:00','normal','0',''],
+    ['1012345678','Juan Pérez','2025-06-07','Mañana','06:00','16:00','hora_extra','2','Horas extra autorizadas'],
+    ['1012345678','Juan Pérez','2025-06-08','Dominical','08:00','16:00','dominical','0',''],
+    ['2098765432','María López','2025-06-02','Fijo','08:00','17:00','normal','0',''],
+    ['2098765432','María López','2025-06-03','Fijo','08:00','17:00','normal','1',''],
+    ['2098765432','María López','2025-06-04','','','','ausencia','0','No se presentó'],
+    ['2098765432','María López','2025-06-06','Nocturno','22:00','06:00','nocturno','0',''],
+  ];
+  const csv = [cols, ...ejemplos].map(r => r.join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'Plantilla_Malla_Turnos.csv'; a.click();
+  URL.revokeObjectURL(url);
+  showNotif('📥 Plantilla descargada. Completa y súbela en "Mi Malla de Turnos".');
+}
+
+// Exportar novedades del área como CSV
+function exportarNovedadesCSV() {
+  const misEmps = getMisEmps();
+  const hoy     = new Date();
+  const anio    = _planYear || hoy.getFullYear();
+  const mes     = (_planMonth || hoy.getMonth()) + 1;
+  const iniMes  = `${anio}-${String(mes).padStart(2,'0')}-01`;
+  const diasMes = new Date(anio, mes, 0).getDate();
+  const finMes  = `${anio}-${String(mes).padStart(2,'0')}-${String(diasMes).padStart(2,'0')}`;
+
+  const novsM = SC.novedadesArea.filter(n =>
+    misEmps.some(e=>e.id===n.empId) && n.fecha>=iniMes && n.fecha<=finMes
+  );
+  const cols = ['cedula','nombre','area','fecha','tipo','horas','descripcion','reportado_por'];
+  const rows = novsM.map(n => {
+    const emp  = SC.empleados.find(e=>e.id===n.empId);
+    const area = SC.areas.find(a=>String(a.id)===String(emp?.areaId));
+    return [emp?.cedula||'', emp?.name||'', area?.name||'', n.fecha,
+            TIPO_NOVEDAD_LABEL[n.tipo]||n.tipo, n.horas||'', n.descripcion||'', n.reportadoPor||''].join(',');
+  });
+  const csv = [[cols.join(',')], ...rows].join('\n');
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8;'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href=url; a.download=`Novedades_${anio}_${String(mes).padStart(2,'0')}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  showNotif('📥 Novedades exportadas como CSV');
+}
+
+window.descargarPlantillaMalla = descargarPlantillaMalla;
+window.exportarNovedadesCSV    = exportarNovedadesCSV;
 
 window.renderMallaArea        = renderMallaArea;
 window.abrirCargaMallaExcel   = abrirCargaMallaExcel;
@@ -7835,6 +8090,7 @@ function verificarCupoYArchivar(cargo, areaId) {
 
 // ─── CRUD VACANTES ────────────────────────────────────────────
 function openVacantesPanel() {
+  if (SC.user?.role === 'lider_area') { showNotif('Los líderes de área no pueden crear vacantes. Contacta a RRHH.', 'error'); return; }
   const el = document.getElementById('vacantes-list');
   if (!el) return;
   // Poblar áreas

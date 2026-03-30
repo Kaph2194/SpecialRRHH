@@ -555,16 +555,40 @@
     <div id="view-novedades-diarias" class="view">
       <div class="section-header mb-4">
         <div class="section-title">Novedades <span>Diarias</span></div>
-        <div class="flex gap-2">
-          <input type="date" id="nd-fecha-filtro" class="form-input" style="width:160px" onchange="renderNovedadesDiarias()">
-          <select id="nd-area-filtro" class="form-select" style="width:160px" onchange="renderNovedadesDiarias()">
+        <div class="flex gap-2 flex-wrap">
+          <input type="date" id="nd-fecha-desde" class="form-input" style="width:145px" oninput="renderNovedadesDiarias()">
+          <input type="date" id="nd-fecha-hasta" class="form-input" style="width:145px" oninput="renderNovedadesDiarias()">
+          <select id="nd-area-filtro" class="form-select" style="width:155px" onchange="renderNovedadesDiarias()">
             <option value="">Todas las áreas</option>
           </select>
+          <select id="nd-tipo-filtro" class="form-select" style="width:155px" onchange="renderNovedadesDiarias()">
+            <option value="">Todos los tipos</option>
+            <option value="ausencia">🔴 Ausencia</option>
+            <option value="tardanza">⏰ Tardanza</option>
+            <option value="salida_temprana">🏃 Salida temprana</option>
+            <option value="hora_extra">⭐ Hora extra</option>
+            <option value="dominical">🌟 Dominical/Festivo</option>
+            <option value="nocturno">🌙 Nocturno</option>
+            <option value="permiso">📋 Permiso</option>
+            <option value="incapacidad">🏥 Incapacidad</option>
+            <option value="vacaciones">🏖 Vacaciones</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="renderNovedadesDiarias()">🔍 Filtrar</button>
           <button class="btn btn-ghost btn-sm" onclick="openCargarBiometrico()">📂 Cargar Biométrico</button>
           <button class="btn btn-ghost btn-sm" onclick="openCargarMalla()">📋 Malla sin Marca</button>
         </div>
       </div>
       <div id="novedades-diarias-content"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- VACACIONES ÁREA (Líder de Área)                  -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="view-vacaciones-admin" class="view">
+      <div class="section-header mb-4">
+        <div class="section-title">Vacaciones <span>del Área</span></div>
+      </div>
+      <div id="vacaciones-admin-content"></div>
     </div>
 
     <!-- ═══════════════════════════════════════════════ -->
