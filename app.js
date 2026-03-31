@@ -531,13 +531,30 @@ function dbToVac(r) {
   };
 }
 function dbToDisc(r) {
+  let etapas = {};
+  try { etapas = r.etapas ? (typeof r.etapas==='string' ? JSON.parse(r.etapas) : r.etapas) : {}; } catch(e) {}
   return {
     id: r.id, empId: r.emp_id, tipo: r.tipo||'llamado_atencion',
     fecha: r.fecha||'', descripcion: r.descripcion||'', obs: r.obs||'',
-    diasSuspension: r.dias_suspension||null, estado: r.estado||'en_proceso',
-    notificado: r.notificado||false, respuestaEmp: r.respuesta_emp||'',
-    creadoPor: r.creado_por||'', fechaCreacion: r.fecha_creacion||'',
-    archivos: [],
+    diasSuspension: r.dias_suspension||null,
+    estado:         r.estado||'en_proceso',
+    etapaActual:    r.etapa_actual||'solicitud',
+    notificado:     r.notificado||false,
+    respuestaEmp:   r.respuesta_emp||'',
+    creadoPor:      r.creado_por||'',
+    creadoPorRol:   r.creado_por_rol||'',
+    fechaCreacion:  r.fecha_creacion||'',
+    archivos:       [],
+    etapas,
+    solicitadoPorLider:    r.solicitado_por_lider||false,
+    areaIdSolicitante:     r.area_id_solicitante||null,
+    requiereVistoBuenoLider: r.requiere_visto_bueno||false,
+    liderOtraAreaId:       r.lider_otra_area_id||null,
+    liderOtraAreaNombre:   r.lider_otra_area_nombre||null,
+    vistoBuenolider:       r.visto_bueno_lider!==undefined ? r.visto_bueno_lider : true,
+    respuestaLiderArea:    r.respuesta_lider_area||'',
+    sancionFinal:          r.sancion_final||null,
+    motivacion:            r.motivacion||'',
   };
 }
 function dbToCand(r) {
@@ -645,9 +662,24 @@ async function sbSaveDisc(d) {
   const row = {
     id:d.id, emp_id:d.empId, tipo:d.tipo, fecha:d.fecha,
     descripcion:d.descripcion, obs:d.obs||'',
-    dias_suspension:d.diasSuspension||null, estado:d.estado||'en_proceso',
-    notificado:d.notificado||false, respuesta_emp:d.respuestaEmp||'',
-    creado_por:d.creadoPor||'', fecha_creacion:d.fechaCreacion||'',
+    dias_suspension:d.diasSuspension||null,
+    estado:d.estado||'en_proceso',
+    etapa_actual:d.etapaActual||'solicitud',
+    notificado:d.notificado||false,
+    respuesta_emp:d.respuestaEmp||'',
+    creado_por:d.creadoPor||'',
+    creado_por_rol:d.creadoPorRol||'',
+    fecha_creacion:d.fechaCreacion||'',
+    etapas: JSON.stringify(d.etapas||{}),
+    solicitado_por_lider:   d.solicitadoPorLider||false,
+    area_id_solicitante:    d.areaIdSolicitante||null,
+    requiere_visto_bueno:   d.requiereVistoBuenoLider||false,
+    lider_otra_area_id:     d.liderOtraAreaId||null,
+    lider_otra_area_nombre: d.liderOtraAreaNombre||null,
+    visto_bueno_lider:      d.vistoBuenolider!==undefined ? d.vistoBuenolider : null,
+    respuesta_lider_area:   d.respuestaLiderArea||'',
+    sancion_final:          d.sancionFinal||null,
+    motivacion:             d.motivacion||'',
   };
   await sbFetch('disciplinarios','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
@@ -4892,6 +4924,39 @@ function aprobarAperturaDisc(discId) {
 
 window.darVistoBuenoDisc  = darVistoBuenoDisc;
 window.aprobarAperturaDisc= aprobarAperturaDisc;
+
+// RH puede cambiar el tipo y sanción del proceso
+function actualizarTipoDisc(discId) {
+  const disc  = SC.disciplinarios.find(x => x.id === discId);
+  if (!disc) return;
+  const tipo  = document.getElementById(`disc-edit-tipo-${discId}`)?.value;
+  const dias  = parseInt(document.getElementById(`disc-edit-dias-${discId}`)?.value||'1');
+  if (!tipo) return;
+  disc.tipo          = tipo;
+  disc.diasSuspension= tipo==='suspension' ? dias : null;
+  sbSaveDisc(disc);
+  syncToSheets('disciplinarios');
+  showNotif('✅ Tipo de proceso actualizado');
+  openDiscDetail(discId);
+  renderDisciplinarios();
+}
+
+function handleEtapaFile(discId, e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    if (!SC._etapaFile) SC._etapaFile = {};
+    SC._etapaFile[discId] = { name: file.name, fileData: ev.target.result, type: file.type };
+    const lbl = document.getElementById('etapa-file-lbl-'+discId);
+    if (lbl) lbl.textContent = '✅ '+file.name;
+    showNotif('📎 '+file.name+' listo para adjuntar');
+  };
+  reader.readAsDataURL(file);
+}
+window.handleEtapaFile = handleEtapaFile;
+
+window.actualizarTipoDisc = actualizarTipoDisc;
+
 // Avanzar a la siguiente etapa del proceso disciplinario
 function avanzarEtapaDisc(discId) {
   const disc = SC.disciplinarios.find(x => x.id === discId);
@@ -4906,12 +4971,18 @@ function avanzarEtapaDisc(discId) {
   const fecha  = new Date().toISOString().split('T')[0];
 
   if (!disc.etapas) disc.etapas = {};
+  // Capturar archivo adjunto si hay para esta etapa
+  const fileInput = document.getElementById(`etapa-file-${discId}`);
+  const adjunto   = SC._etapaFile?.[discId] || null;
+  const archivos  = adjunto ? [adjunto] : [];
+  if (SC._etapaFile) delete SC._etapaFile[discId];
+
   disc.etapas[siguienteEtapa.key] = {
     completada:   true,
     fecha,
     responsable:  SC.user?.name || SC.user?.user || '',
     notas,
-    archivos:     [],
+    archivos,
   };
 
   // Acciones automáticas por etapa
@@ -4944,15 +5015,23 @@ function cerrarDiscConDecision(discId) {
     sancion,
     archivos: [],
   };
-  disc.etapaActual = 'decision';
-  disc.estado      = 'cerrado';
-  disc.sancionFinal= sancion;
-  disc.motivacion  = motivacion;
+  const hoy2 = new Date().toISOString().split('T')[0];
+  disc.etapaActual    = 'decision';
+  disc.estado         = 'cerrado';
+  disc.sancionFinal   = sancion;
+  disc.motivacion     = motivacion;
+  disc.fechaDecision  = hoy2;
 
-  // Si la sanción es terminación, marcar al empleado
+  // Si la sanción es terminación, marcar al empleado con fecha de retiro = fecha de decisión
   if (sancion === 'terminacion') {
     const emp = SC.empleados.find(e => e.id === disc.empId);
-    if (emp) { emp.status = 'retirado'; emp.fechaRetiro = new Date().toISOString().split('T')[0]; sbSaveEmpleado(emp); }
+    if (emp) {
+      emp.status = 'retirado';
+      emp.fechaRetiro = hoy2;
+      emp.motivoRetiro = 'Terminación con justa causa — Proceso disciplinario: ' + disc.id;
+      sbSaveEmpleado(emp);
+      showNotif('🔴 Empleado marcado como retirado por terminación de contrato');
+    }
   }
   sbSaveDisc(disc);
   syncToSheets('disciplinarios');
@@ -4985,8 +5064,10 @@ function openDiscDetail(id) {
 
   const idxActual   = ETAPAS_DISCIPLINARIO.findIndex(e => e.key === d.etapaActual);
   const esRH        = ['superadmin','analista_rrhh','lider_rrhh'].includes(SC.user?.role);
+  const esJuridico  = ['juridico','ceo','gerencia','superadmin'].includes(SC.user?.role);
   const esGerencia  = SC.user?.role === 'gerencia';
   const puedeAvanzar= esRH && d.estado !== 'cerrado';
+  const puedeVerTodo= esRH || esJuridico;
   const sigEtapa    = idxActual >= 0 && idxActual < ETAPAS_DISCIPLINARIO.length - 1
                       ? ETAPAS_DISCIPLINARIO[idxActual + 1] : null;
 
@@ -5029,6 +5110,28 @@ function openDiscDetail(id) {
   const fechaDecision   = d.etapas?.decision?.fecha;
   const limiteImpugn    = fechaDecision ? calcDiasHabiles(fechaDecision, 5) : '—';
 
+  // Panel de edición tipo de proceso (solo RH)
+  let panelEditarTipo = '';
+  if (esRH && d.estado === 'en_proceso') {
+    panelEditarTipo = `
+      <div class="glass-card p-3 mt-3" style="border-left:3px solid var(--navy)">
+        <div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:8px">✏️ Gestión del Proceso</div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group mb-0" style="flex:1;min-width:180px">
+            <label class="form-label" style="font-size:11px">Tipo de proceso</label>
+            <select class="form-select" id="disc-edit-tipo-${d.id}" style="font-size:12px">
+              ${Object.entries(TIPOS_DISCIPLINARIO).map(([k,v])=>`<option value="${k}" ${d.tipo===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group mb-0" style="flex:1;min-width:140px" id="disc-edit-dias-grp-${d.id}" style="${d.tipo==='suspension'?'':'display:none'}">
+            <label class="form-label" style="font-size:11px">Días suspensión</label>
+            <input class="form-input" id="disc-edit-dias-${d.id}" type="number" min="1" value="${d.diasSuspension||1}" style="font-size:12px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="actualizarTipoDisc('${d.id}')">💾 Actualizar tipo</button>
+        </div>
+      </div>`;
+  }
+
   // Panel de avance (solo RH, proceso abierto)
   let panelAvance = '';
   if (puedeAvanzar && sigEtapa) {
@@ -5039,6 +5142,14 @@ function openDiscDetail(id) {
           ➡️ Avanzar a Etapa ${sigEtapa.num}: ${sigEtapa.label}
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${sigEtapa.desc}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <input type="file" id="etapa-file-${d.id}" style="display:none"
+            onchange="handleEtapaFile('${d.id}',event)">
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('etapa-file-${d.id}').click()">
+            📎 Adjuntar documento
+          </button>
+          <span id="etapa-file-lbl-${d.id}" style="font-size:11px;color:var(--text-muted)">Opcional</span>
+        </div>
         ${esFinalDecision ? `
         <div class="form-group mb-2">
           <label class="form-label" style="font-size:12px">Sanción impuesta</label>
@@ -5117,7 +5228,8 @@ function openDiscDetail(id) {
     ${detalleEtapas}
     ${respPanel}
     ${impugnPanel}
-    ${panelVistoBuenoPendiente(d)}
+    ${panelEditarTipo}
+  ${panelVistoBuenoPendiente(d)}
   ${panelAvance}
   `;
   openModal('modal-disc-detail');
@@ -5141,37 +5253,252 @@ function cerrarDiscModal(id) {
 // Empleado responde a proceso disciplinario
 function renderDiscPortal() {
   const empId = SC.user?.empId;
-  // Empleado ve TODOS sus procesos (notificados o no)
-  const discs = SC.disciplinarios.filter(d => d.empId === empId);
-  let html = `<div class="section-header mb-4"><div class="section-title" style="font-size:16px">⚖️ Mis Procesos <span>Disciplinarios</span></div></div>`;
-  if(!discs.length){ html+='<div class="text-muted text-sm p-4 glass-card">No tienes procesos disciplinarios registrados.</div>'; return html; }
-  discs.forEach(d=>{
-    const tipo = TIPOS_DISCIPLINARIO[d.tipo]||{label:d.tipo,icon:'📋',color:'var(--navy)'};
-    html+=`<div class="perm-card mb-3">
-      <div class="flex justify-between items-center flex-wrap gap-2 mb-3">
-        <div style="color:${tipo.color};font-weight:700">${tipo.icon} ${tipo.label}</div>
+  // El empleado solo ve procesos donde ya fue notificado (etapa 3 completada o superior)
+  const discs = SC.disciplinarios.filter(d =>
+    d.empId === empId && (d.notificado || d.etapas?.notificacion?.completada)
+  );
+
+  let html = `<div class="section-header mb-4">
+    <div class="section-title" style="font-size:16px">⚖️ Mis Procesos <span>Disciplinarios</span></div>
+  </div>`;
+
+  if (!discs.length) {
+    html += `<div class="glass-card p-5 text-center">
+      <div style="font-size:32px;margin-bottom:8px">✅</div>
+      <div style="font-weight:600;color:var(--navy)">Sin procesos disciplinarios activos</div>
+      <div class="text-sm text-muted mt-2">No tienes procesos disciplinarios en curso.</div>
+    </div>`;
+    return html;
+  }
+
+  discs.sort((a,b)=>(b.fechaCreacion||'').localeCompare(a.fechaCreacion||'')).forEach(d => {
+    const tipo   = TIPOS_DISCIPLINARIO[d.tipo]||{label:d.tipo||'Proceso',icon:'⚖️',color:'var(--navy)'};
+    const etapas = ETAPAS_DISCIPLINARIO;
+    const idxAct = etapas.findIndex(e => e.key === d.etapaActual);
+
+    // Tracker compacto para el empleado
+    const trackerEmp = etapas.map((e,i) => {
+      const realizada = d.etapas?.[e.key]?.completada;
+      const esActual  = e.key === d.etapaActual;
+      const bg  = realizada ? '#22c55e' : esActual ? 'var(--navy)' : '#e5e7eb';
+      const col = (realizada || esActual) ? '#fff' : '#9ca3af';
+      return `<div style="display:flex;flex-direction:column;align-items:center;flex:1">
+        <div style="width:28px;height:28px;border-radius:50%;background:${bg};color:${col};
+             display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800">
+          ${realizada?'✓':e.num}
+        </div>
+        <div style="font-size:8px;text-align:center;color:${esActual?'var(--navy)':'#9ca3af'};
+             font-weight:${esActual?700:400};margin-top:2px;max-width:52px;line-height:1.1">
+          ${e.label.split(' ').slice(0,2).join(' ')}
+        </div>
+      </div>
+      ${i<etapas.length-1?`<div style="height:2px;background:${realizada?'#22c55e':'#e5e7eb'};flex:0 0 4px;align-self:center;margin-bottom:14px;min-width:6px"></div>`:''}`;
+    }).join('');
+
+    // Línea de tiempo completa de etapas completadas (visible para empleado)
+    const timelineItems = etapas.filter(e => d.etapas?.[e.key]?.completada).map(e => {
+      const et = d.etapas[e.key];
+      // Pruebas: solo mostrar si es etapa 4 (traslado de pruebas) o descripción de hechos en etapa 1
+      const muestraPruebas = e.key === 'traslado_pruebas' || e.key === 'solicitud';
+      const archivosHtml = (et.archivos||[]).length
+        ? et.archivos.map(a =>
+            `<a href="${a.driveUrl||a.fileData||'#'}" target="_blank"
+               style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;
+                      background:rgba(17,31,77,.06);border-radius:4px;font-size:11px;
+                      color:var(--navy);text-decoration:none;margin-top:4px">
+              📎 ${a.name||'Documento'}
+            </a>`).join('')
+        : (muestraPruebas && et.tienePruebas === false
+            ? '<div style="font-size:11px;color:var(--amber)">⚠️ Sin documentos adjuntos</div>'
+            : '');
+
+      return `<div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--navy-border)">
+        <div style="width:32px;height:32px;border-radius:50%;background:#22c55e;color:#fff;
+             flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">${e.icon}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:13px;color:var(--navy)">Etapa ${e.num} – ${e.label}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">
+            ${et.fecha||'—'} · ${et.responsable||'RRHH'}
+          </div>
+          ${et.notas?`<div style="font-size:12px;line-height:1.5;background:var(--surface);border-radius:6px;padding:8px">${et.notas}</div>`:''}
+          ${archivosHtml}
+          ${e.key==='decision'&&et.sancion?`
+            <div style="margin-top:6px">
+              <span style="padding:3px 10px;border-radius:6px;font-size:12px;font-weight:700;
+                background:${et.sancion==='ninguna'?'#dcfce7':et.sancion==='terminacion'?'#fee2e2':'#fef3c7'};
+                color:${et.sancion==='ninguna'?'#166534':et.sancion==='terminacion'?'#991b1b':'#92400e'}">
+                ${et.sancion==='ninguna'?'✅ Absolución':et.sancion==='terminacion'?'🔴 Terminación del contrato':'⚠️ '+et.sancion}
+              </span>
+            </div>`:''
+          }
+        </div>
+      </div>`;
+    }).join('');
+
+    // Bloque de defensa del empleado — visible desde etapa 5 (descargos)
+    const etapaDescargos   = d.etapas?.notificacion?.completada;
+    const puedeResponder   = etapaDescargos && d.estado !== 'cerrado';
+    const fechaLimiteResp  = d.etapas?.notificacion?.fecha
+      ? `Plazo máximo: ${calcDiasHabiles(d.etapas.notificacion.fecha, 5)}`
+      : '';
+
+    const bloqueDefensa = etapaDescargos ? `
+      <div class="glass-card p-4 mt-3" style="border-left:4px solid var(--blue)">
+        <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:8px">
+          🗣️ Tu Defensa y Descargos
+        </div>
+        ${fechaLimiteResp ? `<div style="font-size:11px;color:var(--amber);margin-bottom:8px">⏰ ${fechaLimiteResp} (5 días hábiles desde notificación)</div>` : ''}
+        ${d.respuestaEmp
+          ? `<div style="font-size:12px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px;line-height:1.5">${d.respuestaEmp}</div>
+             <div style="font-size:11px;color:var(--green);margin-top:6px">✅ Respuesta enviada</div>`
+          : puedeResponder ? `
+            <div class="form-group">
+              <label class="form-label" style="font-size:12px">Tu versión de los hechos y pruebas de descargo</label>
+              <textarea class="form-textarea" id="resp-${d.id}" rows="4"
+                placeholder="Presenta tu versión detallada, controvierte las pruebas presentadas y aporta las evidencias que consideres necesarias para tu defensa. Puedes ser acompañado por un compañero de trabajo o representante sindical..."></textarea>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+              <input type="file" id="def-file-${d.id}" style="display:none" onchange="handleDefensaFile('${d.id}',event)">
+              <button class="btn btn-ghost btn-sm" onclick="document.getElementById('def-file-${d.id}').click()">📎 Adjuntar pruebas de descargo</button>
+              <span id="def-file-lbl-${d.id}" style="font-size:11px;color:var(--text-muted)">Sin archivo</span>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="enviarRespuestaDisc('${d.id}')">📤 Enviar Descargos</button>`
+          : '<div class="text-muted text-sm">El proceso ha finalizado.</div>'}
+      </div>` : '';
+
+    // Bloque impugnación (si hay decisión y aún no se ha impugnado)
+    const bloqueImpugn = d.etapas?.decision?.completada && d.estado==='cerrado' && !d.etapas?.impugnacion?.completada ? `
+      <div class="glass-card p-4 mt-3" style="border-left:4px solid var(--amber)">
+        <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:8px">📩 Recurso de Impugnación</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+          Tienes ${calcDiasHabiles(d.etapas.decision.fecha, 5) !== '—' ? 'hasta el '+calcDiasHabiles(d.etapas.decision.fecha,5) : '5 días hábiles'} para solicitar reconsideración ante Gerencia.
+        </div>
+        <textarea class="form-textarea" id="impugn-${d.id}" rows="3"
+          placeholder="Expresa los fundamentos de tu impugnación..."></textarea>
+        <button class="btn btn-primary btn-sm mt-2" onclick="enviarImpugnacion('${d.id}')">📤 Enviar Impugnación</button>
+      </div>` : '';
+
+    // Decisión visible siempre que esté cerrado
+    const bloqueDecision = d.etapas?.decision?.completada ? `
+      <div style="padding:12px;border-radius:8px;margin-top:10px;
+        background:${d.sancionFinal==='ninguna'?'rgba(22,163,74,.06)':d.sancionFinal==='terminacion'?'rgba(239,68,68,.06)':'rgba(245,158,11,.06)'};
+        border:1px solid ${d.sancionFinal==='ninguna'?'rgba(22,163,74,.2)':d.sancionFinal==='terminacion'?'rgba(239,68,68,.2)':'rgba(245,158,11,.2)'}">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">⚖️ Resolución del Proceso</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;
+          color:${d.sancionFinal==='ninguna'?'var(--green)':d.sancionFinal==='terminacion'?'var(--red)':'var(--amber)'}">
+          ${d.sancionFinal==='ninguna'?'✅ Absolución — Sin sanción':
+            d.sancionFinal==='terminacion'?'🔴 Terminación del Contrato con Justa Causa':
+            '⚠️ '+(d.sancionFinal||'Sanción')}
+        </div>
+        ${d.motivacion?`<div style="font-size:12px;line-height:1.5">${d.motivacion}</div>`:''}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+          Fecha de decisión: ${d.etapas.decision.fecha||'—'} · Por: ${d.etapas.decision.responsable||'—'}
+        </div>
+      </div>` : '';
+
+    html += `<div class="glass-card p-4 mb-4">
+      <!-- Encabezado -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        <div>
+          <div style="color:${tipo.color};font-weight:700;font-size:15px">${tipo.icon} ${tipo.label}</div>
+          <div style="font-size:11px;color:var(--text-muted)">Iniciado: ${d.fechaCreacion||d.fecha}</div>
+        </div>
         ${statusBadge(d.estado)}
       </div>
-      <div class="text-sm mb-2">${d.descripcion}</div>
-      <div class="text-xs text-muted mb-3">Fecha: ${d.fecha}</div>
-      ${d.estado==='en_proceso'&&!d.respuestaEmp?`
-        <div>
-          <label class="form-label">Tu Respuesta / Descargos</label>
-          <textarea class="form-textarea" id="resp-${d.id}" rows="3" placeholder="Escribe tu respuesta..."></textarea>
-          <button class="btn btn-primary btn-sm mt-2" onclick="enviarRespuestaDisc('${d.id}')">📤 Enviar Respuesta</button>
-        </div>` :
-        d.respuestaEmp?`<div class="info-box text-sm">✅ Tu respuesta fue enviada: "${d.respuestaEmp.substring(0,80)}..."</div>`:''}
+
+      <!-- Tracker -->
+      <div style="background:var(--surface);border-radius:8px;padding:10px;margin-bottom:14px;overflow-x:auto">
+        <div style="display:flex;align-items:flex-start;gap:2px;min-width:420px">${trackerEmp}</div>
+      </div>
+
+      <!-- Hechos imputados (etapa 3 en adelante) -->
+      <div style="background:rgba(17,31,77,.04);border-radius:8px;padding:10px;margin-bottom:10px">
+        <div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">📋 Hechos imputados</div>
+        <div style="font-size:12px;line-height:1.5">${d.descripcion}</div>
+      </div>
+
+      ${bloqueDecision}
+
+      <!-- Línea de tiempo de etapas -->
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-weight:700;font-size:12px;color:var(--navy);padding:6px 0;user-select:none">
+          📅 Ver línea de tiempo completa (${Object.keys(d.etapas||{}).length} etapas registradas)
+        </summary>
+        <div style="margin-top:8px">${timelineItems||'<div class="text-muted text-sm">Sin etapas registradas aún.</div>'}</div>
+      </details>
+
+      ${bloqueDefensa}
+      ${bloqueImpugn}
     </div>`;
   });
   return html;
 }
 
 function enviarRespuestaDisc(id) {
-  const d = SC.disciplinarios.find(x=>x.id===id);
+  const d    = SC.disciplinarios.find(x => x.id === id);
   const resp = document.getElementById('resp-'+id)?.value.trim();
-  if(!resp){ showNotif('Escribe tu respuesta antes de enviar','error'); return; }
-  if(d){ d.respuestaEmp=resp; showNotif('Respuesta enviada ✅'); renderPortal(currentPortalTab); }
+  if (!resp) { showNotif('Escribe tu respuesta antes de enviar','error'); return; }
+  if (!d) return;
+
+  d.respuestaEmp = resp;
+  const hoy = new Date().toISOString().split('T')[0];
+  if (!d.etapas) d.etapas = {};
+  // Registrar descargos en etapa 5
+  if (!d.etapas.descargos?.completada) {
+    d.etapas.descargos = {
+      completada: true, fecha: hoy,
+      responsable: SC.user?.name || 'Empleado',
+      notas: resp,
+      archivos: d._defFile ? [d._defFile] : [],
+    };
+    if (d.etapaActual === 'notificacion' || d.etapaActual === 'traslado_pruebas') {
+      d.etapaActual = 'descargos';
+    }
+  }
+  d._defFile = null;
+  sbSaveDisc(d);
+  syncToSheets('disciplinarios');
+  showNotif('📤 Descargos enviados ✅ · RRHH los revisará');
+  renderPortal(currentPortalTab);
 }
+
+function handleDefensaFile(discId, e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const d = SC.disciplinarios.find(x => x.id === discId);
+    if (!d) return;
+    d._defFile = { name: file.name, fileData: ev.target.result };
+    const lbl = document.getElementById('def-file-lbl-'+discId);
+    if (lbl) lbl.textContent = '✅ '+file.name;
+    showNotif('📎 Adjunto listo: '+file.name);
+  };
+  reader.readAsDataURL(file);
+}
+
+function enviarImpugnacion(discId) {
+  const d    = SC.disciplinarios.find(x => x.id === discId);
+  const text = document.getElementById('impugn-'+discId)?.value.trim();
+  if (!text) { showNotif('Escribe los fundamentos de tu impugnación','error'); return; }
+  if (!d) return;
+  if (!d.etapas) d.etapas = {};
+  d.etapas.impugnacion = {
+    completada:  true,
+    fecha:       new Date().toISOString().split('T')[0],
+    responsable: SC.user?.name || 'Empleado',
+    notas:       text,
+    archivos:    [],
+  };
+  d.etapaActual = 'impugnacion';
+  d.estado      = 'impugnado';
+  sbSaveDisc(d);
+  syncToSheets('disciplinarios');
+  showNotif('📩 Impugnación enviada a Gerencia ✅');
+  renderPortal(currentPortalTab);
+}
+
+window.handleDefensaFile  = handleDefensaFile;
+window.enviarImpugnacion  = enviarImpugnacion;
 
 
 function renderEmpDisc(emp, container) {
