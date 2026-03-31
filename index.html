@@ -1594,14 +1594,24 @@
 
 <!-- Add Disciplinario -->
 <div class="modal-overlay" id="modal-add-disc">
-  <div class="modal" style="max-width:600px">
+  <div class="modal" style="max-width:620px;max-height:90vh;overflow-y:auto">
     <div class="modal-header">
-      <div class="modal-title">⚖️ Nuevo Proceso Disciplinario</div>
+      <div id="disc-modal-title" class="modal-title">⚖️ Nuevo Proceso Disciplinario</div>
       <button class="modal-close" onclick="closeModal('modal-add-disc')">✕</button>
     </div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">Empleado *</label><select class="form-select" id="disc-emp"></select></div>
-      <div class="form-grid">
+
+      <!-- Empleado -->
+      <div class="form-group">
+        <label class="form-label">Empleado * <span style="font-size:11px;color:var(--text-muted)">(solo empleados activos)</span></label>
+        <select class="form-select" id="disc-emp" onchange="checkDiscEmpArea()"></select>
+        <div id="disc-emp-area-warn" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(245,158,11,.1);border-left:3px solid var(--amber);border-radius:4px;font-size:12px">
+          ⚠️ <strong>Este empleado pertenece a otra área.</strong> El líder de esa área recibirá esta solicitud y deberá dar una primera respuesta antes de que RRHH proceda.
+        </div>
+      </div>
+
+      <!-- Tipo de proceso (solo RH/admin) -->
+      <div class="form-grid" id="disc-tipo-group">
         <div class="form-group">
           <label class="form-label">Tipo de Proceso *</label>
           <select class="form-select" id="disc-tipo" onchange="toggleDiscTipo()">
@@ -1612,21 +1622,63 @@
             <option value="terminacion">🔴 Terminación con Justa Causa</option>
           </select>
         </div>
-        <div class="form-group"><label class="form-label">Fecha del Proceso *</label><input class="form-input" id="disc-fecha" type="date"></div>
+        <div class="form-group">
+          <label class="form-label">Fecha *</label>
+          <input class="form-input" id="disc-fecha" type="date">
+        </div>
       </div>
       <div class="form-group" id="disc-dias-group" style="display:none">
         <label class="form-label">Días de Suspensión</label>
         <input class="form-input" id="disc-dias" type="number" min="1" placeholder="Número de días">
       </div>
-      <div class="form-group"><label class="form-label">Descripción de los Hechos *</label><textarea class="form-textarea" id="disc-desc" rows="4" placeholder="Describe los hechos que originan el proceso disciplinario..."></textarea></div>
-      <div class="form-group"><label class="form-label">Observaciones Adicionales</label><textarea class="form-textarea" id="disc-obs" rows="2" placeholder="Observaciones del proceso..."></textarea></div>
-      <div class="info-box" style="font-size:12px">
-        📧 Después de crear el proceso, recuerda notificar al empleado para que pueda ver y responder desde su portal.
+
+      <!-- Descripción -->
+      <div class="form-group">
+        <label class="form-label">Descripción de los Hechos *</label>
+        <textarea class="form-textarea" id="disc-desc" rows="4"
+          placeholder="Describe detalladamente los hechos: qué ocurrió, cuándo, dónde y cómo. Si requieres pruebas a las que no tienes acceso (cámaras, GPS, registros), indícalo aquí para que RRHH las gestione..."></textarea>
+      </div>
+
+      <!-- Pruebas adjuntas -->
+      <div class="form-group">
+        <label class="form-label">
+          📎 Pruebas (PDF único integrado)
+          <span id="disc-pruebas-req-badge" style="margin-left:6px;padding:2px 8px;background:rgba(245,158,11,.15);color:var(--amber);border-radius:4px;font-size:10px;font-weight:700">RECOMENDADO</span>
+        </label>
+        <div id="disc-sin-pruebas-warn" style="padding:10px 12px;background:rgba(239,68,68,.06);border-left:3px solid var(--red);border-radius:4px;font-size:12px;margin-bottom:8px">
+          ⚠️ <strong>Sin pruebas adjuntas el proceso puede no prosperar.</strong><br>
+          Las pruebas deben incluirse en <strong>un único archivo PDF integrado</strong> con todas las evidencias.
+          <strong>No será posible adjuntarlas posteriormente.</strong> Si no tienes acceso a grabaciones de 
+          cámaras, GPS, registros de plataforma o testimonios, indícalo en la descripción para que RRHH los gestione.
+        </div>
+        <input type="file" id="disc-pruebas-file" accept=".pdf,.jpg,.png,.mp4,.mp3"
+          style="display:none" onchange="handleDiscPruebas(event)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-ghost btn-sm" type="button"
+            onclick="document.getElementById('disc-pruebas-file').click()">
+            📂 Adjuntar pruebas
+          </button>
+          <span id="disc-pruebas-lbl" style="font-size:12px;color:var(--text-muted)">
+            Sin archivo adjunto
+          </span>
+        </div>
+      </div>
+
+      <!-- Observaciones -->
+      <div class="form-group">
+        <label class="form-label">Observaciones Adicionales</label>
+        <textarea class="form-textarea" id="disc-obs" rows="2"
+          placeholder="Contexto adicional, antecedentes, testigos..."></textarea>
+      </div>
+
+      <!-- Info box dinámico -->
+      <div class="info-box" id="disc-info-box" style="font-size:12px">
+        📧 El empleado será notificado únicamente cuando RRHH lo indique.
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-add-disc')">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveDiscipinario()">💾 Crear Proceso</button>
+      <button class="btn btn-primary" id="disc-btn-guardar" onclick="saveDiscipinario()">💾 Crear Proceso</button>
     </div>
   </div>
 </div>

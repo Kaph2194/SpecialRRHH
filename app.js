@@ -1031,8 +1031,7 @@ function buildSidebar() {
     addNavItem(nav, '🗓', 'Permisos del Área', 'permisos-admin');
     addNavItem(nav, '🏥', 'Incapacidades', 'incapacidades-admin');
     addNavItem(nav, '🏖', 'Vacaciones del Área', 'vacaciones-admin');
-    addNavItem(nav, '⚖️', 'Disciplinarios', 'disciplinarios');
-  addNavItem(nav, '🔒', 'Canal de Denuncias', 'denuncias-admin');
+    addNavItem(nav, '⚖️', 'Solicitar Proceso Disciplinario', 'disciplinarios');
     addNavSep(nav, 'NÓMINA');
     addNavItem(nav, '📋', 'Mi Malla de Turnos', 'malla-area');
     return;
@@ -1046,6 +1045,10 @@ function buildSidebar() {
   addNavItem(nav, '📐', 'Áreas', 'areas');
   addNavItem(nav, '🎯', 'Perfiles de Cargo', 'perfiles-cargo');
   addNavItem(nav, '⚖️', 'Disciplinarios', 'disciplinarios');
+  // Canal de Denuncias: solo jurídica, gerencia, CEO, superadmin
+  if (['superadmin','gerencia','juridico','ceo'].includes(u.role)) {
+    addNavItem(nav, '🔒', 'Canal de Denuncias', 'denuncias-admin');
+  }
   if (u.role === 'gerencia' || u.role === 'superadmin' || u.role === 'analista_rrhh' || u.role === 'lider_rrhh') {
     addNavItem(nav, '📊', 'Panel Gerencia', 'gerencia');
   }
@@ -3749,7 +3752,8 @@ function buildHistorialHtml(emp) {
   if (!historial.length) return '';
 
   const statusBadgeH = s => {
-    if (s === 'retirado')   return '<span class="badge badge-grey">Retirado</span>';
+    if (s === 'pendiente_apertura') return '<span class="badge badge-amber" style="background:rgba(245,158,11,.15);color:var(--amber);border-color:var(--amber)">⏳ Pendiente apertura</span>';
+  if (s === 'retirado')   return '<span class="badge badge-grey">Retirado</span>';
     if (s === 'activo')     return '<span class="badge badge-green">Activo</span>';
     if (s === 'sancionado') return '<span class="badge badge-red">Sancionado</span>';
     return '<span class="badge">' + s + '</span>';
@@ -4634,35 +4638,118 @@ function renderDisciplinarios() {
     return emp2 && String(emp2.areaId) === miArea_d;
   });
   discFiltrados.forEach(d => {
-    const emp = SC.empleados.find(e => e.id === d.empId);
-    const tipo = TIPOS_DISCIPLINARIO[d.tipo]||{label:d.tipo,icon:'📋'};
+    const emp  = SC.empleados.find(e => e.id === d.empId);
+    const tipo = TIPOS_DISCIPLINARIO[d.tipo]||{label:'Sin definir',icon:'📋',color:'var(--text-muted)'};
+    const area = SC.areas.find(a => a.id === emp?.areaId);
+    const esLider = SC.user?.role === 'lider_area';
+
+    // Badge de estado enriquecido
+    let estadoBadge = statusBadge(d.estado);
+    if (d.estado === 'pendiente_apertura') {
+      estadoBadge = '<span class="badge badge-amber">⏳ Pendiente apertura RH</span>';
+    }
+    // Si requiere visto bueno del lider de otra área y está pendiente
+    let vistoBuenoTag = '';
+    if (d.requiereVistoBuenoLider && d.vistoBuenolider === null) {
+      vistoBuenoTag = `<div style="font-size:10px;color:var(--amber);margin-top:2px">⏳ Esperando respuesta de: ${d.liderOtraAreaNombre||'Líder de área'}</div>`;
+    } else if (d.requiereVistoBuenoLider && d.vistoBuenolider === true) {
+      vistoBuenoTag = '<div style="font-size:10px;color:var(--green)">✅ Visto bueno del líder</div>';
+    } else if (d.requiereVistoBuenoLider && d.vistoBuenolider === false) {
+      vistoBuenoTag = '<div style="font-size:10px;color:var(--red)">❌ Objetado por líder</div>';
+    }
+
+    const tienePruebas = d.etapas?.solicitud?.tienePruebas;
+    const pruebasBadge = tienePruebas !== undefined
+      ? (tienePruebas ? '<span style="color:var(--green);font-size:10px">📎 Con pruebas</span>'
+                      : '<span style="color:var(--amber);font-size:10px">⚠️ Sin pruebas</span>')
+      : '';
+
+    // Acciones disponibles según rol y estado
+    let acciones = `<button class="btn btn-ghost btn-sm" onclick="openDiscDetail('${d.id}')">👁️ Ver</button>`;
+    // Lider de otra área puede dar visto bueno si le corresponde
+    if (d.requiereVistoBuenoLider && d.vistoBuenolider === null
+        && SC.user?.role === 'lider_area'
+        && String(SC.user.areaId) === String(emp?.areaId)) {
+      acciones += ` <button class="btn btn-primary btn-sm" onclick="darVistoBuenoDisc('${d.id}',true)">✅ Aprobar</button>
+                    <button class="btn btn-danger btn-sm" onclick="darVistoBuenoDisc('${d.id}',false)">❌ Objetar</button>`;
+    }
+    // RH puede aprobar apertura
+    if (!esLider && d.estado === 'pendiente_apertura') {
+      acciones += ` <button class="btn btn-primary btn-sm" onclick="aprobarAperturaDisc('${d.id}')">📂 Abrir Proceso</button>`;
+    }
+    if (!esLider && can('write') && d.estado === 'en_proceso') {
+      acciones += ` <button class="btn btn-ghost btn-sm" onclick="cerrarDisc('${d.id}')">✓ Cerrar</button>`;
+    }
+
     tb.insertAdjacentHTML('beforeend', `<tr>
       <td>
         <div style="font-weight:500">${emp?.name||'—'}</div>
-        <div class="text-xs text-muted">${emp?.cargo||''}</div>
+        <div class="text-xs text-muted">${emp?.cargo||''} · ${area?.icon||''} ${area?.name||'—'}</div>
+        ${vistoBuenoTag}
       </td>
-      <td><span style="color:${tipo.color}">${tipo.icon} ${tipo.label}</span></td>
-      <td class="text-xs text-muted">${d.fecha}</td>
-      <td style="max-width:200px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.descripcion}</td>
-      <td>${statusBadge(d.estado)}</td>
-      <td>${d.notificado?'<span class="badge badge-green">Notificado</span>':'<span class="badge badge-grey">Pendiente</span>'}</td>
       <td>
-        <button class="btn btn-ghost btn-sm" onclick="openDiscDetail('${d.id}')">👁️ Ver</button>
-        ${can('w')&&d.estado==='en_proceso'?`<button class="btn btn-ghost btn-sm" onclick="cerrarDisc('${d.id}')">✓ Cerrar</button>`:''}
+        <span style="color:${tipo.color}">${tipo.icon} ${tipo.label}</span>
+        ${pruebasBadge ? '<br>'+pruebasBadge : ''}
+        ${d.solicitadoPorLider?'<div style="font-size:10px;color:var(--text-muted)">Solicitado por líder</div>':''}
       </td>
+      <td class="text-xs text-muted">${d.fechaCreacion||d.fecha}</td>
+      <td style="max-width:200px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.descripcion}</td>
+      <td>${estadoBadge}</td>
+      <td>${d.notificado?'<span class="badge badge-green">✉️ Notificado</span>':'<span class="badge badge-grey">Sin notif.</span>'}</td>
+      <td><div class="flex gap-1">${acciones}</div></td>
     </tr>`);
   });
 }
 
 function openAddDisciplinarioModal() {
   SC._discEditId = null;
-  ['disc-desc','disc-dias','disc-obs'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  SC.pendingFiles = {};
+  ['disc-desc','disc-dias','disc-obs','disc-pruebas-lbl'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  const lbl = document.getElementById('disc-pruebas-lbl');
+  if (lbl) lbl.textContent = '📎 Adjuntar pruebas (PDF único con todas las evidencias)';
+
+  const esLider = SC.user?.role === 'lider_area';
   const sel = document.getElementById('disc-emp');
-  if(sel){ sel.innerHTML=''; SC.empleados.forEach(e=>sel.insertAdjacentHTML('beforeend',`<option value="${e.id}">${e.name}</option>`)); }
+  if (sel) {
+    sel.innerHTML = '';
+    // Solo empleados ACTIVOS en el listado
+    const empActivos = SC.empleados.filter(e => (e.status||'activo') === 'activo')
+      .sort((a,b) => a.name.localeCompare(b.name,'es'));
+    empActivos.forEach(e => {
+      const area = SC.areas.find(a => a.id === e.areaId);
+      const esOtraArea = esLider && SC.user?.areaId && String(e.areaId) !== String(SC.user.areaId);
+      const label = e.name + (area ? ' · ' + area.name : '') + (esOtraArea ? ' ⚠️ Otra área' : '');
+      sel.insertAdjacentHTML('beforeend', `<option value="${e.id}" ${esOtraArea?'style="color:var(--amber)"':''}>${label}</option>`);
+    });
+  }
+
   document.getElementById('disc-tipo').value = 'llamado_atencion';
   document.getElementById('disc-fecha').value = new Date().toISOString().split('T')[0];
   const diasGrp = document.getElementById('disc-dias-group');
-  if(diasGrp) diasGrp.style.display='none';
+  if (diasGrp) diasGrp.style.display = 'none';
+
+  // Ajustar UI según rol
+  const tituloEl  = document.getElementById('disc-modal-title');
+  const btnGuardar= document.getElementById('disc-btn-guardar');
+  const tipoGrp   = document.getElementById('disc-tipo-group');
+  const infoBox   = document.getElementById('disc-info-box');
+
+  if (esLider) {
+    if (tituloEl)  tituloEl.textContent  = '📋 Solicitar Apertura de Proceso Disciplinario';
+    if (btnGuardar) btnGuardar.textContent = '📤 Enviar Solicitud a RRHH';
+    if (tipoGrp)   tipoGrp.style.display  = 'none';  // lider no define el tipo
+    if (infoBox)   infoBox.innerHTML = `<strong>⚠️ Importante:</strong> Las pruebas deben adjuntarse en un <strong>único archivo PDF</strong> integrado.
+      Si no tienes pruebas en este momento, <strong>no podrás adjuntarlas posteriormente</strong>.
+      Sin pruebas sólidas el proceso puede no prosperar. Si necesitas grabaciones de cámaras, GPS u otros 
+      datos a los que no tienes acceso, indícalo en la descripción para que RRHH los gestione.`;
+  } else {
+    if (tituloEl)  tituloEl.textContent  = '⚖️ Nuevo Proceso Disciplinario';
+    if (btnGuardar) btnGuardar.textContent = '💾 Crear Proceso';
+    if (tipoGrp)   tipoGrp.style.display  = '';
+    if (infoBox)   infoBox.innerHTML = '📧 El empleado será notificado únicamente cuando RRHH lo indique. No se le notifica automáticamente.';
+  }
   openModal('modal-add-disc');
 }
 
@@ -4679,50 +4766,132 @@ function saveDiscipinario() {
   const desc  = document.getElementById('disc-desc').value.trim();
   if (!empId||!desc||!fecha) { showNotif('Completa los campos obligatorios','error'); return; }
 
-  const hoy   = new Date().toISOString().split('T')[0];
-  const disc  = {
-    id: 'd'+Date.now(), empId, tipo, fecha, descripcion: desc,
+  const esLider    = SC.user?.role === 'lider_area';
+  const hoy        = new Date().toISOString().split('T')[0];
+  const emp2       = SC.empleados.find(e => e.id === empId);
+  const areaEmp    = emp2?.areaId;
+  const areaLider  = SC.user?.areaId;
+
+  // Si el empleado es de otra área, verificar si hay lider de esa área para notificar
+  const esOtraArea  = esLider && areaEmp && String(areaEmp) !== String(areaLider);
+  const liderOtraArea= esOtraArea
+    ? USERS.find(u => u.role==='lider_area' && String(u.areaId)===String(areaEmp))
+    : null;
+
+  const disc = {
+    id: 'd'+Date.now(), empId,
+    tipo: esLider ? 'descargos' : tipo,  // lider no define el tipo, RH lo definirá
+    fecha, descripcion: desc,
     obs: document.getElementById('disc-obs')?.value||'',
     diasSuspension: tipo==='suspension'?(parseInt(document.getElementById('disc-dias')?.value)||1):null,
-    estado:          'en_proceso',
-    etapaActual:     'solicitud',     // comienza en etapa 1
-    notificado:      false,
-    respuestaEmp:    '',
-    archivos:        [],
-    creadoPor:       SC.user?.user||'rrhh',
-    fechaCreacion:   new Date().toLocaleDateString('es-CO'),
-    // Registro de cada etapa
+    // Estado inicial diferenciado: lider → pendiente de apertura por RH
+    estado:       esLider ? 'pendiente_apertura' : 'en_proceso',
+    etapaActual:  'solicitud',
+    notificado:   false,
+    respuestaEmp: '',
+    archivos:     [],
+    creadoPor:    SC.user?.name || SC.user?.user || 'rrhh',
+    creadoPorRol: SC.user?.role || '',
+    fechaCreacion: new Date().toLocaleDateString('es-CO'),
+    solicitadoPorLider: esLider,
+    areaIdSolicitante:  SC.user?.areaId || null,
+    // Si empleado es de otra área, requiere visto bueno del lider de esa área
+    requiereVistoBuenoLider: esOtraArea,
+    liderOtraAreaId:    liderOtraArea?.id || null,
+    liderOtraAreaNombre:liderOtraArea?.name || null,
+    vistoBuenolider:    esOtraArea ? null : true, // null=pendiente, true=aprobado, false=rechazado
+    respuestaLiderArea: '',
     etapas: {
       solicitud: {
         completada: true,
         fecha: hoy,
-        responsable: SC.user?.name||SC.user?.user||'',
+        responsable: SC.user?.name || SC.user?.user || '',
         notas: desc,
         archivos: [],
+        tienePruebas: !!(SC.pendingFiles?.solicitud_disc),
       },
     },
-    // Para solicitudes de lider_area → RH debe aprobar apertura
-    solicitadoPorLider: SC.user?.role === 'lider_area',
-    areaId: SC.user?.areaId || null,
   };
 
-  // Subir archivo de solicitud si hay
+  // Subir archivo de pruebas si se adjuntó
   const archivoSol = SC.pendingFiles?.solicitud_disc;
-  if (archivoSol && GAPI_CONFIG.connected) {
-    const emp2 = SC.empleados.find(e=>e.id===empId);
-    uploadToDrive(archivoSol.data, archivoSol.name||'Solicitud_Disc.pdf', 'disciplinarios', emp2?.name||empId)
-      .then(fid => { if(fid) disc.etapas.solicitud.archivos.push({name:archivoSol.name, driveId:fid}); sbSaveDisc(disc); });
+  if (archivoSol) {
+    disc.etapas.solicitud.tienePruebas = true;
+    if (GAPI_CONFIG.connected) {
+      uploadToDrive(archivoSol.data, archivoSol.name||'Pruebas_Disc_'+emp2?.name+'.pdf', 'disciplinarios', emp2?.name||empId)
+        .then(fid => {
+          if (fid) disc.etapas.solicitud.archivos.push({name:archivoSol.name, driveId:fid, driveUrl: driveViewUrl(fid)});
+          sbSaveDisc(disc);
+        });
+    } else {
+      disc.etapas.solicitud.archivos.push({name:archivoSol.name, fileData:archivoSol.data});
+    }
   }
   SC.pendingFiles = {};
 
   SC.disciplinarios.push(disc);
   closeModal('modal-add-disc');
   sbSaveDisc(disc);
-  showNotif('Proceso disciplinario creado ✅ · Etapa 1: Solicitud de apertura registrada');
   syncToSheets('disciplinarios');
+
+  if (esLider) {
+    if (esOtraArea && liderOtraArea) {
+      showNotif(`📋 Solicitud enviada a RRHH · ⚠️ El empleado es del área de ${liderOtraArea.name} — se le notificará para dar su primera respuesta antes de que RRHH proceda`);
+    } else {
+      showNotif('📋 Solicitud enviada a RRHH ✅ · No se ha notificado al empleado');
+    }
+  } else {
+    showNotif('⚖️ Proceso disciplinario creado ✅ · Etapa 1 registrada');
+  }
   renderDisciplinarios();
 }
 
+
+// Lider de área da visto bueno a solicitud de proceso sobre empleado de su área
+function darVistoBuenoDisc(discId, aprobado) {
+  const disc = SC.disciplinarios.find(x => x.id === discId);
+  if (!disc) return;
+  disc.vistoBuenolider   = aprobado;
+  disc.respuestaLiderArea= aprobado
+    ? 'El líder del área confirma los hechos y avala la apertura del proceso.'
+    : 'El líder del área objeta la solicitud o no confirma los hechos expuestos.';
+  const nota = prompt(aprobado ? 'Observaciones (opcional):' : 'Motivo de objeción *:');
+  if (!aprobado && !nota) { showNotif('Debes indicar el motivo de la objeción','error'); return; }
+  if (nota) disc.respuestaLiderArea = nota;
+  sbSaveDisc(disc);
+  syncToSheets('disciplinarios');
+  showNotif(aprobado ? '✅ Visto bueno registrado — RRHH puede proceder' : '❌ Objeción registrada — RRHH evaluará');
+  renderDisciplinarios();
+}
+
+// RH aprueba formalmente la apertura del proceso (etapa 2)
+function aprobarAperturaDisc(discId) {
+  const disc = SC.disciplinarios.find(x => x.id === discId);
+  if (!disc) return;
+  // Si requería visto bueno y está rechazado, avisar
+  if (disc.requiereVistoBuenoLider && disc.vistoBuenolider === null) {
+    if (!confirm('⚠️ El líder del área del empleado aún no ha dado respuesta.\n¿Deseas abrir el proceso de todas formas?')) return;
+  }
+  if (!disc.etapas) disc.etapas = {};
+  const hoy = new Date().toISOString().split('T')[0];
+  disc.etapas.apertura = {
+    completada:  true,
+    fecha:       hoy,
+    responsable: SC.user?.name || SC.user?.user || '',
+    notas:       'Apertura formal del proceso. Constancia de apertura generada.',
+    archivos:    [],
+  };
+  disc.etapaActual = 'apertura';
+  disc.estado      = 'en_proceso';
+  sbSaveDisc(disc);
+  syncToSheets('disciplinarios');
+  showNotif('📂 Proceso abierto formalmente ✅ — Etapa 2 registrada');
+  openDiscDetail(discId);
+  renderDisciplinarios();
+}
+
+window.darVistoBuenoDisc  = darVistoBuenoDisc;
+window.aprobarAperturaDisc= aprobarAperturaDisc;
 // Avanzar a la siguiente etapa del proceso disciplinario
 function avanzarEtapaDisc(discId) {
   const disc = SC.disciplinarios.find(x => x.id === discId);
@@ -4948,7 +5117,8 @@ function openDiscDetail(id) {
     ${detalleEtapas}
     ${respPanel}
     ${impugnPanel}
-    ${panelAvance}
+    ${panelVistoBuenoPendiente(d)}
+  ${panelAvance}
   `;
   openModal('modal-disc-detail');
 }
@@ -6826,6 +6996,72 @@ function abrirCalculadoraSalarialEmp(empId) {
 window.buildPerfilCargoEmpHTML      = buildPerfilCargoEmpHTML;
 window.abrirCalculadoraSalarialEmp  = abrirCalculadoraSalarialEmp;
 
+
+
+// Manejar archivo de pruebas adjunto en solicitud disciplinaria
+
+// Verifica si el empleado seleccionado es de otra área (para lider_area)
+function checkDiscEmpArea() {
+  const empId  = document.getElementById('disc-emp')?.value;
+  const warn   = document.getElementById('disc-emp-area-warn');
+  if (!warn || !empId || SC.user?.role !== 'lider_area') return;
+  const emp    = SC.empleados.find(e => e.id === empId);
+  const esOtra = emp && SC.user?.areaId && String(emp.areaId) !== String(SC.user.areaId);
+  warn.style.display = esOtra ? '' : 'none';
+  // Actualizar texto con nombre del área
+  if (esOtra) {
+    const area = SC.areas.find(a => String(a.id) === String(emp.areaId));
+    warn.innerHTML = `⚠️ <strong>Este empleado pertenece a ${area?.icon||''} ${area?.name||'otra área'}.</strong> 
+      El líder de esa área recibirá esta solicitud y deberá dar una primera respuesta antes de que RRHH proceda.`;
+  }
+}
+window.checkDiscEmpArea = checkDiscEmpArea;
+
+function handleDiscPruebas(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!SC.pendingFiles) SC.pendingFiles = {};
+  const reader = new FileReader();
+  reader.onload = ev => {
+    SC.pendingFiles.solicitud_disc = { name: file.name, data: ev.target.result, type: file.type };
+    const lbl = document.getElementById('disc-pruebas-lbl');
+    if (lbl) lbl.textContent = '✅ ' + file.name + ' (' + (file.size/1024).toFixed(0) + ' KB)';
+    // Quitar advertencia si existía
+    const warn = document.getElementById('disc-sin-pruebas-warn');
+    if (warn) warn.style.display = 'none';
+    showNotif('📎 Prueba adjunta: ' + file.name);
+  };
+  reader.readAsDataURL(file);
+}
+window.handleDiscPruebas = handleDiscPruebas;
+
+// Mostrar panel visto bueno pendiente en openDiscDetail
+function panelVistoBuenoPendiente(disc) {
+  if (!disc.requiereVistoBuenoLider || disc.vistoBuenolider !== null) return '';
+  // Solo si yo soy el lider de la otra área
+  const soyLiderOtraArea = SC.user?.role === 'lider_area'
+    && disc.liderOtraAreaId === SC.user?.id;
+  if (!soyLiderOtraArea) return '';
+  return `
+    <div class="glass-card p-4 mt-3" style="border-left:4px solid var(--amber)">
+      <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:8px">
+        ⚠️ Solicitud de proceso sobre empleado de tu área
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+        Se ha recibido una solicitud de apertura de proceso disciplinario para un colaborador 
+        de tu área. Como líder, debes dar una primera respuesta antes de que RRHH proceda.
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="darVistoBuenoDisc('${disc.id}',true)">
+          ✅ Confirmo los hechos — Avalar apertura
+        </button>
+        <button class="btn btn-danger btn-sm" onclick="darVistoBuenoDisc('${disc.id}',false)">
+          ❌ Objeto la solicitud
+        </button>
+      </div>
+    </div>`;
+}
+window.panelVistoBuenoPendiente = panelVistoBuenoPendiente;
 
 // ═══════════════════════════════════════════════════════════════
 // MÓDULO: CANAL DE DENUNCIAS Y REPORTES
