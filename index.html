@@ -204,6 +204,14 @@
           <option value="retirado">🔴 Retirados</option>
           <option value="sancionado">⚠️ Sancionados</option>
         </select>
+        <select id="filter-vinculacion" class="form-select" onchange="renderEmpleados()" style="width:150px">
+          <option value="">Todos los tipos</option>
+          <option value="directo">👔 Directos</option>
+          <option value="contratista">🔧 Contratistas</option>
+          <option value="temporal">⏱ Temporales</option>
+          <option value="practicante">🎓 Practicantes</option>
+          <option value="tercero">🤝 Terceros</option>
+        </select>
       </div>
       <div id="empleados-grid"></div>
     </div>
@@ -352,6 +360,7 @@
         <div class="tab" onclick="portalTab('contratos',this)">📄 Mis Contratos</div>
         <div class="tab" onclick="portalTab('vacaciones',this)">🏖 Mis Vacaciones</div>
         <div class="tab" onclick="portalTab('bodega',this)">🗄 Bodega</div>
+        <div class="tab" onclick="portalTab('denuncias',this)">🔒 Denuncias</div>
       </div>
       <div id="portal-content"></div>
     </div>
@@ -998,9 +1007,20 @@
         </div>
       </div>
 
+      <div class="form-group">
+        <label class="form-label">Tipo de Vinculación</label>
+        <select class="form-select" id="em-tipo-vinculacion">
+          <option value="directo">👔 Empleado Directo</option>
+          <option value="contratista">🔧 Contratista / Prestación de Servicios</option>
+          <option value="temporal">⏱ Temporal (ETT)</option>
+          <option value="practicante">🎓 Practicante / Aprendiz</option>
+          <option value="tercero">🤝 Tercero / Outsourcing</option>
+        </select>
+      </div>
+
       <div class="form-group" id="em-status-group" style="display:none">
         <label class="form-label">Estado del Empleado</label>
-        <select class="form-select" id="em-status">
+        <select class="form-select" id="em-status" onchange="toggleFechaRetiro()">
           <option value="activo">✅ Activo</option>
           <option value="sancionado">⚠️ Sancionado</option>
           <option value="retirado">🔴 Retirado</option>
@@ -1008,6 +1028,10 @@
         <div class="info-box mt-2" style="font-size:12px">
           ⚠️ Cambiar a "Retirado" limitará el acceso del empleado solo a certificaciones y documentos.
         </div>
+      </div>
+      <div class="form-group" id="em-fecha-retiro-group" style="display:none">
+        <label class="form-label">Fecha de Retiro</label>
+        <input class="form-input" id="em-fecha-retiro" type="date">
       </div>
     </div>
     <div class="modal-footer">
@@ -1308,6 +1332,104 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-add-doc-emp')">Cancelar</button>
       <button class="btn btn-primary" onclick="saveDocEmpleado()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vista Denuncias Admin -->
+<div id="view-denuncias-admin" class="view">
+  <div class="section-header mb-4">
+    <div class="section-title">🔒 Canal de <span>Denuncias</span></div>
+  </div>
+  <div id="denuncias-admin-content"></div>
+</div>
+
+<!-- Modal Nueva Denuncia -->
+<div class="modal-overlay" id="modal-nueva-denuncia">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">🔒 Nuevo Reporte / Denuncia</div>
+        <div class="text-sm text-muted mt-1">Tu reporte es confidencial y está protegido por la ley</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-nueva-denuncia')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Tipo de Reporte *</label>
+        <select class="form-select" id="den-tipo">
+          <option value="acoso_laboral">🚨 Acoso Laboral / Hostigamiento</option>
+          <option value="acoso_sexual">🛑 Acoso Sexual</option>
+          <option value="conducta_delictiva">⚠️ Conducta Delictiva en la Organización</option>
+          <option value="sarlaft">🏦 Proceso SARLAFT (Lavado de Activos)</option>
+          <option value="datos_personales">🔒 Violación Protección Datos Personales</option>
+          <option value="conflicto_interes">⚖️ Conflicto de Interés</option>
+          <option value="fraude">💰 Fraude o Corrupción Interna</option>
+          <option value="otro">📝 Otro Reporte / Sugerencia</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Fecha aproximada de los hechos</label>
+        <input class="form-input" id="den-fecha-hechos" type="date">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descripción detallada de los hechos *</label>
+        <textarea class="form-textarea" id="den-descripcion" rows="4"
+          placeholder="Describe con el mayor detalle posible lo ocurrido: qué, cuándo, dónde, cómo..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Personas involucradas (opcional)</label>
+        <input class="form-input" id="den-involucrados"
+          placeholder="Nombre o cargo de las personas involucradas">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(245,158,11,.08);border-radius:8px;margin-bottom:8px">
+        <input type="checkbox" id="den-anonimo" style="width:18px;height:18px;cursor:pointer">
+        <label for="den-anonimo" style="font-size:13px;cursor:pointer;font-weight:600">
+          🎭 Enviar de forma anónima
+          <div style="font-size:11px;font-weight:400;color:var(--text-muted)">Tu identidad no será revelada a las partes investigadas</div>
+        </label>
+      </div>
+      <div class="info-box" style="font-size:12px">
+        🔒 Este reporte será recibido exclusivamente por el área de Gestión Humana y/o Gerencia.
+        La organización garantiza no represalia para quienes denuncien de buena fe.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-nueva-denuncia')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveDenuncia()">📤 Enviar Reporte</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Importar Vacaciones -->
+<div class="modal-overlay" id="modal-import-vac">
+  <div class="modal" style="max-width:900px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">🏖 Importar Historial de Vacaciones</div>
+        <div class="text-sm text-muted mt-1">Estructura: COMPAÑIA · ID · NOMBRE · SUELDO · CARGO · FECHA INGRESO · PERIODO · INICIAL · FINAL · DÍAS TOMADOS · DESCONTADOS · DÍAS LABORADOS · FECHA LIMITE · DIAS PENDIENTE</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-import-vac')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="drop-zone" style="padding:20px;text-align:center;margin-bottom:16px"
+           ondragover="event.preventDefault()" ondrop="handleImportVacDrop(event)">
+        <input type="file" id="import-vac-file" accept=".csv,.xlsx,.xls" style="display:none"
+               onchange="handleImportVacFile(event)">
+        <div id="import-vac-file-lbl" style="font-size:14px;margin-bottom:8px">
+          📊 Arrastra tu archivo CSV o Excel aquí
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-vac-file').click()">
+          Seleccionar archivo
+        </button>
+      </div>
+      <div id="import-vac-preview"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-import-vac')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirm-import-vac" onclick="confirmImportVacaciones()" style="display:none">
+        ✅ Importar vacaciones
+      </button>
     </div>
   </div>
 </div>
@@ -2131,6 +2253,12 @@ function handleFuratDrop(e) {
   const f = e.dataTransfer.files[0]; if (!f) return;
   document.getElementById('incap-furat-file').files = e.dataTransfer.files;
   handleFuratFile({ target: { files: e.dataTransfer.files } });
+}
+
+function toggleFechaRetiro() {
+  const status = document.getElementById('em-status')?.value;
+  const gr = document.getElementById('em-fecha-retiro-group');
+  if (gr) gr.style.display = status === 'retirado' ? '' : 'none';
 }
 
 function togglePermisoHoras() {

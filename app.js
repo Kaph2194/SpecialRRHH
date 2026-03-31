@@ -275,6 +275,7 @@ const SC = {
   horarios: {},          // { empId: { tipo:'fijo'|'flexible'|'rotativo', dias:[], entrada:'', salida:'' } }
   descuentos: [],        // [ { id, empId, tipo, monto, cuotas, cuotasPagadas, estado, aprobadoPor, fecha, descripcion } ]
   novedadesArea: [],     // [ { id, empId, fecha, tipo, horas, descripcion, reportadoPor, areaId } ]
+  denuncias:     [],     // [ { id, empId, tipo, descripcion, fecha, anonimo, estado, ... } ]
 };
 
 // ─── SEED DATA ────────────────────────────────────────────
@@ -475,6 +476,9 @@ function dbToEmp(r) {
     empresaId: r.empresa_id, fechaIngreso: r.fecha_ingreso||'',
     contratoTipo: r.contrato_tipo||'indefinido', salario: r.salario||0,
     dir: r.dir||'', status: r.status||'activo',
+    tipoVinculacion:          r.tipo_vinculacion||'directo',
+    vacPendientesImportados:  r.vac_pendientes_importados||0,
+    vacFechaLimite:           r.vac_fecha_limite||'',
     docs: r.docs||{}, contratos: r.contratos||[],
     nomina: r.nomina||[], extractos: r.extractos||[],
     fechaRetiro: r.fecha_retiro||null,
@@ -578,6 +582,7 @@ async function sbSaveEmpleado(emp) {
     empresa_id: emp.empresaId||null, fecha_ingreso: emp.fechaIngreso||'',
     contrato_tipo: emp.contratoTipo||'indefinido', salario: emp.salario||0,
     dir: emp.dir||'', status: emp.status||'activo',
+    tipo_vinculacion: emp.tipoVinculacion||'directo',
     docs:      docsClean,
     contratos: (emp.contratos||[]).map(c => { const x={...c}; delete x.fileData; return x; }),
     nomina:    (emp.nomina||[]).map(n  => { const x={...n}; delete x.fileData; return x; }),
@@ -593,9 +598,12 @@ async function sbSaveEmpleado(emp) {
     banco:         emp.banco||null,
     numero_cuenta: emp.numeroCuenta||null,
     tipo_cuenta:   emp.tipoCuenta||null,
-    subsidio_transporte: emp.subsidioTransporte ?? true,
-    dotacion:      emp.dotacion ?? true,
-    area_fisica:   emp.areaFisica||null,
+    subsidio_transporte:         emp.subsidioTransporte ?? true,
+    dotacion:                    emp.dotacion ?? true,
+    area_fisica:                 emp.areaFisica||null,
+    tipo_vinculacion:            emp.tipoVinculacion||'directo',
+    vac_pendientes_importados:   emp.vacPendientesImportados||null,
+    vac_fecha_limite:            emp.vacFechaLimite||null,
   };
   // UPSERT — inserta o actualiza en un solo request
   await sbFetch('empleados', 'POST', row, '', { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
@@ -757,6 +765,7 @@ async function init() {
   SC.horarios       = JSON.parse(localStorage.getItem('sc_horarios')||'{}');
   SC.descuentos     = JSON.parse(localStorage.getItem('sc_descuentos')||'[]');
   SC.novedadesArea  = JSON.parse(localStorage.getItem('sc_novedades_area')||'[]');
+  SC.denuncias      = JSON.parse(localStorage.getItem('sc_denuncias')||'[]');
 
   // Intentar cargar datos dinámicos desde Supabase
   const sbLoaded = await loadFromSupabase();
@@ -1023,6 +1032,7 @@ function buildSidebar() {
     addNavItem(nav, '🏥', 'Incapacidades', 'incapacidades-admin');
     addNavItem(nav, '🏖', 'Vacaciones del Área', 'vacaciones-admin');
     addNavItem(nav, '⚖️', 'Disciplinarios', 'disciplinarios');
+  addNavItem(nav, '🔒', 'Canal de Denuncias', 'denuncias-admin');
     addNavSep(nav, 'NÓMINA');
     addNavItem(nav, '📋', 'Mi Malla de Turnos', 'malla-area');
     return;
@@ -1117,6 +1127,7 @@ function showView(viewId) {
   else if (viewId === 'novedades-area')    { renderNovedadesAreaCalendar(); }
   else if (viewId === 'malla-area')        { showView('novedades-area'); renderMallaArea(); }
   else if (viewId === 'descuentos')        { renderDescuentos(); }
+  else if (viewId === 'denuncias-admin')   { renderDenunciasAdmin(); }
   else if (viewId === 'vacaciones-admin')  { renderVacacionesAdmin(); }
   else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('w')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
@@ -1128,7 +1139,8 @@ function showView(viewId) {
 
 function setupEmpActions(el) {
   if (can('write')) el.innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="openImportModal()">📥 Importar CSV/Excel</button>
+    <button class="btn btn-ghost btn-sm" onclick="openImportModal()">📥 Importar Empleados</button>
+    <button class="btn btn-ghost btn-sm" onclick="openImportVacacionesModal()">🏖 Importar Vacaciones</button>
     <button class="btn btn-primary btn-sm" onclick="openAddEmpModal()">+ Nuevo Empleado</button>`;
 }
 function setupCandActions(el) {
@@ -1274,19 +1286,20 @@ function renderEmpleados() {
   const q  = (document.getElementById('search-emp')?.value||'').toLowerCase();
   const fa = document.getElementById('filter-area')?.value    || '';
   const fe = document.getElementById('filter-empresa')?.value || '';
-  const fs = document.getElementById('filter-status')?.value  || '';
+  const fs = document.getElementById('filter-status')?.value      || '';
+  const fv = document.getElementById('filter-vinculacion')?.value || '';
 
   // Lider de área solo ve su equipo
   const esLiderArea  = SC.user?.role === 'lider_area';
   const miAreaId     = SC.user?.areaId ? String(SC.user.areaId) : null;
 
   let filtered = SC.empleados.filter(e => {
-    // Restricción de área para lider_area
     if (esLiderArea && miAreaId && String(e.areaId) !== miAreaId) return false;
     if (q  && !e.name.toLowerCase().includes(q) && !(e.cedula||'').includes(q) && !(e.cargo||'').toLowerCase().includes(q)) return false;
     if (fa && String(e.areaId) !== fa) return false;
     if (fe && e.empresaId !== fe) return false;
     if (fs && (e.status||'activo') !== fs) return false;
+    if (fv && (e.tipoVinculacion||'directo') !== fv) return false;
     return true;
   });
 
@@ -1320,6 +1333,13 @@ function renderEmpleados() {
     const fotoEl    = e.fotoData
       ? `<img src="${e.fotoData}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:3px solid var(--navy-border);flex-shrink:0">`
       : `<div class="emp-avatar" style="width:48px;height:48px;font-size:18px;flex-shrink:0">${e.name[0]}</div>`;
+    const vinculacionBadge = {
+      directo:     {icon:'👔', color:'var(--navy)'},
+      contratista: {icon:'🔧', color:'#7c3aed'},
+      temporal:    {icon:'⏱', color:'var(--amber)'},
+      practicante: {icon:'🎓', color:'var(--blue)'},
+      tercero:     {icon:'🤝', color:'#6b7280'},
+    }[e.tipoVinculacion||'directo'] || {icon:'👔', color:'var(--navy)'};
     const card = document.createElement('div');
     card.className = 'emp-card';
     card.innerHTML = `
@@ -1332,7 +1352,11 @@ function renderEmpleados() {
         ${statusBadge(empStatus)}
       </div>
       <div class="text-sm text-muted mb-1">${area?.icon||''} ${area?.name||'—'} &nbsp;·&nbsp; ${empresa?.name||'—'}</div>
-      <div class="text-xs text-muted mb-2">📅 Ingreso: ${e.fechaIngreso}</div>
+      <div class="text-xs text-muted mb-2" style="display:flex;gap:8px;align-items:center">
+        📅 Ingreso: ${e.fechaIngreso}
+        ${e.status==='retirado'&&e.fechaRetiro?`<span style="color:var(--red)">🔴 Retiro: ${e.fechaRetiro}</span>`:''}
+        <span style="background:${vinculacionBadge.color}18;color:${vinculacionBadge.color};padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${vinculacionBadge.icon} ${(e.tipoVinculacion||'directo').charAt(0).toUpperCase()+(e.tipoVinculacion||'directo').slice(1)}</span>
+      </div>
       <div class="mb-3">
         <div class="flex justify-between text-xs text-muted mb-1"><span>Carpeta de vida</span><span>${docCount}/${reqCount} docs</span></div>
         <div class="carpeta-progress"><div class="cp-bar"><div class="cp-fill" style="width:${pct}%"></div></div><span class="cp-label">${pct}%</span></div>
@@ -1387,6 +1411,13 @@ function openEditEmpModal(empId) {
   updateEmpPositions();
   setTimeout(() => { document.getElementById('em-cargo').value = emp.cargo||''; }, 50);
   document.getElementById('em-empresa').value = emp.empresaId||'';
+  // Cargar tipo vinculación y fecha retiro
+  const tvEl = document.getElementById('em-tipo-vinculacion');
+  if (tvEl) tvEl.value = emp.tipoVinculacion || 'directo';
+  const frEl = document.getElementById('em-fecha-retiro');
+  if (frEl) frEl.value = emp.fechaRetiro || '';
+  const frGr = document.getElementById('em-fecha-retiro-group');
+  if (frGr) frGr.style.display = emp.status === 'retirado' ? '' : 'none';
   // Cargar foto existente
   SC._pendingEmpFoto = null;
   const prevFoto = document.getElementById('em-foto-preview');
@@ -1550,10 +1581,15 @@ function saveEmpleado() {
       emp.subsidioTransporte = document.getElementById('em-subsidio')?.checked ?? emp.subsidioTransporte ?? true;
       emp.dotacion  = document.getElementById('em-dotacion')?.checked ?? emp.dotacion ?? true;
       emp.areaFisica= document.getElementById('em-area-fisica')?.value||emp.areaFisica||'';
+      emp.tipoVinculacion = document.getElementById('em-tipo-vinculacion')?.value || emp.tipoVinculacion || 'directo';
       const prevStatus = emp.status;
       emp.status = statusVal;
-      if (statusVal === 'retirado' && !emp.fechaRetiro) {
-        emp.fechaRetiro = new Date().toLocaleDateString('es-CO');
+      // Fecha de retiro: usar la ingresada manualmente o autogenerar
+      const fechaRetiroInput = document.getElementById('em-fecha-retiro')?.value;
+      if (statusVal === 'retirado') {
+        emp.fechaRetiro = fechaRetiroInput || emp.fechaRetiro || new Date().toISOString().split('T')[0];
+      } else if (statusVal !== 'retirado') {
+        emp.fechaRetiro = null; // Limpiar si vuelve a activo
       }
       showNotif(`Empleado "${name}" actualizado ✅`);
       sbSaveEmpleado(emp);
@@ -1589,6 +1625,7 @@ function saveEmpleado() {
     SC._pendingEmpFoto = null;
     SC.empleados.push({
       id: newEmpId, name, cedula,
+      tipoVinculacion: document.getElementById('em-tipo-vinculacion')?.value || 'directo',
       email: document.getElementById('em-email').value,
       phone: document.getElementById('em-phone').value,
       areaId, cargo, empresaId,
@@ -1754,6 +1791,8 @@ function renderEmpTab(tab) {
           ${infoRow('Antigüedad', vacI.años+'a '+vacI.meses+'m')}
           ${infoRow('Tipo Contrato', emp.contratoTipo)}
           ${infoRow('Salario Base', '$ ' + (emp.salario||0).toLocaleString('es-CO'))}
+          ${infoRow('Tipo Vinculación', {directo:'👔 Empleado Directo',contratista:'🔧 Contratista',temporal:'⏱ Temporal (ETT)',practicante:'🎓 Practicante',tercero:'🤝 Tercero'}[emp.tipoVinculacion||'directo']||'—')}
+          ${emp.status==='retirado'&&emp.fechaRetiro ? infoRow('Fecha de Retiro', '<span style="color:var(--red);font-weight:600">🔴 '+emp.fechaRetiro+'</span>') : ''}
           ${infoRow('Subsidio de Transporte', emp.subsidioTransporte ? '<span style="color:var(--green)">✅ Aplica</span>' : '<span style="color:var(--text-muted)">No aplica</span>')}
           ${infoRow('Dotación', emp.dotacion ? '<span style="color:var(--green)">✅ Aplica</span>' : '<span style="color:var(--text-muted)">No aplica</span>')}
         </div>
@@ -1929,7 +1968,9 @@ function calcVacInfo(emp) {
     .filter(v => v.estado === 'aprobado')
     .reduce((s,v) => s + parseInt(v.dias||0), 0);
 
-  const diasDisponibles = Math.max(0, diasCausados - diasTomados - diasEnProceso);
+  // Si hay días pendientes importados de historial, sumarlos a los calculados
+  const diasImportados = emp.vacPendientesImportados || 0;
+  const diasDisponibles = Math.max(0, diasCausados - diasTomados - diasEnProceso + diasImportados);
 
   // Períodos anuales: un período cada 12 meses de trabajo
   const periodos = [];
@@ -2314,7 +2355,217 @@ const IMPORT_COLUMNS = {
   'subsidio transporte':'subsidioTransporte','subsidio de transporte':'subsidioTransporte','subsidio':'subsidioTransporte',
   'dotacion':'dotacion','dotación':'dotacion',
   'area fisica':'areaFisica','área física':'areaFisica','sede':'areaFisica','lugar de trabajo':'areaFisica',
+  // Retiro y tipo vinculación
+  'fecha retiro':'fechaRetiro','fecha de retiro':'fechaRetiro','retiro':'fechaRetiro','fecha baja':'fechaRetiro',
+  'tipo vinculacion':'tipoVinculacion','tipo de vinculacion':'tipoVinculacion','tipo vinculación':'tipoVinculacion','vinculacion':'tipoVinculacion','tipo empleado':'tipoVinculacion','contrato especial':'tipoVinculacion',
 };
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: IMPORTACIÓN ARCHIVO DE VACACIONES
+// Estructura: COMPAÑIA | NUMERO DE ID | NOMBRE DEL COLABORADOR |
+//  SUELDO | CARGO | FECHA DE INGRESO | PERIODO | INICIAL | FINAL |
+//  DÍAS TOMADOS | DESCONTADOS | DÍAS LABORADOS | FECHA LIMITE | DIAS PENDIENTE
+// ═══════════════════════════════════════════════════════════════
+function openImportVacacionesModal() {
+  const el = document.getElementById('import-vac-preview');
+  if (el) el.innerHTML = '';
+  const lbl = document.getElementById('import-vac-file-lbl');
+  if (lbl) lbl.textContent = 'Arrastra tu archivo CSV o Excel aquí';
+  const btn = document.getElementById('btn-confirm-import-vac');
+  if (btn) btn.style.display = 'none';
+  SC._importVacPreview = [];
+  openModal('modal-import-vac');
+}
+
+function handleImportVacFile(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      let rows;
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        const text = new TextDecoder('utf-8').decode(ev.target.result);
+        const sep  = (text.match(/\t/g)||[]).length > 5 ? '\t'
+                   : (text.match(/;/g)||[]).length > (text.match(/,/g)||[]).length ? ';' : ',';
+        const lines = text.split(/\r?\n/).filter(l=>l.trim());
+        const hdrs  = lines[0].split(sep).map(h=>h.trim().replace(/['"]/g,'').toLowerCase());
+        rows = lines.slice(1).filter(l=>l.trim()).map(line=>{
+          const vals=line.split(sep); const o={};
+          hdrs.forEach((h,i)=>{ o[h]=(vals[i]||'').trim().replace(/^['"]+|['"]+$/g,''); });
+          return o;
+        });
+      } else if (typeof XLSX !== 'undefined') {
+        const wb = XLSX.read(ev.target.result, {type:'array', cellDates:true});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false, dateNF:'yyyy-mm-dd'});
+        const hdrs  = data[0].map(h=>String(h||'').trim().toLowerCase());
+        rows = data.slice(1).filter(r=>r.some(v=>v)).map(r=>{
+          const o={}; hdrs.forEach((h,i)=>{o[h]=r[i]!=null?String(r[i]).trim():'';});
+          return o;
+        });
+      } else { showNotif('SheetJS no disponible, usa CSV','error'); return; }
+
+      processImportVacRows(rows, file.name);
+    } catch(err) { showNotif('Error leyendo archivo: '+err.message,'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function handleImportVacDrop(e) {
+  e.preventDefault();
+  document.getElementById('import-vac-file').files = e.dataTransfer.files;
+  handleImportVacFile({target:{files:e.dataTransfer.files}});
+}
+
+function processImportVacRows(rows, fileName) {
+  // Mapa de columnas flexible para la estructura del archivo
+  const COL_MAP = {
+    'compañia':'empresa', 'compania':'empresa', 'empresa':'empresa', 'company':'empresa',
+    'numero de id':'cedula', 'numero id':'cedula', 'id':'cedula', 'cedula':'cedula', 'documento':'cedula', 'cc':'cedula',
+    'nombre del colaborador':'nombre', 'nombre colaborador':'nombre', 'nombre':'nombre', 'colaborador':'nombre',
+    'sueldo':'salario', 'salario':'salario',
+    'cargo':'cargo',
+    'fecha de ingreso':'fechaIngreso', 'fecha ingreso':'fechaIngreso', 'ingreso':'fechaIngreso',
+    'periodo':'periodo',
+    'inicial':'inicioVac', 'fecha inicial':'inicioVac', 'inicio':'inicioVac',
+    'final':'finVac', 'fecha final':'finVac', 'fin':'finVac',
+    'días tomados':'diasTomados', 'dias tomados':'diasTomados',
+    'descontados':'diasDescontados', 'días descontados':'diasDescontados',
+    'días laborados':'diasLaborados', 'dias laborados':'diasLaborados',
+    'fecha limite':'fechaLimite', 'fecha límite':'fechaLimite', 'limite':'fechaLimite',
+    'dias pendiente':'diasPendiente', 'días pendiente':'diasPendiente', 'dias pendientes':'diasPendiente',
+  };
+
+  const mapped = rows.map((row, idx) => {
+    const r = {};
+    Object.entries(row).forEach(([col, val]) => {
+      const field = COL_MAP[col.trim().toLowerCase()];
+      if (field) r[field] = val;
+    });
+    // Normalizar cédula
+    r.cedula = String(r.cedula||'').replace(/[.\s,]/g,'');
+    // Normalizar fechas
+    ['inicioVac','finVac','fechaIngreso','fechaLimite'].forEach(f => {
+      if (r[f]) r[f] = normalizarFecha(r[f]);
+    });
+    // Normalizar números
+    ['diasTomados','diasDescontados','diasLaborados','diasPendiente','salario'].forEach(f => {
+      if (r[f] !== undefined) r[f] = parseFloat(String(r[f]).replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
+    });
+    // Buscar empleado
+    const emp = SC.empleados.find(e => String(e.cedula||'').replace(/[.\s,]/g,'') === r.cedula);
+    r._emp    = emp;
+    r._row    = idx + 2;
+    r._match  = !!emp;
+    r._warn   = !emp ? 'Cédula no encontrada en el sistema' : '';
+    return r;
+  }).filter(r => r.cedula);
+
+  SC._importVacPreview = mapped;
+  const lbl = document.getElementById('import-vac-file-lbl');
+  if (lbl) lbl.textContent = '✅ ' + fileName + ' — ' + mapped.length + ' registros';
+
+  const encontrados = mapped.filter(r=>r._match).length;
+  const noEncontrados = mapped.filter(r=>!r._match).length;
+
+  let html = `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <div class="stat-card" style="padding:10px 14px;flex:1;min-width:90px;border-left:3px solid var(--green)">
+      <div class="stat-label">Encontrados</div><div class="stat-value" style="color:var(--green)">${encontrados}</div>
+    </div>
+    <div class="stat-card" style="padding:10px 14px;flex:1;min-width:90px;border-left:3px solid var(--red)">
+      <div class="stat-label">No encontrados</div><div class="stat-value" style="color:var(--red)">${noEncontrados}</div>
+    </div>
+    <div class="stat-card" style="padding:10px 14px;flex:1;min-width:90px;border-left:3px solid var(--navy)">
+      <div class="stat-label">Total filas</div><div class="stat-value">${mapped.length}</div>
+    </div>
+  </div>
+  <div class="table-wrap" style="max-height:340px;overflow-y:auto">
+  <table class="data-table" style="font-size:11px">
+    <thead><tr><th>#</th><th>Cédula</th><th>Nombre</th><th>Período</th><th>Inicio Vac</th><th>Fin Vac</th><th>Días Tom.</th><th>Días Pend.</th><th>F. Límite</th><th>Estado</th></tr></thead>
+    <tbody>`;
+  mapped.forEach(r => {
+    const bg = !r._match ? 'background:var(--red-bg)' : '';
+    html += `<tr style="${bg}">
+      <td class="text-muted">${r._row}</td>
+      <td>${r.cedula}</td>
+      <td><div style="font-weight:500">${r._emp?.name||r.nombre||'—'}</div>${r._warn?`<div style="color:var(--red);font-size:10px">⚠️ ${r._warn}</div>`:''}</td>
+      <td>${r.periodo||'—'}</td>
+      <td>${r.inicioVac||'—'}</td>
+      <td>${r.finVac||'—'}</td>
+      <td style="text-align:center">${r.diasTomados||0}</td>
+      <td style="text-align:center;font-weight:600;color:${(r.diasPendiente||0)>0?'var(--amber)':'var(--green)'}">${r.diasPendiente||0}</td>
+      <td>${r.fechaLimite||'—'}</td>
+      <td>${r._match?'<span style="color:var(--green)">✅</span>':'<span style="color:var(--red)">❌</span>'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+
+  const prev = document.getElementById('import-vac-preview');
+  if (prev) prev.innerHTML = html;
+
+  const btn = document.getElementById('btn-confirm-import-vac');
+  if (btn && encontrados > 0) {
+    btn.style.display = '';
+    btn.textContent = '✅ Importar vacaciones de ' + encontrados + ' empleados';
+  }
+}
+
+function confirmImportVacaciones() {
+  const validos = (SC._importVacPreview||[]).filter(r => r._match && r._emp);
+  let importados = 0, actualizados = 0;
+
+  validos.forEach(r => {
+    const emp = r._emp;
+
+    // 1. Actualizar fecha de ingreso si viene y es más antigua
+    if (r.fechaIngreso && (!emp.fechaIngreso || r.fechaIngreso < emp.fechaIngreso)) {
+      emp.fechaIngreso = r.fechaIngreso;
+    }
+    // 2. Actualizar salario si viene
+    if (r.salario > 0 && !emp.salario) emp.salario = r.salario;
+
+    // 3. Crear período de vacaciones si tiene fechas
+    if (r.inicioVac && r.finVac) {
+      const yaExiste = SC.vacaciones.some(v =>
+        v.empId === emp.id && v.inicio === r.inicioVac && v.fin === r.finVac
+      );
+      if (!yaExiste) {
+        const vac = {
+          id: 'v_imp_' + emp.id + '_' + Date.now() + '_' + importados,
+          empId: emp.id,
+          inicio: r.inicioVac,
+          fin: r.finVac,
+          dias: r.diasTomados || calcDias(r.inicioVac, r.finVac),
+          obs: 'Importado de historial · Período: ' + (r.periodo||'—'),
+          estado: 'disfrutado',  // vacaciones ya tomadas = disfrutadas
+          fechaSolicitud: r.inicioVac,
+        };
+        SC.vacaciones.push(vac);
+        sbSaveVac(vac);
+        importados++;
+      }
+    }
+
+    // 4. Guardar días pendientes en el campo auxiliar del empleado
+    if (r.diasPendiente > 0) {
+      emp.vacPendientesImportados = r.diasPendiente;
+      emp.vacFechaLimite = r.fechaLimite || '';
+    }
+    sbSaveEmpleado(emp);
+    actualizados++;
+  });
+
+  closeModal('modal-import-vac');
+  syncToSheets('empleados');
+  syncToSheets('vacaciones');
+  showNotif(`✅ Vacaciones importadas: ${importados} períodos · ${actualizados} empleados actualizados`);
+  SC._importVacPreview = [];
+}
+
+window.openImportVacacionesModal  = openImportVacacionesModal;
+window.handleImportVacFile        = handleImportVacFile;
+window.handleImportVacDrop        = handleImportVacDrop;
+window.confirmImportVacaciones    = confirmImportVacaciones;
 
 function openImportModal() {
   SC._importPreview = [];
@@ -2480,6 +2731,16 @@ function processImportRows(rows, fileName) {
     if(!emp.cedula) emp._errores.push('Cédula requerida');
     // Normalizar fecha de ingreso (soporta serial Excel, DD/MM/YYYY, YYYY-MM-DD, etc.)
     if (emp.fechaIngreso) emp.fechaIngreso = normalizarFecha(emp.fechaIngreso);
+    if (emp.fechaRetiro)  emp.fechaRetiro  = normalizarFecha(emp.fechaRetiro);
+    // Normalizar tipo vinculación
+    const tvMap2 = {
+      'directo':'directo','empleado directo':'directo','planta':'directo',
+      'contratista':'contratista','prestacion de servicios':'contratista','ops':'contratista',
+      'temporal':'temporal','ett':'temporal','temporales':'temporal',
+      'practicante':'practicante','aprendiz':'practicante','sena':'practicante',
+      'tercero':'tercero','outsourcing':'tercero','externo':'tercero',
+    };
+    if (emp.tipoVinculacion) emp.tipoVinculacion = tvMap2[(emp.tipoVinculacion||'').toLowerCase().trim()]||'directo';
     emp.salario = parseInt(String(emp.salario||'0').replace(/[^0-9]/g,''))||0;
     const cmap={indefinido:'indefinido',fijo:'fijo',obra:'obra',aprendizaje:'aprendizaje'};
     emp.contratoTipo = cmap[(emp.contratoTipo||'').toLowerCase()]||'indefinido';
@@ -2582,6 +2843,8 @@ function confirmImport() {
       subsidioTransporte: e.subsidioTransporte !== undefined ? e.subsidioTransporte : true,
       dotacion:           e.dotacion           !== undefined ? e.dotacion           : true,
       areaFisica:         e.areaFisica||'',
+      tipoVinculacion:    e.tipoVinculacion||'directo',
+      fechaRetiro:        e.fechaRetiro||null,
     };
 
     // Vinculación exacta = misma cédula + misma empresa + misma fechaIngreso
@@ -3714,6 +3977,9 @@ function renderPortal(tab) {
     content.innerHTML = `<div class="section-header mb-4"><div class="section-title" style="font-size:16px">🗄 Bodega <span>Documental</span></div></div><div id="portal-bodega-content"></div>`;
     renderPortalBodega();
   }
+  else if (tab === 'denuncias') {
+    renderPortalDenuncias();
+  }
 }
 
 function portalTab(tab, el) {
@@ -4313,13 +4579,44 @@ function loadSavedEmpresas() {
 
 
 // ─── DISCIPLINARIOS ───────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO DISCIPLINARIO — 8 ETAPAS REGLAMENTARIAS
+// ═══════════════════════════════════════════════════════════════
 const TIPOS_DISCIPLINARIO = {
-  llamado_atencion: { label:'Llamado de Atención Verbal',    icon:'⚠️', color:'var(--amber)' },
-  memorando:        { label:'Memorando Escrito',              icon:'📝', color:'var(--amber)' },
-  suspension:       { label:'Suspensión',                     icon:'🚫', color:'var(--red)'   },
-  descargos:        { label:'Pliego de Cargos / Descargos',   icon:'⚖️', color:'var(--navy)'  },
-  terminacion:      { label:'Terminación con Justa Causa',    icon:'🔴', color:'var(--red)'   },
+  llamado_atencion: { label:'Llamado de Atención Verbal',  icon:'⚠️', color:'var(--amber)' },
+  memorando:        { label:'Memorando Escrito',            icon:'📝', color:'var(--amber)' },
+  suspension:       { label:'Suspensión',                   icon:'🚫', color:'var(--red)'   },
+  descargos:        { label:'Pliego de Cargos / Descargos', icon:'⚖️', color:'var(--navy)'  },
+  terminacion:      { label:'Terminación con Justa Causa',  icon:'🔴', color:'var(--red)'   },
 };
+
+const ETAPAS_DISCIPLINARIO = [
+  { num:1, key:'solicitud',       label:'Solicitud de Apertura',          icon:'📋', desc:'Informe del jefe inmediato con pruebas adjuntas en PDF.' },
+  { num:2, key:'apertura',        label:'Apertura del Proceso',           icon:'📂', desc:'RH abre el proceso y deja constancia escrita.' },
+  { num:3, key:'notificacion',    label:'Notificación al Trabajador',     icon:'📧', desc:'Comunicación escrita con hechos imputados y fecha de descargos (mín. 5 días hábiles).' },
+  { num:4, key:'traslado_pruebas',label:'Traslado de Pruebas',            icon:'📎', desc:'Se entregan todas las pruebas al trabajador.' },
+  { num:5, key:'descargos',       label:'Descargos y Defensa',            icon:'🗣️', desc:'El trabajador dispone de mín. 5 días hábiles para presentar su versión.' },
+  { num:6, key:'evaluacion',      label:'Evaluación de Pruebas',          icon:'🔍', desc:'RH evalúa pruebas con criterios objetivos y proporcionalidad.' },
+  { num:7, key:'decision',        label:'Decisión Motivada',              icon:'⚖️', desc:'Decisión escrita con hechos probados, calificación y sanción o absolución.' },
+  { num:8, key:'impugnacion',     label:'Recurso de Impugnación',         icon:'📩', desc:'El trabajador puede solicitar reconsideración ante Gerencia en 5 días hábiles.' },
+];
+
+function getEtapaNombre(key) {
+  const e = ETAPAS_DISCIPLINARIO.find(x => x.key === key);
+  return e ? `Etapa ${e.num} – ${e.label}` : key;
+}
+
+function calcDiasHabiles(fechaInicio, dias) {
+  if (!fechaInicio) return '—';
+  const d = new Date(fechaInicio);
+  let count = 0;
+  while (count < dias) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return d.toLocaleDateString('es-CO');
+}
 
 function renderDisciplinarios() {
   const container = document.getElementById('content-area');
@@ -4377,64 +4674,281 @@ function toggleDiscTipo() {
 
 function saveDiscipinario() {
   const empId = document.getElementById('disc-emp').value;
-  const tipo = document.getElementById('disc-tipo').value;
+  const tipo  = document.getElementById('disc-tipo').value;
   const fecha = document.getElementById('disc-fecha').value;
-  const desc = document.getElementById('disc-desc').value.trim();
-  if(!empId||!desc||!fecha){ showNotif('Completa los campos obligatorios','error'); return; }
-  const disc = {
+  const desc  = document.getElementById('disc-desc').value.trim();
+  if (!empId||!desc||!fecha) { showNotif('Completa los campos obligatorios','error'); return; }
+
+  const hoy   = new Date().toISOString().split('T')[0];
+  const disc  = {
     id: 'd'+Date.now(), empId, tipo, fecha, descripcion: desc,
     obs: document.getElementById('disc-obs')?.value||'',
     diasSuspension: tipo==='suspension'?(parseInt(document.getElementById('disc-dias')?.value)||1):null,
-    estado: 'en_proceso', notificado: false, respuestaEmp: '',
-    archivos: [], creadoPor: SC.user?.user||'rrhh',
-    fechaCreacion: new Date().toLocaleDateString('es-CO'),
+    estado:          'en_proceso',
+    etapaActual:     'solicitud',     // comienza en etapa 1
+    notificado:      false,
+    respuestaEmp:    '',
+    archivos:        [],
+    creadoPor:       SC.user?.user||'rrhh',
+    fechaCreacion:   new Date().toLocaleDateString('es-CO'),
+    // Registro de cada etapa
+    etapas: {
+      solicitud: {
+        completada: true,
+        fecha: hoy,
+        responsable: SC.user?.name||SC.user?.user||'',
+        notas: desc,
+        archivos: [],
+      },
+    },
+    // Para solicitudes de lider_area → RH debe aprobar apertura
+    solicitadoPorLider: SC.user?.role === 'lider_area',
+    areaId: SC.user?.areaId || null,
   };
+
+  // Subir archivo de solicitud si hay
+  const archivoSol = SC.pendingFiles?.solicitud_disc;
+  if (archivoSol && GAPI_CONFIG.connected) {
+    const emp2 = SC.empleados.find(e=>e.id===empId);
+    uploadToDrive(archivoSol.data, archivoSol.name||'Solicitud_Disc.pdf', 'disciplinarios', emp2?.name||empId)
+      .then(fid => { if(fid) disc.etapas.solicitud.archivos.push({name:archivoSol.name, driveId:fid}); sbSaveDisc(disc); });
+  }
+  SC.pendingFiles = {};
+
   SC.disciplinarios.push(disc);
   closeModal('modal-add-disc');
-  const lastDisc = SC.disciplinarios[SC.disciplinarios.length-1];
-  sbSaveDisc(lastDisc);
-  showNotif('Proceso disciplinario creado ✅');
+  sbSaveDisc(disc);
+  showNotif('Proceso disciplinario creado ✅ · Etapa 1: Solicitud de apertura registrada');
   syncToSheets('disciplinarios');
   renderDisciplinarios();
 }
 
+// Avanzar a la siguiente etapa del proceso disciplinario
+function avanzarEtapaDisc(discId) {
+  const disc = SC.disciplinarios.find(x => x.id === discId);
+  if (!disc) return;
+  const etapas = ETAPAS_DISCIPLINARIO;
+  const idxActual = etapas.findIndex(e => e.key === disc.etapaActual);
+  if (idxActual < 0 || idxActual >= etapas.length - 1) {
+    showNotif('Este proceso ya está en la última etapa', 'error'); return;
+  }
+  const siguienteEtapa = etapas[idxActual + 1];
+  const notas = document.getElementById(`etapa-notas-${discId}`)?.value.trim() || '';
+  const fecha  = new Date().toISOString().split('T')[0];
+
+  if (!disc.etapas) disc.etapas = {};
+  disc.etapas[siguienteEtapa.key] = {
+    completada:   true,
+    fecha,
+    responsable:  SC.user?.name || SC.user?.user || '',
+    notas,
+    archivos:     [],
+  };
+
+  // Acciones automáticas por etapa
+  if (siguienteEtapa.key === 'notificacion') disc.notificado = true;
+  if (siguienteEtapa.key === 'decision')     disc.estado = 'en_proceso';
+  if (siguienteEtapa.key === 'impugnacion')  disc.estado = 'en_proceso';
+
+  disc.etapaActual = siguienteEtapa.key;
+  sbSaveDisc(disc);
+  syncToSheets('disciplinarios');
+  showNotif(`✅ Etapa ${siguienteEtapa.num} – ${siguienteEtapa.label} registrada`);
+  openDiscDetail(discId);
+  renderDisciplinarios();
+}
+
+// Cerrar proceso con decisión final
+function cerrarDiscConDecision(discId) {
+  const disc = SC.disciplinarios.find(x => x.id === discId);
+  if (!disc) return;
+  const sancion   = document.getElementById(`dec-sancion-${discId}`)?.value || 'ninguna';
+  const motivacion= document.getElementById(`dec-motivacion-${discId}`)?.value.trim() || '';
+  if (!motivacion) { showNotif('Escribe la motivación de la decisión', 'error'); return; }
+
+  if (!disc.etapas) disc.etapas = {};
+  disc.etapas.decision = {
+    completada: true,
+    fecha: new Date().toISOString().split('T')[0],
+    responsable: SC.user?.name || '',
+    notas: motivacion,
+    sancion,
+    archivos: [],
+  };
+  disc.etapaActual = 'decision';
+  disc.estado      = 'cerrado';
+  disc.sancionFinal= sancion;
+  disc.motivacion  = motivacion;
+
+  // Si la sanción es terminación, marcar al empleado
+  if (sancion === 'terminacion') {
+    const emp = SC.empleados.find(e => e.id === disc.empId);
+    if (emp) { emp.status = 'retirado'; emp.fechaRetiro = new Date().toISOString().split('T')[0]; sbSaveEmpleado(emp); }
+  }
+  sbSaveDisc(disc);
+  syncToSheets('disciplinarios');
+  showNotif('⚖️ Decisión motivada registrada · Proceso cerrado');
+  closeModal('modal-disc-detail');
+  renderDisciplinarios();
+}
+
+// Solicitud de apertura desde Lider de Área
+function solicitarAperturaDisc() {
+  const empId = document.getElementById('disc-emp').value;
+  const desc  = document.getElementById('disc-desc').value.trim();
+  const fecha = document.getElementById('disc-fecha').value;
+  if (!empId||!desc||!fecha) { showNotif('Completa todos los campos','error'); return; }
+  // Crear proceso en etapa 1 con flag de solicitud de lider
+  saveDiscipinario();
+  showNotif('📋 Solicitud enviada a RRHH para apertura del proceso');
+}
+window.solicitarAperturaDisc = solicitarAperturaDisc;
+window.avanzarEtapaDisc      = avanzarEtapaDisc;
+window.cerrarDiscConDecision  = cerrarDiscConDecision;
+
 function openDiscDetail(id) {
-  const d = SC.disciplinarios.find(x=>x.id===id);
-  if(!d) return;
-  const emp = SC.empleados.find(e=>e.id===d.empId);
-  const tipo = TIPOS_DISCIPLINARIO[d.tipo]||{label:d.tipo,icon:'📋',color:'var(--navy)'};
-  const el = document.getElementById('disc-detail-body');
-  if(!el) return;
+  const d   = SC.disciplinarios.find(x => x.id === id);
+  if (!d) return;
+  const emp = SC.empleados.find(e => e.id === d.empId);
+  const tipo= TIPOS_DISCIPLINARIO[d.tipo]||{label:d.tipo,icon:'📋',color:'var(--navy)'};
+  const el  = document.getElementById('disc-detail-body');
+  if (!el) return;
+
+  const idxActual   = ETAPAS_DISCIPLINARIO.findIndex(e => e.key === d.etapaActual);
+  const esRH        = ['superadmin','analista_rrhh','lider_rrhh'].includes(SC.user?.role);
+  const esGerencia  = SC.user?.role === 'gerencia';
+  const puedeAvanzar= esRH && d.estado !== 'cerrado';
+  const sigEtapa    = idxActual >= 0 && idxActual < ETAPAS_DISCIPLINARIO.length - 1
+                      ? ETAPAS_DISCIPLINARIO[idxActual + 1] : null;
+
+  // Tracker de etapas
+  const tracker = ETAPAS_DISCIPLINARIO.map((e, i) => {
+    const realizada = d.etapas?.[e.key]?.completada;
+    const esActual  = e.key === d.etapaActual;
+    const bgColor   = realizada ? 'var(--green)' : esActual ? 'var(--navy)' : '#e5e7eb';
+    const txtColor  = (realizada || esActual) ? '#fff' : 'var(--text-muted)';
+    const fechaEt   = d.etapas?.[e.key]?.fecha || '';
+    return `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:60px">
+      <div style="width:32px;height:32px;border-radius:50%;background:${bgColor};color:${txtColor};
+           display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;
+           border:2px solid ${esActual?'var(--navy)':'transparent'};margin-bottom:4px">
+        ${realizada ? '✓' : e.num}
+      </div>
+      <div style="font-size:9px;text-align:center;color:${esActual?'var(--navy)':'var(--text-muted)'};
+           font-weight:${esActual?700:400};line-height:1.2;max-width:60px">${e.label}</div>
+      ${fechaEt ? `<div style="font-size:8px;color:var(--text-muted)">${fechaEt}</div>` : ''}
+    </div>
+    ${i < ETAPAS_DISCIPLINARIO.length - 1 ? `<div style="flex:0 0 2px;height:2px;background:${realizada?'var(--green)':'#e5e7eb'};align-self:center;min-width:8px;margin-top:-20px"></div>` : ''}`;
+  }).join('');
+
+  // Detalle de cada etapa completada
+  const detalleEtapas = ETAPAS_DISCIPLINARIO.filter(e => d.etapas?.[e.key]?.completada).map(e => {
+    const et = d.etapas[e.key];
+    return `<div style="padding:10px 12px;border-left:3px solid var(--green);background:rgba(22,163,74,.04);border-radius:0 8px 8px 0;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span style="font-weight:700;font-size:12px;color:var(--navy)">${e.icon} Etapa ${e.num} – ${e.label}</span>
+        <span style="font-size:10px;color:var(--text-muted)">${et.fecha||''} · ${et.responsable||''}</span>
+      </div>
+      ${et.notas ? `<div style="font-size:12px;color:var(--navy);line-height:1.5">${et.notas}</div>` : ''}
+      ${et.sancion ? `<div style="margin-top:4px"><span class="badge badge-red">Sanción: ${et.sancion}</span></div>` : ''}
+    </div>`;
+  }).join('');
+
+  // Plazos clave
+  const fechaNotif = d.etapas?.notificacion?.fecha;
+  const limiteDescargos = fechaNotif ? calcDiasHabiles(fechaNotif, 5) : '—';
+  const fechaDecision   = d.etapas?.decision?.fecha;
+  const limiteImpugn    = fechaDecision ? calcDiasHabiles(fechaDecision, 5) : '—';
+
+  // Panel de avance (solo RH, proceso abierto)
+  let panelAvance = '';
+  if (puedeAvanzar && sigEtapa) {
+    const esFinalDecision = sigEtapa.key === 'decision';
+    panelAvance = `
+      <div class="glass-card p-4 mt-4" style="border-left:4px solid var(--navy)">
+        <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:10px">
+          ➡️ Avanzar a Etapa ${sigEtapa.num}: ${sigEtapa.label}
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${sigEtapa.desc}</div>
+        ${esFinalDecision ? `
+        <div class="form-group mb-2">
+          <label class="form-label" style="font-size:12px">Sanción impuesta</label>
+          <select class="form-select" id="dec-sancion-${d.id}" style="font-size:12px">
+            <option value="ninguna">✅ Absolución / Sin sanción</option>
+            <option value="llamado_atencion">⚠️ Llamado de Atención</option>
+            <option value="memorando">📝 Memorando Escrito</option>
+            <option value="suspension_1">🚫 Suspensión 1 día</option>
+            <option value="suspension_3">🚫 Suspensión 3 días</option>
+            <option value="suspension_5">🚫 Suspensión 5 días</option>
+            <option value="terminacion">🔴 Terminación con Justa Causa</option>
+          </select>
+        </div>
+        <div class="form-group mb-2">
+          <label class="form-label" style="font-size:12px">Motivación de la decisión *</label>
+          <textarea class="form-textarea" id="dec-motivacion-${d.id}" rows="3"
+            placeholder="Describe los hechos probados, calificación de la falta y fundamento de la sanción..."></textarea>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="cerrarDiscConDecision('${d.id}')">⚖️ Emitir Decisión Motivada</button>
+        ` : `
+        <textarea class="form-textarea" id="etapa-notas-${d.id}" rows="2"
+          placeholder="Notas o descripción de la acción tomada en esta etapa..."
+          style="font-size:12px;margin-bottom:8px"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="avanzarEtapaDisc('${d.id}')">
+          ✅ Registrar: ${sigEtapa.icon} Etapa ${sigEtapa.num}
+        </button>`}
+      </div>`;
+  }
+
+  // Respuesta del empleado (descargos)
+  const respPanel = `
+    <div class="form-group mt-3">
+      <label class="form-label">🗣️ Respuesta / Descargos del Empleado</label>
+      ${d.respuestaEmp
+        ? `<div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:12px;font-size:13px">${d.respuestaEmp}</div>`
+        : `<div class="text-muted text-sm p-3" style="background:var(--surface);border-radius:8px">Pendiente de respuesta del empleado.</div>`}
+    </div>`;
+
+  // Impugnación (etapa 8 — solo si está en impugnacion o cerrado)
+  const impugnPanel = d.etapas?.impugnacion?.notas ? `
+    <div class="glass-card p-4 mt-3" style="border-left:4px solid var(--amber)">
+      <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:6px">📩 Recurso de Impugnación</div>
+      <div style="font-size:12px">${d.etapas.impugnacion.notas}</div>
+    </div>` : '';
+
   el.innerHTML = `
-    <div class="emp-detail-header-inner mb-4">
-      <div class="emp-detail-avatar" style="width:48px;height:48px;font-size:18px">${emp?.name?.[0]||'?'}</div>
+    <!-- Encabezado -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <div class="emp-avatar" style="width:48px;height:48px;font-size:18px">${emp?.name?.[0]||'?'}</div>
       <div style="flex:1">
         <div style="font-weight:700;font-size:16px;color:var(--navy)">${emp?.name||'—'}</div>
-        <div class="text-sm text-muted">${emp?.cargo||''}</div>
+        <div class="text-sm text-muted">${emp?.cargo||''} · Proceso: ${tipo.icon} ${tipo.label}</div>
+        <div style="font-size:11px;color:var(--text-muted)">Abierto: ${d.fechaCreacion} · Por: ${d.creadoPor}</div>
       </div>
       ${statusBadge(d.estado)}
     </div>
-    <div style="padding:12px;background:var(--surface);border-radius:8px;margin-bottom:16px">
-      <div style="color:${tipo.color};font-weight:700;font-size:15px;margin-bottom:4px">${tipo.icon} ${tipo.label}</div>
-      <div class="text-sm text-muted">Creado: ${d.fechaCreacion} · Por: ${d.creadoPor}</div>
-      ${d.diasSuspension?`<div class="text-sm mt-1">Días de suspensión: <strong>${d.diasSuspension}</strong></div>`:''}
+
+    <!-- Tracker de etapas -->
+    <div style="background:var(--surface);border-radius:10px;padding:12px;margin-bottom:16px;overflow-x:auto">
+      <div style="display:flex;align-items:flex-start;gap:4px;min-width:480px">${tracker}</div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Descripción de los Hechos</label>
-      <div style="background:var(--surface);border-radius:8px;padding:12px;font-size:13px;line-height:1.6">${d.descripcion}</div>
+
+    <!-- Plazos legales -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      <div style="padding:8px 12px;background:rgba(17,31,77,.05);border-radius:8px;font-size:12px">
+        <div style="font-weight:600;color:var(--navy)">📅 Límite descargos</div>
+        <div>${fechaNotif ? `Máx. ${limiteDescargos} (5 días hábiles desde notificación)` : 'Pendiente de notificación'}</div>
+      </div>
+      <div style="padding:8px 12px;background:rgba(17,31,77,.05);border-radius:8px;font-size:12px">
+        <div style="font-weight:600;color:var(--navy)">📅 Límite impugnación</div>
+        <div>${fechaDecision ? `Máx. ${limiteImpugn} (5 días hábiles desde decisión)` : 'Pendiente de decisión'}</div>
+      </div>
     </div>
-    ${d.obs?`<div class="form-group"><label class="form-label">Observaciones</label><div style="background:var(--surface);border-radius:8px;padding:12px;font-size:13px">${d.obs}</div></div>`:''}
-    <div class="form-group mt-3">
-      <label class="form-label">Respuesta del Empleado</label>
-      ${d.respuestaEmp
-        ? `<div style="background:rgba(74,144,217,0.08);border:1px solid rgba(74,144,217,0.2);border-radius:8px;padding:12px;font-size:13px;line-height:1.6">${d.respuestaEmp}</div>`
-        : `<div class="text-muted text-sm p-3" style="background:var(--surface);border-radius:8px">El empleado no ha respondido aún.</div>`}
-    </div>
-    ${can('w')&&d.estado==='en_proceso'?`
-    <div class="mt-4 flex gap-3">
-      <button class="btn btn-ghost" style="flex:1" onclick="notificarDisc('${d.id}')">📧 ${d.notificado?'Re-Notificar':'Notificar Empleado'}</button>
-      <button class="btn btn-primary" style="flex:1" onclick="cerrarDiscModal('${d.id}')">✓ Cerrar Proceso</button>
-    </div>` : ''}
+
+    <!-- Historial de etapas -->
+    ${detalleEtapas}
+    ${respPanel}
+    ${impugnPanel}
+    ${panelAvance}
   `;
   openModal('modal-disc-detail');
 }
@@ -6311,6 +6825,169 @@ function abrirCalculadoraSalarialEmp(empId) {
 }
 window.buildPerfilCargoEmpHTML      = buildPerfilCargoEmpHTML;
 window.abrirCalculadoraSalarialEmp  = abrirCalculadoraSalarialEmp;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: CANAL DE DENUNCIAS Y REPORTES
+// ═══════════════════════════════════════════════════════════════
+const TIPOS_DENUNCIA = {
+  acoso_laboral:    { label:'Acoso Laboral / Hostigamiento',         icon:'🚨', color:'#dc2626' },
+  acoso_sexual:     { label:'Acoso Sexual',                          icon:'🛑', color:'#dc2626' },
+  conducta_delictiva:{ label:'Conducta Delictiva en la Organización', icon:'⚠️', color:'#d97706' },
+  sarlaft:          { label:'Proceso SARLAFT (Lavado de Activos)',    icon:'🏦', color:'#7c3aed' },
+  datos_personales: { label:'Violación Protección Datos Personales',  icon:'🔒', color:'#0369a1' },
+  conflicto_interes:{ label:'Conflicto de Interés',                  icon:'⚖️', color:'#0369a1' },
+  fraude:           { label:'Fraude o Corrupción Interna',            icon:'💰', color:'#dc2626' },
+  otro:             { label:'Otro Reporte / Sugerencia',              icon:'📝', color:'#6b7280' },
+};
+
+function renderPortalDenuncias() {
+  const content = document.getElementById('portal-content');
+  if (!content) return;
+  const empId = SC.user?.empId;
+  const misDenuncias = (SC.denuncias||[]).filter(d => d.empId === empId || d.anonimo);
+
+  const tipos = Object.entries(TIPOS_DENUNCIA);
+  content.innerHTML = `
+    <div class="section-header mb-4">
+      <div class="section-title" style="font-size:16px">🔒 Canal de <span>Denuncias y Reportes</span></div>
+      <button class="btn btn-primary btn-sm" onclick="openNuevaDenuncia()">+ Nueva Denuncia</button>
+    </div>
+    <div class="info-box mb-4" style="border-left:4px solid var(--navy)">
+      <div style="font-weight:700;margin-bottom:6px">Tus derechos están protegidos</div>
+      <div style="font-size:12px">Este canal es confidencial. Puedes reportar de forma anónima. 
+      La organización garantiza la no represalia por denuncias de buena fe. 
+      Todos los reportes serán gestionados con discreción y respondidos en máximo <strong>15 días hábiles</strong>.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:20px">
+      ${tipos.map(([k,v]) => `
+        <div onclick="openNuevaDenunciaType('${k}')"
+          style="border:1.5px solid ${v.color}30;border-radius:10px;padding:14px;cursor:pointer;
+                 background:${v.color}08;transition:all .15s"
+          onmouseover="this.style.background='${v.color}15'" onmouseout="this.style.background='${v.color}08'">
+          <div style="font-size:22px;margin-bottom:6px">${v.icon}</div>
+          <div style="font-size:12px;font-weight:600;color:var(--navy)">${v.label}</div>
+        </div>`).join('')}
+    </div>
+    ${(SC.denuncias||[]).filter(d=>d.empId===empId).length > 0 ? `
+    <div class="glass-card p-4">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:10px">Mis reportes enviados</div>
+      ${(SC.denuncias||[]).filter(d=>d.empId===empId).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(d => {
+        const tp = TIPOS_DENUNCIA[d.tipo]||{label:d.tipo,icon:'📝',color:'#888'};
+        return `<div style="padding:10px 0;border-bottom:1px solid var(--navy-border);display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:600;font-size:13px">${tp.icon} ${tp.label}</span>
+            <div style="font-size:11px;color:var(--text-muted)">${d.fecha||'—'} ${d.anonimo?'· Anónimo':''}</div>
+          </div>
+          <span class="badge ${d.estado==='cerrado'?'badge-green':d.estado==='en_proceso'?'badge-amber':'badge-grey'}">${d.estado==='pendiente'?'Enviado':d.estado==='en_proceso'?'En revisión':'Cerrado'}</span>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+  `;
+}
+
+function openNuevaDenuncia() { openNuevaDenunciaType('acoso_laboral'); }
+function openNuevaDenunciaType(tipo) {
+  document.getElementById('den-tipo').value = tipo;
+  document.getElementById('den-descripcion').value = '';
+  document.getElementById('den-fecha-hechos').value = '';
+  document.getElementById('den-involucrados').value = '';
+  document.getElementById('den-anonimo').checked = false;
+  openModal('modal-nueva-denuncia');
+}
+
+function saveDenuncia() {
+  const tipo  = document.getElementById('den-tipo').value;
+  const desc  = document.getElementById('den-descripcion').value.trim();
+  const fecha = document.getElementById('den-fecha-hechos').value;
+  const invol = document.getElementById('den-involucrados').value.trim();
+  const anon  = document.getElementById('den-anonimo').checked;
+  if (!tipo||!desc) { showNotif('Describe los hechos para continuar','error'); return; }
+
+  if (!SC.denuncias) SC.denuncias = [];
+  const d = {
+    id:           'den_'+Date.now(),
+    empId:        anon ? null : SC.user?.empId,
+    empName:      anon ? 'Anónimo' : SC.empleados.find(e=>e.id===SC.user?.empId)?.name||'—',
+    tipo, descripcion: desc,
+    fechaHechos:  fecha,
+    involucrados: invol,
+    anonimo:      anon,
+    estado:       'pendiente',
+    fecha:        new Date().toISOString().split('T')[0],
+    respuestaRH:  '',
+    gestionadoPor:'',
+  };
+  SC.denuncias.push(d);
+  try { localStorage.setItem('sc_denuncias', JSON.stringify(SC.denuncias)); } catch(e) {}
+  closeModal('modal-nueva-denuncia');
+  showNotif('🔒 Reporte enviado de forma confidencial ✅');
+  renderPortalDenuncias();
+}
+
+// Vista admin de denuncias
+function renderDenunciasAdmin() {
+  const el = document.getElementById('denuncias-admin-content');
+  if (!el) return;
+  if (!SC.denuncias) SC.denuncias = [];
+  const lista = SC.denuncias.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const pendientes = lista.filter(d=>d.estado==='pendiente').length;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+      <div class="stat-card"><div class="stat-label">Total Reportes</div><div class="stat-value">${lista.length}</div></div>
+      <div class="stat-card"><div class="stat-label">⏳ Pendientes</div><div class="stat-value" style="color:var(--amber)">${pendientes}</div></div>
+      <div class="stat-card"><div class="stat-label">🔍 En Revisión</div><div class="stat-value">${lista.filter(d=>d.estado==='en_proceso').length}</div></div>
+      <div class="stat-card"><div class="stat-label">✅ Cerrados</div><div class="stat-value" style="color:var(--green)">${lista.filter(d=>d.estado==='cerrado').length}</div></div>
+    </div>
+    <div class="glass-card p-4">
+      ${lista.length===0 ? '<div class="text-muted text-sm p-4">No hay reportes registrados.</div>' :
+        lista.map(d => {
+          const tp = TIPOS_DENUNCIA[d.tipo]||{label:d.tipo,icon:'📝',color:'#888'};
+          return `<div style="padding:12px 0;border-bottom:1px solid var(--navy-border)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+              <div>
+                <span style="font-weight:700;font-size:13px">${tp.icon} ${tp.label}</span>
+                <span class="text-xs text-muted" style="margin-left:8px">${d.fecha||'—'} · ${d.anonimo?'<span style="color:var(--amber)">Anónimo</span>':d.empName||'—'}</span>
+                <div style="font-size:12px;margin-top:4px;max-width:600px;color:var(--navy)">${d.descripcion}</div>
+                ${d.involucrados?`<div style="font-size:11px;color:var(--text-muted)">Involucrados: ${d.involucrados}</div>`:''}
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+                <span class="badge ${d.estado==='cerrado'?'badge-green':d.estado==='en_proceso'?'badge-amber':'badge-grey'}">${d.estado}</span>
+                ${can('write') && d.estado==='pendiente' ? `<button class="btn btn-ghost btn-sm" onclick="iniciarRevisionDenuncia('${d.id}')">🔍 Revisar</button>` : ''}
+                ${can('write') && d.estado==='en_proceso' ? `<button class="btn btn-primary btn-sm" onclick="cerrarDenuncia('${d.id}')">✅ Cerrar</button>` : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+    </div>`;
+}
+
+function iniciarRevisionDenuncia(id) {
+  const d = (SC.denuncias||[]).find(x=>x.id===id);
+  if (!d) return;
+  d.estado = 'en_proceso';
+  d.gestionadoPor = SC.user?.name||'';
+  try { localStorage.setItem('sc_denuncias', JSON.stringify(SC.denuncias)); } catch(e) {}
+  showNotif('🔍 Reporte en revisión');
+  renderDenunciasAdmin();
+}
+function cerrarDenuncia(id) {
+  const d = (SC.denuncias||[]).find(x=>x.id===id);
+  if (!d) return;
+  d.estado = 'cerrado';
+  try { localStorage.setItem('sc_denuncias', JSON.stringify(SC.denuncias)); } catch(e) {}
+  showNotif('✅ Reporte cerrado');
+  renderDenunciasAdmin();
+}
+
+window.renderPortalDenuncias  = renderPortalDenuncias;
+window.openNuevaDenuncia      = openNuevaDenuncia;
+window.openNuevaDenunciaType  = openNuevaDenunciaType;
+window.saveDenuncia           = saveDenuncia;
+window.renderDenunciasAdmin   = renderDenunciasAdmin;
+window.iniciarRevisionDenuncia= iniciarRevisionDenuncia;
+window.cerrarDenuncia         = cerrarDenuncia;
 
 function renderAreas() {
   const tb = document.getElementById('areas-tbody');
