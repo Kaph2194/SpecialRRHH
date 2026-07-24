@@ -1037,7 +1037,7 @@ const AUX_TRANSPORTE = 200000;    // auxilio de transporte 2026
 const PLAZO_PERMISO_DIAS      = 2;   // anticipación mínima para solicitar permiso
 const PLAZO_INCAP_DIAS        = 2;   // días máx. para radicar tras finalizar la incapacidad
 const PLAZO_VACACIONES_DIAS   = 15;  // días calendario de anticipación
-const VACACIONES_MIN_DIAS     = 7;   // período mínimo de disfrute
+const VACACIONES_MIN_DIAS     = 1;   // desde 1 día en adelante
 const DIAS_EPICRISIS          = 2;   // incapacidad > 2 días exige epicrisis
 const RESPUESTA_MAX_DIAS      = 1;   // respuesta máx. 1 día antes del inicio
 
@@ -2346,8 +2346,11 @@ function saveVacaciones() {
     }
   }
   const dias = calcDias(inicio, fin);
-  if (dias < VACACIONES_MIN_DIAS) {
-    showNotif(`⛔ El período mínimo de vacaciones es de ${VACACIONES_MIN_DIAS} días. Seleccionaste ${dias}.`, 'error');
+  if (dias < 1) { showNotif('Selecciona un período válido', 'error'); return; }
+  // No exceder los días disponibles
+  const vInfo = calcVacInfo(SC.empleados.find(e => e.id === ctx.empId));
+  if (SC.user?.role === 'empleado' && dias > vInfo.diasDisponibles) {
+    showNotif(`⛔ Solicitaste ${dias} días pero solo tienes ${vInfo.diasDisponibles} disponibles.`, 'error');
     return;
   }
   SC.vacaciones.push({
@@ -10847,19 +10850,14 @@ function buildCertificadosHTML(emp) {
   const disponibles = TIPOS_CERTIFICADO.filter(t => retirado ? t.retirados : t.activos);
   const mias = (SC.solicitudesCert || []).filter(s => s.empId === emp?.id);
 
-  return `<div class="section-title mb-3" style="font-size:15px">📄 Solicitar <span>Certificados</span></div>
+  // Tarjetas para solicitar (siempre permiten pedir uno nuevo)
+  let html = `<div class="section-title mb-3" style="font-size:15px">📄 Solicitar <span>Certificados</span></div>
   <div class="three-col mb-5">
     ${disponibles.map(c => {
-      const ultima = mias.filter(s => s.tipo === c.id)
-        .sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''))[0];
-      let accion;
-      if (ultima?.estado === 'emitido' && ultima.archivoUrl) {
-        accion = `<a href="${ultima.archivoUrl}" target="_blank" class="btn btn-primary btn-sm full-w">⬇️ Descargar</a>`;
-      } else if (ultima?.estado === 'solicitado') {
-        accion = `<span class="badge badge-yellow">⏳ En proceso desde ${ultima.fecha}</span>`;
-      } else {
-        accion = `<button class="btn btn-ghost btn-sm full-w" onclick="solicitarCertificado('${c.id}')">📤 Solicitar</button>`;
-      }
+      const enProceso = mias.some(s => s.tipo === c.id && s.estado === 'solicitado');
+      const accion = enProceso
+        ? `<span class="badge badge-yellow">⏳ Solicitud en proceso</span>`
+        : `<button class="btn btn-ghost btn-sm full-w" onclick="solicitarCertificado('${c.id}')">📤 Solicitar</button>`;
       return `<div class="glass-card p-4">
         <div style="font-size:28px;margin-bottom:8px">${c.icon}</div>
         <div style="font-weight:600;font-size:13px;color:var(--navy);margin-bottom:4px">${c.name}</div>
@@ -10868,6 +10866,34 @@ function buildCertificadosHTML(emp) {
       </div>`;
     }).join('')}
   </div>`;
+
+  // Histórico: todas las solicitudes del empleado, con descarga de las emitidas
+  const historial = mias.slice().sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''));
+  html += `<div class="section-title mb-3" style="font-size:15px">🗂 Histórico de <span>Certificados</span></div>`;
+  if (!historial.length) {
+    html += '<div class="glass-card p-4 text-muted text-sm text-center">Aún no has solicitado certificados.</div>';
+  } else {
+    html += `<div class="glass-card p-2"><table class="data-table"><thead><tr>
+      <th>Certificado</th><th>Dirigido a</th><th>Solicitado</th><th>Estado</th><th></th></tr></thead><tbody>`;
+    historial.forEach(s => {
+      const t = TIPOS_CERTIFICADO.find(x => x.id === s.tipo) || { name:s.tipo, icon:'📄' };
+      const estado = s.estado === 'emitido'
+        ? `<span class="badge badge-green">✅ Emitido ${s.fechaEmision||''}</span>`
+        : s.estado === 'rechazado'
+        ? `<span class="badge badge-red">❌ Rechazado</span>`
+        : `<span class="badge badge-yellow">⏳ En proceso</span>`;
+      const dl = (s.estado === 'emitido' && s.archivoUrl)
+        ? `<a href="${s.archivoUrl}" target="_blank" class="btn btn-primary btn-sm">⬇️ Descargar</a>` : '—';
+      html += `<tr>
+        <td>${t.icon} ${t.name}</td>
+        <td class="text-sm text-muted">${s.dirigidoA||'—'}</td>
+        <td class="text-sm text-muted">${s.fecha||'—'}</td>
+        <td>${estado}</td>
+        <td>${dl}</td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  return html;
 }
 
 window.TIPOS_CERTIFICADO      = TIPOS_CERTIFICADO;
