@@ -1247,6 +1247,7 @@ const VIEW_TITLES = {
   'incapacidades-admin': ['Gestión de Incapacidades', 'Incapacidades Médicas'],
   portal: ['Mi Portal de Empleado', 'Gestión Personal'],
   gerencia: ['Panel de Gerencia', 'Solo Lectura · Indicadores'],
+  'denuncias-admin': ['Canal de Denuncias', 'Reportes confidenciales'],
   areas: ['Áreas Organizacionales', 'Estructura Organizacional'],
   pdf: ['Visor de Documento', 'Visualización PDF'],
   'empresas-admin':  ['Gestión de Empresas', 'Superadmin · Empresas contratantes'],
@@ -8231,6 +8232,8 @@ function iniciarRevisionDenuncia(id) {
   d.estado = 'en_proceso';
   d.gestionadoPor = SC.user?.name||'';
   try { localStorage.setItem('sc_denuncias', JSON.stringify(SC.denuncias)); } catch(e) {}
+  if (typeof sbSaveDenuncia === 'function') sbSaveDenuncia(d);
+  registrarAuditoria('revisar','denuncia', d.id, '');
   showNotif('🔍 Reporte en revisión');
   renderDenunciasAdmin();
 }
@@ -8239,6 +8242,8 @@ function cerrarDenuncia(id) {
   if (!d) return;
   d.estado = 'cerrado';
   try { localStorage.setItem('sc_denuncias', JSON.stringify(SC.denuncias)); } catch(e) {}
+  if (typeof sbSaveDenuncia === 'function') sbSaveDenuncia(d);
+  registrarAuditoria('cerrar','denuncia', d.id, '');
   showNotif('✅ Reporte cerrado');
   renderDenunciasAdmin();
 }
