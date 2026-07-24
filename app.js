@@ -27,11 +27,32 @@ function openVacDetailAdmin(empId) {
   openModal('modal-vac-detail');
 }
 
+function aprobarDoc(empId, tipoId) {
+  const emp = SC.empleados.find(e => e.id === empId);
+  if (!emp || !emp.docs[tipoId]) return;
+  if (!can('write')) { showNotif('No tienes permiso para revisar documentos', 'error'); return; }
+  const d = emp.docs[tipoId];
+  d.pendienteRevision = false;
+  d.rechazado         = false;
+  d.aprobado          = true;
+  d.aprobadoPor       = SC.user?.name || '';
+  d.fechaAprobacion   = new Date().toLocaleDateString('es-CO');
+  sbSaveEmpleado(emp);
+  const nombreDoc = TIPOS_DOC_EMPLEADO.find(t => t.id === tipoId)?.name || tipoId;
+  registrarAuditoria('aprobar','documento_empleado', empId + '/' + tipoId, nombreDoc);
+  showNotif('✅ ' + nombreDoc + ' aprobado');
+  renderEmpTab('carpeta');
+}
+window.aprobarDoc = aprobarDoc;
+
 function rechazarDoc(empId, tipoId) {
   const emp = SC.empleados.find(e => e.id === empId);
   if (!emp || !emp.docs[tipoId]) return;
   emp.docs[tipoId].rechazado = true;
   emp.docs[tipoId].pendienteRevision = false;
+  emp.docs[tipoId].aprobado = false;
+  registrarAuditoria('rechazar','documento_empleado', empId + '/' + tipoId,
+    TIPOS_DOC_EMPLEADO.find(t => t.id === tipoId)?.name || tipoId);
   emp.docs[tipoId].driveFileId = null;
   emp.docs[tipoId].driveUrl    = null;
   emp.docs[tipoId].fileData    = null;
@@ -610,6 +631,9 @@ async function sbSaveEmpleado(emp) {
       driveUrl:          v.driveUrl||null,
       rechazado:         v.rechazado||false,
       pendienteRevision: v.pendienteRevision||false,
+      aprobado:          v.aprobado||false,
+      aprobadoPor:       v.aprobadoPor||'',
+      fechaAprobacion:   v.fechaAprobacion||'',
       obs:               v.obs||'',
       // base64 excluido intencionalmente — se usa Drive
     };
@@ -1051,6 +1075,32 @@ function can(action) {
   return SC.user.canWrite;
 }
 
+// ─── QUIÉN APRUEBA PERMISOS E INCAPACIDADES ───────────────
+// Regla de negocio: SOLO Recursos Humanos aprueba o rechaza.
+// El líder de área los ve (para planear su equipo) pero NO decide.
+function esRRHH() {
+  return ['superadmin','analista_rrhh'].includes(SC.user?.role);
+}
+window.esRRHH = esRRHH;
+
+// Permiso "menor": por horas y de duración < 2h → lo aprueba el jefe directo
+// (líder del área del empleado) sin pasar por RRHH; a RRHH solo se le notifica.
+const LIMITE_HORAS_JEFE = 2;
+function esPermisoMenor(p) {
+  if (!p?.esPorHoras) return false;
+  const h = parseFloat(p.dias);
+  return !isNaN(h) && h < LIMITE_HORAS_JEFE;
+}
+// ¿El usuario actual puede decidir sobre este permiso?
+function puedeAprobarPermiso(p) {
+  if (esRRHH()) return true;                                  // RRHH aprueba todo
+  if (SC.user?.role !== 'lider_area') return false;
+  if (!empVisibleParaUsuario(p.empId)) return false;          // solo su equipo
+  return esPermisoMenor(p);                                   // y solo si es < 2 horas
+}
+window.esPermisoMenor    = esPermisoMenor;
+window.puedeAprobarPermiso = puedeAprobarPermiso;
+
 // ─── VISIBILIDAD POR ÁREA (fail-closed) ───────────────────
 // Un líder de área SOLO ve registros de empleados de su área.
 // Si el líder no tiene areaId asignado, NO ve nada (antes veía todo).
@@ -1364,7 +1414,7 @@ function renderDashboard() {
           <div style="font-size:13px;font-weight:500">${emp?.name||'—'}</div>
           <div class="text-sm text-muted">${tipoPermisoLabel(p.tipo)} · ${p.inicio}</div>
         </div>
-        ${can('write') ? `<div class="flex gap-2"><button class="btn btn-ghost btn-sm" onclick="actualizarPermiso('${p.id}','aprobado')">✅</button><button class="btn btn-danger btn-sm" onclick="actualizarPermiso('${p.id}','rechazado')">❌</button></div>` : ''}
+        ${puedeAprobarPermiso(p) ? `<div class="flex gap-2"><button class="btn btn-ghost btn-sm" onclick="actualizarPermiso('${p.id}','aprobado')">✅</button><button class="btn btn-danger btn-sm" onclick="actualizarPermiso('${p.id}','rechazado')">❌</button></div>` : ''}
       </div>`);
   });
 }
@@ -1966,21 +2016,26 @@ function renderCarpetaVida(emp, container) {
   html += '<div>';
   TIPOS_DOC_EMPLEADO.forEach(t => {
     const doc = emp.docs[t.id];
-    const cls = doc ? 'ok' : t.req ? 'missing' : 'optional';
-    const icon = doc ? '✅' : t.req ? '❌' : '⬜';
+    const hayArchivo = !!(doc && (doc.driveUrl || doc.driveFileId || doc.fileData));
+    const cls = doc ? (doc.pendienteRevision ? 'optional' : 'ok') : t.req ? 'missing' : 'optional';
+    const icon = !doc ? (t.req ? '❌' : '⬜')
+               : doc.pendienteRevision ? '⏳'
+               : doc.aprobado ? '✅' : '📄';
     html += `<div class="doc-item ${cls}">
       <div class="doc-icon">${icon}</div>
       <div class="doc-info">
         <div class="doc-name">${t.name}${t.req?'<span style="color:var(--red)"> *</span>':''}</div>
         ${doc?`<div class="doc-meta">
           Subido: ${doc.fecha} · ${doc.fileName||'Archivo'}
-          ${doc.driveUrl?'<span style="color:var(--green);margin-left:6px;font-size:11px">📁 En Drive</span>':''}
           ${doc.pendienteRevision?'<span style="color:var(--amber);margin-left:6px;font-size:11px">⏳ Pendiente revisión</span>':''}
+          ${doc.aprobado?`<span style="color:var(--green);margin-left:6px;font-size:11px">✅ Aprobado${doc.aprobadoPor?' por '+doc.aprobadoPor:''}${doc.fechaAprobacion?' · '+doc.fechaAprobacion:''}</span>`:''}
           ${doc.rechazado?'<span style="color:var(--red);margin-left:6px;font-size:11px">❌ Rechazado — sube uno nuevo</span>':''}
+          ${!hayArchivo?'<div style="color:var(--red);font-size:11px;margin-top:2px">⚠️ El archivo no se guardó — pide al empleado que lo suba de nuevo</div>':''}
         </div>`:'<div class="doc-meta text-muted">No cargado</div>'}
       </div>
-      ${(doc&&(doc.driveUrl||doc.fileData))?`<button class="btn btn-ghost btn-sm" onclick="viewDocFile('${emp.id}','${t.id}')">👁️ Ver</button>`:''}
-      ${can('write')&&!doc?`<button class="btn btn-ghost btn-sm" onclick="openDocEmpModalTipo('${emp.id}','${t.id}')">📤</button>`:''}
+      ${hayArchivo?`<button class="btn btn-ghost btn-sm" onclick="viewDocFile('${emp.id}','${t.id}')">👁️ Ver</button>`:''}
+      ${can('write')&&!doc?`<button class="btn btn-ghost btn-sm" onclick="openDocEmpModalTipo('${emp.id}','${t.id}')" title="Subir documento">📤</button>`:''}
+      ${can('write')&&doc&&!doc.aprobado&&hayArchivo?`<button class="btn btn-primary btn-sm" onclick="aprobarDoc('${emp.id}','${t.id}')" title="Aprobar documento">✅ Aprobar</button>`:''}
       ${can('write')&&doc?`<button class="btn btn-danger btn-sm" onclick="rechazarDoc('${emp.id}','${t.id}')" title="Rechazar documento">✗</button>`:''}
     </div>`;
   });
@@ -2366,13 +2421,13 @@ function viewDocFile(empId, tipoId) {
   const emp = SC.empleados.find(e => e.id === empId);
   const doc = emp?.docs?.[tipoId];
   if (!doc) { showNotif('Sin archivo disponible', 'error'); return; }
-  if (doc.driveUrl) {
-    // Abrir en Drive en nueva pestaña
-    window.open(doc.driveUrl, '_blank');
+  const url = doc.driveUrl || (doc.driveFileId ? driveViewUrl(doc.driveFileId) : null);
+  if (url) {
+    window.open(url, '_blank');
   } else if (doc.fileData) {
     openPDFViewerData(doc.fileData);
   } else {
-    showNotif('Sin archivo disponible', 'error');
+    showNotif('El archivo no se guardó en el almacenamiento — pide al empleado que lo suba nuevamente', 'error');
   }
 }
 
@@ -3375,7 +3430,7 @@ function renderPermisosAdmin() {
         <td class="text-center">${p.dias}</td>
         <td class="text-sm" style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.motivo||'—'}</td>
         <td>${descLabel}</td>
-        <td>${statusBadge(p.status)}</td>
+        <td>${statusBadge(p.status)}${p.aprobadoPorJefe?'<div style="font-size:10px;color:var(--blue)">👤 Aprobado por jefe directo</div>':''}${esPermisoMenor(p)&&p.status==='pendiente'?`<div style="font-size:10px;color:var(--text-muted)">⏱ &lt;${LIMITE_HORAS_JEFE}h · puede aprobar el jefe</div>`:''}</td>
         <td>
           <div class="flex gap-2">
             <button class="btn btn-primary btn-sm" onclick="openPermisoDetail('${p.id}')">👁️ Ver / Clasificar</button>
@@ -3477,7 +3532,9 @@ function openPermisoDetail(id) {
         : `<div class="doc-item missing"><div class="doc-icon">❌</div><div class="doc-info"><div class="doc-name">Sin documento adjunto</div></div></div>`}
     </div>
 
-    ${can('write') ? `
+    ${puedeAprobarPermiso(p) ? `
+    ${!esRRHH() ? `<div style="margin-top:12px;padding:8px 12px;background:rgba(59,130,246,.08);border-left:3px solid var(--blue);border-radius:4px;font-size:12px">
+      ⏱ Permiso menor a ${LIMITE_HORAS_JEFE} horas — puedes aprobarlo como jefe directo. RRHH quedará notificado automáticamente.</div>` : ''}
     <div class="mt-4 flex gap-3 flex-wrap">
       ${p.status==='pendiente' ? `
         <button class="btn btn-primary" style="flex:1" onclick="guardarYAprobarPermiso('${p.id}')">✅ Guardar y Aprobar</button>
@@ -3544,8 +3601,24 @@ function actualizarPermisoModal(id, status) {
 function actualizarPermiso(id, status) {
   const p = SC.permisos.find(x => x.id === id);
   if (!p) return;
-  if (!empVisibleParaUsuario(p.empId)) { showNotif('No puedes gestionar permisos de otra área', 'error'); return; }
+  if (!puedeAprobarPermiso(p)) {
+    showNotif(SC.user?.role === 'lider_area'
+      ? `Como jefe directo solo puedes aprobar permisos por horas menores a ${LIMITE_HORAS_JEFE}h. Este debe aprobarlo Recursos Humanos.`
+      : 'Solo Recursos Humanos puede aprobar o rechazar permisos', 'error');
+    return;
+  }
   p.status = status;
+  // Trazabilidad de quién decidió
+  p.aprobadoPor    = SC.user?.name || '';
+  p.aprobadoPorRol = SC.user?.roleName || SC.user?.role || '';
+  p.fechaDecision  = new Date().toLocaleDateString('es-CO');
+  if (!esRRHH()) {
+    // Aprobación del jefe directo: RRHH solo se entera, no decide
+    p.aprobadoPorJefe   = true;
+    p.notificadoRRHH    = true;
+    registrarAuditoria('notificacion_rrhh','permiso',id,
+      `Permiso de ${p.dias}h ${status} por jefe directo (${SC.user?.name||''})`);
+  }
   sbSavePermiso(p);            // persistir en Supabase (antes se perdía al recargar)
   registrarAuditoria('cambio_estado','permiso',id,status);
   syncToSheets('permisos');
@@ -3689,7 +3762,7 @@ function renderIncapAdmin() {
         <td>
           <div class="flex gap-2">
             <button class="btn btn-ghost btn-sm" onclick="openIncapDetail('${i.id}')">👁️ Ver</button>
-            ${can('write') && i.status==='pendiente' ? `
+            ${esRRHH() && i.status==='pendiente' ? `
               <button class="btn btn-ghost btn-sm" onclick="actualizarIncap('${i.id}','aprobado')">✅</button>
               <button class="btn btn-danger btn-sm" onclick="actualizarIncap('${i.id}','rechazado')">❌</button>` : ''}
           </div>
@@ -3733,7 +3806,7 @@ function openIncapDetail(id) {
         ? `<div class="doc-item ok"><div class="doc-icon">📋</div><div class="doc-info"><div class="doc-name">${i.epicrisisName||'Epicrisis.pdf'}</div></div><button class="btn btn-primary btn-sm" onclick="viewIncapPDF('${i.id}','epic')">👁️ Ver</button></div>`
         : `<div class="doc-item missing"><div class="doc-icon">⚠️</div><div class="doc-info"><div class="doc-name">Epicrisis PENDIENTE — Requerida</div><div class="doc-meta text-red">Esta incapacidad no puede aprobarse sin epicrisis</div></div></div>`}
     </div>` : ''}
-    ${can('write') && i.status==='pendiente' ? `
+    ${esRRHH() && i.status==='pendiente' ? `
     <div class="mt-4 flex gap-3">
       <button class="btn btn-primary" style="flex:1" onclick="actualizarIncapModal('${i.id}','aprobado')" ${i.requiereEpicrisis&&!i.epicrisisData?'disabled title="Falta epicrisis"':''}>✅ Aprobar</button>
       <button class="btn btn-danger" style="flex:1" onclick="actualizarIncapModal('${i.id}','rechazado')">❌ Rechazar</button>
@@ -3758,6 +3831,7 @@ function actualizarIncapModal(id, status) {
 function actualizarIncap(id, status) {
   const i = SC.incapacidades.find(x => x.id === id);
   if (!i) return;
+  if (!esRRHH()) { showNotif('Solo Recursos Humanos puede aprobar o rechazar incapacidades', 'error'); return; }
   if (!empVisibleParaUsuario(i.empId)) { showNotif('No puedes gestionar incapacidades de otra área', 'error'); return; }
   i.status = status;
   sbSaveIncap(i);              // persistir en Supabase (antes se perdía al recargar)
@@ -3942,15 +4016,21 @@ function renderPortal(tab) {
       const doc = emp.docs[t.id];
       const rejected  = doc?.rechazado;
       const pending   = doc?.pendienteRevision;
+      const aprobado  = doc?.aprobado;
       const hasFile   = doc && !rejected && (doc.driveUrl || doc.driveFileId || doc.fileData);
       const cls  = hasFile ? 'ok' : rejected ? 'missing' : t.req ? 'missing' : 'optional';
-      const icon = hasFile ? '✅' : rejected ? '🔄' : t.req ? '❌' : '⬜';
+      const icon = (hasFile && aprobado) ? '✅' : hasFile ? '⏳' : rejected ? '🔄' : t.req ? '❌' : '⬜';
       const statusBadgeHtml = rejected
         ? '<span class="badge badge-red" style="margin-left:6px">Rechazado — actualizar</span>'
+        : (doc && !hasFile)
+        ? '<span class="badge badge-red" style="margin-left:6px">No se guardó — vuelve a subirlo</span>'
+        : aprobado
+        ? '<span class="badge badge-green" style="margin-left:6px">Aprobado por RRHH</span>'
         : pending
         ? '<span class="badge badge-yellow" style="margin-left:6px">En revisión</span>'
         : '';
-      const canUpload = !doc || rejected;   // puede subir si no tiene doc o fue rechazado
+      // Puede subir si no hay documento, si fue rechazado, o si el archivo se perdió
+      const canUpload = !doc || rejected || !hasFile;
       const canView   = doc && !rejected && (doc.driveUrl || doc.driveFileId || doc.fileData);
       html += `<div class="doc-item ${cls}" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;margin-bottom:8px">
         <div class="doc-icon" style="font-size:20px;min-width:28px;text-align:center">${icon}</div>
@@ -4810,10 +4890,17 @@ function openAddDisciplinarioModal() {
   ['disc-desc','disc-dias','disc-obs','disc-pruebas-lbl'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
-  const lbl = document.getElementById('disc-pruebas-lbl');
-  if (lbl) lbl.textContent = '📎 Adjuntar pruebas (PDF único con todas las evidencias)';
-
   const esLider = SC.user?.role === 'lider_area';
+  const lbl = document.getElementById('disc-pruebas-lbl');
+  if (lbl) lbl.textContent = esLider
+    ? '📎 Adjuntar pruebas — OBLIGATORIO (documento, foto o video)'
+    : '📎 Adjuntar pruebas (documento, foto o video)';
+  const badge = document.getElementById('disc-pruebas-req-badge');
+  if (badge) {
+    badge.textContent = esLider ? 'OBLIGATORIO' : 'RECOMENDADO';
+    badge.style.background = esLider ? 'rgba(239,68,68,.15)' : 'rgba(245,158,11,.15)';
+    badge.style.color      = esLider ? 'var(--red)' : 'var(--amber)';
+  }
   const sel = document.getElementById('disc-emp');
   if (sel) {
     sel.innerHTML = '';
@@ -4823,7 +4910,7 @@ function openAddDisciplinarioModal() {
     empActivos.forEach(e => {
       const area = SC.areas.find(a => a.id === e.areaId);
       const esOtraArea = esLider && SC.user?.areaId && String(e.areaId) !== String(SC.user.areaId);
-      const label = e.name + (area ? ' · ' + area.name : '') + (esOtraArea ? ' ⚠️ Otra área' : '');
+      const label = e.name + (area ? ' · ' + area.name : '') + (esOtraArea ? ' · (otra área)' : '');
       sel.insertAdjacentHTML('beforeend', `<option value="${e.id}" ${esOtraArea?'style="color:var(--amber)"':''}>${label}</option>`);
     });
   }
@@ -4870,6 +4957,12 @@ function saveDiscipinario() {
   if (!empId||!desc||!fecha) { showNotif('Completa los campos obligatorios','error'); return; }
 
   const esLider    = SC.user?.role === 'lider_area';
+  // Cualquier líder puede solicitar proceso a CUALQUIER empleado,
+  // pero SIEMPRE debe adjuntar pruebas (documento, foto o video).
+  if (esLider && !SC.pendingFiles?.solicitud_disc) {
+    showNotif('⛔ Debes adjuntar pruebas (documento, foto o video) para solicitar un proceso disciplinario', 'error');
+    return;
+  }
   const hoy        = new Date().toISOString().split('T')[0];
   const emp2       = SC.empleados.find(e => e.id === empId);
   const areaEmp    = emp2?.areaId;
@@ -4920,21 +5013,20 @@ function saveDiscipinario() {
   const archivoSol = SC.pendingFiles?.solicitud_disc;
   if (archivoSol) {
     disc.etapas.solicitud.tienePruebas = true;
-    if (GAPI_CONFIG.connected) {
-      uploadToDrive(archivoSol.data, archivoSol.name||'Pruebas_Disc_'+emp2?.name+'.pdf', 'disciplinarios', emp2?.name||empId)
-        .then(fid => {
-          if (fid) disc.etapas.solicitud.archivos.push({name:archivoSol.name, driveId:fid, driveUrl: driveViewUrl(fid)});
-          sbSaveDisc(disc);
-        });
-    } else {
-      disc.etapas.solicitud.archivos.push({name:archivoSol.name, fileData:archivoSol.data});
-    }
+    uploadToDrive(archivoSol.data, archivoSol.name||('Pruebas_'+(emp2?.name||empId)), 'disciplinarios', emp2?.name||empId)
+      .then(fid => {
+        if (fid) disc.etapas.solicitud.archivos.push({name:archivoSol.name, driveId:fid, driveUrl: driveViewUrl(fid)});
+        else     disc.etapas.solicitud.archivos.push({name:archivoSol.name, fileData:archivoSol.data});
+        sbSaveDisc(disc);
+      });
   }
   SC.pendingFiles = {};
 
   SC.disciplinarios.push(disc);
   closeModal('modal-add-disc');
   sbSaveDisc(disc);
+  registrarAuditoria('crear','disciplinario',disc.id,
+    `${esLider?'Solicitud de líder':'Proceso RRHH'} · emp ${empId} · pruebas: ${disc.etapas.solicitud.tienePruebas?'sí':'no'}`);
   syncToSheets('disciplinarios');
 
   if (esLider) {
@@ -7473,12 +7565,17 @@ window.checkDiscEmpArea = checkDiscEmpArea;
 function handleDiscPruebas(e) {
   const file = e.target.files[0];
   if (!file) return;
+  if (file.size > 40 * 1024 * 1024) {
+    showNotif('El archivo supera los 40 MB. Comprime el video o súbelo en menor calidad.', 'error');
+    e.target.value = ''; return;
+  }
   if (!SC.pendingFiles) SC.pendingFiles = {};
   const reader = new FileReader();
   reader.onload = ev => {
     SC.pendingFiles.solicitud_disc = { name: file.name, data: ev.target.result, type: file.type };
     const lbl = document.getElementById('disc-pruebas-lbl');
-    if (lbl) lbl.textContent = '✅ ' + file.name + ' (' + (file.size/1024).toFixed(0) + ' KB)';
+    const tam = file.size > 1024*1024 ? (file.size/1024/1024).toFixed(1)+' MB' : (file.size/1024).toFixed(0)+' KB';
+    if (lbl) lbl.textContent = '✅ ' + file.name + ' (' + tam + ')';
     // Quitar advertencia si existía
     const warn = document.getElementById('disc-sin-pruebas-warn');
     if (warn) warn.style.display = 'none';
@@ -8597,11 +8694,14 @@ async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
 
     const safe = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
                         .replace(/[^a-zA-Z0-9._-]/g,'_').replace(/_+/g,'_').slice(0,120);
+    // Token aleatorio en el nombre: las URLs no son adivinables desde fuera
+    const token = Math.random().toString(36).slice(2,10) + Math.random().toString(36).slice(2,10);
+    const bucket = (folderKey === 'bodega') ? 'bodega' : 'documentos';
     const path = [ safe(folderKey || 'otros'),
                    subfolder ? safe(subfolder) : null,
-                   Date.now() + '_' + safe(fileName || 'archivo') ].filter(Boolean).join('/');
+                   Date.now() + '_' + token + '_' + safe(fileName || 'archivo') ].filter(Boolean).join('/');
 
-    const res = await fetch(`${SB_URL}/storage/v1/object/documentos/${path}`, {
+    const res = await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`, {
       method: 'POST',
       headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': mime, 'x-upsert': 'true' },
       body: bytes,
@@ -8611,7 +8711,7 @@ async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
       if (typeof showNotif === 'function') showNotif('⚠️ No se pudo subir el archivo al almacenamiento ('+res.status+')','error');
       return null;
     }
-    return path; // el "fileId" ahora es la ruta dentro del bucket
+    return bucket + ':' + path; // "bucket:ruta" para saber de dónde leerlo después
   } catch(e) {
     console.error('Storage upload error:', e);
     return null;
@@ -8619,15 +8719,23 @@ async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
 }
 
 // Construir URL de visualización desde fileId de Drive
+function storageUrl(ref) {
+  const s = String(ref);
+  if (s.includes(':')) {
+    const i = s.indexOf(':');
+    return `${SB_URL}/storage/v1/object/public/${s.slice(0,i)}/${s.slice(i+1)}`;
+  }
+  return `${SB_URL}/storage/v1/object/public/documentos/${s}`; // rutas guardadas antes del cambio
+}
 function driveViewUrl(fileId) {
   if (!fileId) return null;
-  // Rutas nuevas de Supabase Storage contienen '/'; los IDs antiguos de Drive no.
-  if (String(fileId).includes('/')) return `${SB_URL}/storage/v1/object/public/documentos/${fileId}`;
-  return `https://drive.google.com/file/d/${fileId}/view`;   // compatibilidad con archivos viejos
+  const s = String(fileId);
+  if (s.includes('/')) return storageUrl(s);                 // Supabase Storage
+  return `https://drive.google.com/file/d/${s}/view`;        // compatibilidad con archivos viejos
 }
 function drivePreviewUrl(fileId) {
   if (!fileId) return null;
-  if (String(fileId).includes('/')) return `${SB_URL}/storage/v1/object/public/documentos/${fileId}`;
+  if (String(fileId).includes('/')) return storageUrl(fileId);
   return `https://drive.google.com/file/d/${fileId}/preview`;
 }
 
