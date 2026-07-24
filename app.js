@@ -3804,8 +3804,10 @@ function savePermiso() {
   const diasVal  = esPorHoras ? (calcHoras(horaI, horaF) + 'h') : calcDias(inicioReg, finFinal);
   // Tratamiento y descontable: solo lo define RH/Admin
   const esEmpleado   = SC.user?.role === 'empleado';
-  const descontable  = esEmpleado ? 'pendiente' : (document.getElementById('perm-descontable')?.value || 'pendiente');
-  const tratamiento  = esEmpleado ? 'pendiente' : (document.getElementById('perm-tratamiento')?.value  || 'pendiente');
+  // Solo Recursos Humanos define el tratamiento de nómina y si es descontable
+  const soloRH       = esRRHH();
+  const descontable  = soloRH ? (document.getElementById('perm-descontable')?.value || 'pendiente') : 'pendiente';
+  const tratamiento  = soloRH ? (document.getElementById('perm-tratamiento')?.value  || 'pendiente') : 'pendiente';
   const esLicencia   = ['licencia_remunerada','licencia_maternidad','licencia_paternidad','licencia_no_remunerada'].includes(tipo);
 
   // For NON-horas: hora is captured but permiso is by day
@@ -9787,6 +9789,8 @@ function guardarNuevoLider() {
       localStorage.setItem('sc_users', JSON.stringify(saved));
     } catch(e) {}
     const area = SC.areas.find(a => String(a.id) === String(areaId));
+    // Sincronizar el rol REAL en Supabase para que aplique al iniciar sesión
+    actualizarPerfilSupabase(cedNorm, 'lider_area', areaId, emp.name, emp.id);
     showNotif(`✅ ${emp.name} asignado como Líder de ${area?.name||areaId}. Login: ${cedNorm}`);
     openUserMgmt();
     return;
@@ -9823,6 +9827,27 @@ function eliminarLiderArea(userId) {
   openUserMgmt();
 }
 
+// ─── SINCRONIZAR ROL CON SUPABASE ────────────────────────────
+// La gestión de usuarios ahora escribe en la tabla `perfiles`,
+// que es la que realmente define el rol al iniciar sesión.
+async function actualizarPerfilSupabase(cedula, rol, areaId, nombre, empId) {
+  const ced = normalizeCedula(cedula);
+  if (!ced) return { ok:false, msg:'Sin cédula' };
+  const perfiles = await sbFetch('perfiles','GET',null,`?cedula=eq.${encodeURIComponent(ced)}&select=user_id`);
+  if (!perfiles || !perfiles.length) {
+    showNotif(`⚠️ ${nombre||ced} no tiene cuenta de acceso creada. Créala primero desde su ficha de empleado.`, 'error');
+    return { ok:false, msg:'Sin cuenta' };
+  }
+  const uid = perfiles[0].user_id;
+  const res = await sbFetch('perfiles','PATCH',{
+    rol, area_id: areaId != null ? String(areaId) : null,
+    nombre: nombre || '', emp_id: empId || null,
+  }, `?user_id=eq.${uid}`, {'Prefer':'return=minimal'});
+  registrarAuditoria('cambio_rol','perfil', ced, `${rol}${areaId?' · área '+areaId:''}`);
+  return { ok: res !== null };
+}
+window.actualizarPerfilSupabase = actualizarPerfilSupabase;
+
 function saveUserAdmin(userId, esLider = false) {
   const u = USERS.find(x => x.id === userId);
   if (!u) return;
@@ -9852,7 +9877,12 @@ function saveUserAdmin(userId, esLider = false) {
     else saved.push(entry);
     localStorage.setItem('sc_users', JSON.stringify(saved));
   } catch(e) {}
-  if (u.role === 'lider_area') persistUsers();
+  if (u.role === 'lider_area') {
+    persistUsers();
+    // El rol y el área reales viven en Supabase
+    actualizarPerfilSupabase(u.cedula || newUser, 'lider_area', newArea || u.areaId, newName, u.empId)
+      .then(r => { if (r.ok) showNotif('🔄 Rol sincronizado — aplicará en su próximo inicio de sesión'); });
+  }
   showNotif(`✅ Usuario "${newUser}" actualizado`);
   if (SC.user?.id === userId) {
     SC.user.name   = newName;
@@ -10405,11 +10435,23 @@ const DOMINIO_INTERNO = 'empleados.specialcar.com.co';
 function correoDeCedula(cedula) {
   return normalizeCedula(cedula) + '@' + DOMINIO_INTERNO;
 }
-// Si el texto tiene "@" se usa tal cual; si no, se asume cédula.
-function resolverCorreoLogin(txt) {
+// Devuelve los correos posibles para el texto ingresado.
+// Si escriben la cédula, la cuenta pudo crearse con su correo real
+// (el script usa el correo del empleado cuando existe y es único).
+function correosPosiblesLogin(txt) {
   const t = String(txt || '').trim();
-  return t.includes('@') ? t.toLowerCase() : correoDeCedula(t);
+  if (t.includes('@')) return [t.toLowerCase()];
+  const ced = normalizeCedula(t);
+  const lista = [];
+  // 1) Correo registrado en su ficha de empleado
+  const cands = SC.empleados.filter(e => normalizeCedula(e.cedula) === ced);
+  const emp = cands.find(e => e.status === 'activo') || cands[0];
+  if (emp?.email && emp.email.includes('@')) lista.push(emp.email.trim().toLowerCase());
+  // 2) Correo interno derivado de la cédula
+  lista.push(correoDeCedula(ced));
+  return [...new Set(lista)];
 }
+function resolverCorreoLogin(txt) { return correosPosiblesLogin(txt)[0]; }
 
 // ─── Sesión ───────────────────────────────────────────────────
 let SB_SESSION = null;   // { access_token, refresh_token, expires_at, user }
@@ -10539,12 +10581,12 @@ async function loginConAuth(usuarioTxt, password, errorElId) {
   };
   if (!usuarioTxt || !password) { mostrarError('Ingresa tus credenciales.'); return false; }
 
-  try {
-    await authLogin(resolverCorreoLogin(usuarioTxt), password);
-  } catch(e) {
-    mostrarError('Usuario o contraseña incorrectos.');
-    return false;
+  // Probar cada correo posible (correo propio o interno por cédula)
+  let entro = false;
+  for (const correo of correosPosiblesLogin(usuarioTxt)) {
+    try { await authLogin(correo, password); entro = true; break; } catch(e) {}
   }
+  if (!entro) { mostrarError('Usuario o contraseña incorrectos.'); return false; }
 
   // Con sesión activa, recargar los datos ya filtrados por RLS
   await loadFromSupabase();
