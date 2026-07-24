@@ -976,8 +976,8 @@ function startApp() {
       showView('portal-retirado');
     } else {
       showView('portal');
-      // Avisar al empleado si aún usa la contraseña inicial (= su cédula)
-      if (u.pass === u.user) {
+      // Avisar si podría seguir usando la contraseña inicial (= su cédula)
+      if (u.cedula && !localStorage.getItem('sc_pass_ok_' + u.id)) {
         setTimeout(() => {
           showNotif('🔑 Estás usando tu número de documento como contraseña. Te recomendamos cambiarla haciendo clic en <b>Mi Perfil → Cambiar Contraseña</b>.', 'success');
         }, 1000);
@@ -1018,6 +1018,7 @@ function esPermisoMenor(p) {
 function puedeAprobarPermiso(p) {
   if (esRRHH()) return true;                                  // RRHH aprueba todo
   if (SC.user?.role !== 'lider_area') return false;
+  if (p.empId && p.empId === SC.user?.empId) return false;    // nadie aprueba lo propio
   if (!empVisibleParaUsuario(p.empId)) return false;          // solo su equipo
   return esPermisoMenor(p);                                   // y solo si es < 2 horas
 }
@@ -1037,7 +1038,8 @@ function empVisibleParaUsuario(empId) {
 
 // Vistas permitidas para líder de área (lista blanca de navegación)
 const VISTAS_LIDER_AREA = ['empleados','empleado-detail','novedades-area','malla-area',
-  'permisos-admin','incapacidades-admin','vacaciones-admin','disciplinarios'];
+  'permisos-admin','incapacidades-admin','vacaciones-admin','disciplinarios',
+  'portal','portal-retirado'];
 
 // ─── SIDEBAR ──────────────────────────────────────────────
 function buildSidebar() {
@@ -1057,6 +1059,11 @@ function buildSidebar() {
 
   // Lider de área: vista reducida — SIN módulos globales (Candidatos, Vacantes, Bodega, Dashboard)
   if (u.role === 'lider_area') {
+    // Si el líder también tiene ficha de empleado, ve SU propio portal
+    if (u.empId) {
+      addNavItem(nav, '🏠', 'Mi Portal', 'portal');
+      addNavSep(nav, 'MI EQUIPO');
+    }
     addNavItem(nav, '👥', 'Mi Equipo', 'empleados');
     addNavSep(nav, 'NOVEDADES');
     addNavItem(nav, '📅', 'Planeador del Área', 'novedades-area');
@@ -1074,6 +1081,7 @@ function buildSidebar() {
     return;
   }
   addNavItem(nav, '🏠', 'Dashboard', 'dashboard');
+  if (u.empId) addNavItem(nav, '👤', 'Mi Portal', 'portal');
   addNavSep(nav, 'GESTIÓN');
   addNavItem(nav, '👤', 'Empleados', 'empleados');
   addNavItem(nav, '🔍', 'Candidatos', 'candidatos');

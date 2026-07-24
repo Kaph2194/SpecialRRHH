@@ -142,3 +142,62 @@ Hoy la seguridad vive en la pantalla: cualquiera con la consola del navegador
 puede leer toda la base. Después de la migración, el servidor mismo le niega
 los datos a quien no le corresponden — un líder de Taller no puede obtener los
 salarios de Ventas ni aunque manipule el código.
+
+---
+
+## ⚠️ Personas que son líder Y empleado a la vez
+
+Un líder de área normalmente **también tiene ficha de empleado** (tiene sus
+propias vacaciones, incapacidades y carpeta de vida). El sistema maneja
+**una sola cuenta por persona**: no se crean dos accesos distintos.
+
+### Cómo dejarlo bien
+
+**1.** Deja que `crear_usuarios.js` cree la cuenta de TODOS los empleados,
+   incluidos los que son líderes. Todos entran con su cédula.
+
+**2.** Luego "promueve" a los que son líderes, cambiando su rol en el perfil.
+   Reemplaza las cédulas por las reales:
+
+```sql
+-- Líder de Financiera (área 5)
+update public.perfiles
+set rol = 'lider_area', area_id = '5'
+where cedula = '1032505160';
+
+-- Líder de Operaciones (área 12)
+update public.perfiles
+set rol = 'lider_area', area_id = '12'
+where cedula = '1019876543';
+```
+
+Consulta las cédulas y áreas así:
+
+```sql
+select e.cedula, e.name, e.area_id, p.rol
+from empleados e join perfiles p on p.cedula = e.cedula
+where e.status = 'activo' and e.cargo ilike '%lider%'
+order by e.area_id;
+```
+
+**3.** Si en el Paso 4 creaste cuentas de líder con correo corporativo
+   (`lider.financiera@specialcar.com.co`) y esa persona **también** es empleado,
+   **elimina esa cuenta duplicada** en Authentication → Users. Se queda solo la
+   de su cédula, ya promovida a `lider_area`.
+
+### Resultado
+
+Esa persona entra **una sola vez con su cédula** y ve las dos cosas:
+
+- **🏠 Mi Portal** — sus documentos, permisos, vacaciones e incapacidades.
+- **👥 Mi Equipo** — la gestión de su área.
+
+Nadie puede aprobarse permisos a sí mismo: aunque sea líder del área, sus
+propias solicitudes las decide RRHH.
+
+### ¿Y gerencia, jurídica y RRHH?
+
+Si esas cuentas corresponden a personas con ficha de empleado, aplica lo mismo:
+crea la cuenta con su cédula y luego cambia el rol en `perfiles`. Si son cuentas
+institucionales (no una persona concreta), déjalas con su correo corporativo tal
+como quedaron en el Paso 4.
