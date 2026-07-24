@@ -10,7 +10,7 @@
 <script src="https://apis.google.com/js/api.js" async defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="icon" href="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">
-<link rel="stylesheet" href="styles.css?v=12">
+<link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
 
@@ -48,18 +48,18 @@
       <!-- ── MODO EMPLEADO: cédula + contraseña ── -->
       <div id="login-emp-section">
         <p class="login-desc" style="margin-top:0;margin-bottom:18px">
-          Ingresa tu número de documento y contraseña para acceder a tu portal.
+          Ingresa tu número de documento (o tu correo registrado) y tu contraseña.
         </p>
         <div class="form-group">
-          <label class="form-label">Número de Documento</label>
-          <input class="form-input" id="login-cedula" placeholder="Ej: 1012345678"
-            inputmode="numeric" autocomplete="off"
-            style="font-size:18px;letter-spacing:2px;text-align:center;padding:13px"
+          <label class="form-label">Número de Documento o Correo</label>
+          <input class="form-input" id="login-cedula" placeholder="Ej: 1012345678 o tu@correo.com"
+            autocomplete="username"
+            style="font-size:16px;text-align:center;padding:13px"
             onkeydown="if(event.key==='Enter')document.getElementById('login-pass-emp').focus()">
         </div>
         <div class="form-group">
           <label class="form-label">Contraseña
-            <span style="font-size:11px;color:var(--text-muted);font-weight:400">(por defecto: tu número de documento)</span>
+            <span style="font-size:11px;color:var(--text-muted);font-weight:400">(inicial: tu número de documento)</span>
           </label>
           <input class="form-input" id="login-pass-emp" type="password" placeholder="••••••••"
             onkeydown="if(event.key==='Enter')doLoginEmpleado()">
@@ -354,6 +354,7 @@
         <div class="tab" onclick="portalTab('disciplinarios',this)">⚖️ Disciplinarios</div>
         <div class="tab" onclick="portalTab('contratos',this)">📄 Mis Contratos</div>
         <div class="tab" onclick="portalTab('vacaciones',this)">🏖 Mis Vacaciones</div>
+        <div class="tab" onclick="portalTab('nomina',this)">💰 Mi Nómina</div>
         <div class="tab" onclick="portalTab('certificados',this)">📄 Certificados</div>
         <div class="tab" onclick="portalTab('bodega',this)">🗄 Bodega</div>
         <div class="tab" onclick="portalTab('denuncias',this)">🔒 Denuncias</div>
@@ -866,6 +867,10 @@
       </div>
     </div>
 
+    <div id="view-solicitudes-cambio" class="view">
+      <div id="solicitudes-cambio-content"></div>
+    </div>
+
     <div id="view-solicitudes-cert" class="view">
       <div id="solicitudes-cert-content"></div>
     </div>
@@ -1171,6 +1176,46 @@
 </div>
 
 <!-- Solicitar Permiso -->
+<div class="modal-overlay" id="modal-carga-nomina">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-title">📑 Publicar Desprendibles de Nómina</div>
+      <button class="modal-close" onclick="closeModal('modal-carga-nomina')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="info-box mb-3" style="font-size:12px">Selecciona varios PDF a la vez. El sistema los asigna a cada empleado buscando <strong>la cédula en el nombre del archivo</strong> (ej: <code>1032505160_julio.pdf</code>). Cada empleado verá solo el suyo.</div>
+      <div class="form-group"><label class="form-label">Período</label>
+        <input type="month" class="form-input" id="cmn-periodo"></div>
+      <div class="form-group"><label class="form-label">Archivos PDF</label>
+        <input type="file" class="form-input" id="cmn-files" accept=".pdf" multiple></div>
+      <div id="cmn-resultado" class="mb-3"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="procesarCargaMasivaNomina()">Publicar Desprendibles</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-solicitud-cambio">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <div class="modal-title" id="sca-titulo">Solicitar Cambio</div>
+      <button class="modal-close" onclick="closeModal('modal-solicitud-cambio')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Dato actual</label>
+        <div id="sca-actual" style="padding:9px 12px;background:rgba(17,31,77,.05);border-radius:8px;font-size:13px">—</div></div>
+      <div class="form-group"><label class="form-label" id="sca-label-nuevo">Nuevo valor *</label>
+        <input type="text" class="form-input" id="sca-nuevo" placeholder="Ej: Sura"></div>
+      <div class="form-group" id="sca-extra-group" style="display:none">
+        <label class="form-label">Número de cuenta / tipo</label>
+        <input type="text" class="form-input" id="sca-extra" placeholder="Ej: 1234567890 / ahorros"></div>
+      <div class="form-group"><label class="form-label">Soporte * <span id="sca-soporte-req" class="text-xs text-muted"></span></label>
+        <input type="file" class="form-input" id="sca-file" accept=".pdf,.jpg,.jpeg,.png"></div>
+      <div class="text-xs text-muted mb-3">El cambio se aplicará solo después de que Recursos Humanos valide el soporte.</div>
+      <button class="btn btn-primary" style="width:100%" onclick="enviarSolicitudCambio()">Enviar Solicitud</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-solicitar-cert">
   <div class="modal" style="max-width:430px">
     <div class="modal-header">
@@ -1243,11 +1288,11 @@
         </select>
       </div>
       <div id="perm-tratamiento-nota" class="info-box mb-3" style="font-size:12px;display:none"></div>
-      <div class="info-box mb-3" style="font-size:12px" id="perm-72h-note">⏰ Los permisos deben solicitarse con mínimo <strong>72 horas de anticipación</strong> a la fecha y hora del permiso.</div>
+      <div class="info-box mb-3" style="font-size:12px" id="perm-72h-note">⏰ Los permisos deben solicitarse con mínimo <strong>2 días de anticipación</strong>. Debes adjuntar el <strong>formato firmado</strong> por ti y tu jefe directo.</div>
       <!-- Campos para permiso por DÍAS (todos los tipos excepto horas) -->
       <div id="perm-dias-fields">
         <div class="form-grid">
-          <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="perm-inicio" type="date"></div>
+          <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="perm-inicio" onchange="checkPermFecha()" type="date"></div>
           <div class="form-group"><label class="form-label">Fecha Fin *</label><input class="form-input" id="perm-fin" type="date"></div>
         </div>
         <div class="form-grid">
@@ -1257,7 +1302,7 @@
       </div>
       <!-- Campos para permiso POR HORAS -->
       <div id="perm-horas-fields" style="display:none">
-        <div class="form-group"><label class="form-label">Fecha del Permiso *</label><input class="form-input" id="perm-fecha-horas" type="date" oninput="document.getElementById('perm-inicio').value=this.value"></div>
+        <div class="form-group"><label class="form-label">Fecha del Permiso *</label><input class="form-input" id="perm-fecha-horas" onchange="checkPermFecha()" type="date" oninput="document.getElementById('perm-inicio').value=this.value"></div>
         <div class="form-grid">
           <div class="form-group"><label class="form-label">Hora Inicio *</label><input class="form-input" id="perm-hora-inicio-h" type="time" value="08:00" oninput="document.getElementById('perm-hora-inicio').value=this.value"></div>
           <div class="form-group"><label class="form-label">Hora Fin *</label><input class="form-input" id="perm-hora-fin-h" type="time" value="12:00" oninput="document.getElementById('perm-hora-fin').value=this.value"></div>
@@ -1285,7 +1330,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-permiso')">Cancelar</button>
-      <button class="btn btn-primary" onclick="savePermiso()">📤 Solicitar Permiso</button>
+      <button class="btn btn-primary" id="btn-guardar-permiso" onclick="savePermiso()">📤 Solicitar Permiso</button>
     </div>
   </div>
 </div>
@@ -1313,7 +1358,7 @@
         <div class="form-group"><label class="form-label">Diagnóstico *</label><input class="form-input" id="incap-diag" placeholder="Diagnóstico médico o descripción del accidente"></div>
         <div class="form-group"><label class="form-label">Días de Incapacidad *</label><input class="form-input" id="incap-dias" type="number" min="1" placeholder="0" oninput="checkIncapDias()"></div>
         <div class="form-group"><label class="form-label">EPS / ARL *</label><input class="form-input" id="incap-eps" placeholder="Nombre de EPS o ARL"></div>
-        <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="incap-fecha" type="date"></div>
+        <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="incap-fecha" onchange="checkIncapFecha()" type="date"></div>
       </div>
       <!-- Campos específicos de Accidente de Trabajo -->
       <div id="incap-at-group" style="display:none">
@@ -1344,8 +1389,9 @@
           </div>
         </div>
       </div>
+      <div id="incap-fecha-error" class="warning-72h mb-3" style="display:none"></div>
       <div id="incap-dias-warning" class="warning-72h mb-3" style="display:none">
-        ⚠️ Incapacidades mayores a 2 días requieren adjuntar también la epicrisis médica.
+        ⚠️ Las incapacidades de más de 2 días requieren adjuntar la epicrisis médica.
       </div>
       <div class="form-group">
         <label class="form-label">Certificado de Incapacidad (PDF) *</label>
@@ -1366,7 +1412,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-incap')">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveIncapacidad()">📤 Radicar</button>
+      <button class="btn btn-primary" id="btn-radicar-incap" onclick="saveIncapacidad()">📤 Radicar</button>
     </div>
   </div>
 </div>
@@ -1523,14 +1569,14 @@
     </div>
     <div class="modal-body">
       <div class="form-grid">
-        <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="vac-inicio" type="date"></div>
-        <div class="form-group"><label class="form-label">Fecha Fin *</label><input class="form-input" id="vac-fin" type="date"></div>
+        <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="vac-inicio" onchange="checkVacFechas()" type="date"></div>
+        <div class="form-group"><label class="form-label">Fecha Fin *</label><input class="form-input" id="vac-fin" onchange="checkVacFechas()" type="date"></div>
       </div>
       <div class="form-group"><label class="form-label">Observaciones</label><textarea class="form-textarea" id="vac-obs" placeholder="Notas del período de vacaciones..."></textarea></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-vacaciones')">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveVacaciones()">💾 Guardar</button>
+      <button class="btn btn-primary" id="btn-guardar-vac" onclick="saveVacaciones()">💾 Guardar</button>
     </div>
   </div>
 </div>
@@ -2397,8 +2443,66 @@ function checkIncapDias() {
   const dias = parseInt(document.getElementById('incap-dias')?.value)||0;
   const epicGroup = document.getElementById('incap-epicrisis-group');
   const warn = document.getElementById('incap-dias-warning');
-  if (epicGroup) epicGroup.style.display = dias > 3 ? '' : 'none';
-  if (warn) warn.style.display = dias > 3 ? 'flex' : 'none';
+  if (epicGroup) epicGroup.style.display = dias > 2 ? '' : 'none';
+  if (warn) warn.style.display = dias > 2 ? 'flex' : 'none';
+  checkIncapFecha();
+}
+
+// Bloqueo inmediato si la fecha no cumple el plazo mínimo (2 días)
+function checkPermFecha() {
+  const esHoras = document.getElementById('perm-tipo')?.value === 'horas';
+  const f = esHoras ? document.getElementById('perm-fecha-horas')?.value
+                    : document.getElementById('perm-inicio')?.value;
+  const err = document.getElementById('perm-72h-error');
+  const btn = document.getElementById('btn-guardar-permiso');
+  if (!f) { if(err) err.style.display='none'; if(btn) btn.disabled=false; return; }
+  const dias = Math.floor((new Date(f+'T00:00:00') - new Date(new Date().toDateString()))/86400000);
+  const esEmp = SC.user?.role === 'empleado';
+  const invalido = esEmp && dias < 2;
+  if (err) {
+    err.style.display = invalido ? 'flex' : 'none';
+    if (invalido) err.textContent = dias < 0
+      ? '⛔ No puedes solicitar permisos para fechas pasadas.'
+      : `⛔ Faltan solo ${dias} día(s). Los permisos requieren mínimo 2 días de anticipación.`;
+  }
+  if (btn) { btn.disabled = invalido; btn.style.opacity = invalido ? '.45' : '1'; }
+}
+
+// Bloqueo inmediato: la incapacidad debe radicarse máx. 2 días después de terminar
+function checkIncapFecha() {
+  const f    = document.getElementById('incap-fecha')?.value;
+  const dias = parseInt(document.getElementById('incap-dias')?.value)||0;
+  const err  = document.getElementById('incap-fecha-error');
+  const btn  = document.getElementById('btn-radicar-incap');
+  if (!f || !dias) { if(err) err.style.display='none'; if(btn) btn.disabled=false; return; }
+  const fin = new Date(f+'T00:00:00'); fin.setDate(fin.getDate()+dias-1);
+  const diasDesdeFin = Math.floor((new Date(new Date().toDateString()) - fin)/86400000);
+  const esEmp = SC.user?.role === 'empleado';
+  const invalido = esEmp && diasDesdeFin > 2;
+  if (err) {
+    err.style.display = invalido ? 'flex' : 'none';
+    if (invalido) err.innerHTML = `⛔ La incapacidad terminó el <b>${fin.toISOString().split('T')[0]}</b> y el plazo de radicación (2 días) ya venció. Comunícate con Recursos Humanos.`;
+  }
+  if (btn) { btn.disabled = invalido; btn.style.opacity = invalido ? '.45' : '1'; }
+}
+
+// Bloqueo inmediato en vacaciones: 15 días de anticipación y mínimo 7 días de disfrute
+function checkVacFechas() {
+  const ini = document.getElementById('vac-inicio')?.value;
+  const fin = document.getElementById('vac-fin')?.value;
+  const err = document.getElementById('vac-fecha-error');
+  const btn = document.getElementById('btn-guardar-vac');
+  if (!ini || !fin) { if(err) err.style.display='none'; if(btn) btn.disabled=false; return; }
+  const hoy0 = new Date(new Date().toDateString());
+  const antic = Math.floor((new Date(ini+'T00:00:00') - hoy0)/86400000);
+  const dur   = Math.floor((new Date(fin+'T00:00:00') - new Date(ini+'T00:00:00'))/86400000) + 1;
+  const esEmp = SC.user?.role === 'empleado';
+  let msg = '';
+  if (dur < 7)  msg = `⛔ El período mínimo de vacaciones es de 7 días. Seleccionaste ${dur} día(s).`;
+  else if (new Date(fin) < new Date(ini)) msg = '⛔ La fecha de fin debe ser posterior a la de inicio.';
+  else if (esEmp && antic < 15) msg = `⛔ Las vacaciones requieren mínimo 15 días calendario de anticipación. Faltan ${antic} día(s).`;
+  if (err) { err.style.display = msg ? 'flex' : 'none'; err.textContent = msg; }
+  if (btn) { btn.disabled = !!msg; btn.style.opacity = msg ? '.45' : '1'; }
 }
 
 function handlePermFile(e) {
@@ -2417,6 +2521,6 @@ function handlePermDrop(e) {
 }
 </script>
 
-<script src="app.js?v=12"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

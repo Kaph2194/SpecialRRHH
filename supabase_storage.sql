@@ -62,3 +62,23 @@ create table if not exists public.solicitudes_certificados (
 );
 alter table public.solicitudes_certificados disable row level security;
 select pg_notify('pgrst', 'reload schema');
+
+-- ─── SOLICITUDES DE CAMBIO DE DATOS ──────────────────────────
+create table if not exists public.solicitudes_cambio (
+  id             text primary key,
+  emp_id         text,
+  campo          text,
+  valor_actual   text default '',
+  valor_nuevo    text default '',
+  datos_extra    text default '',
+  estado         text default 'solicitado',
+  fecha          text default '',
+  soporte_url    text,
+  soporte_nombre text default '',
+  revisado_por   text default '',
+  fecha_revision text default '',
+  motivo_rechazo text default '',
+  created_at     timestamptz default now()
+);
+alter table public.solicitudes_cambio disable row level security;
+select pg_notify('pgrst', 'reload schema');

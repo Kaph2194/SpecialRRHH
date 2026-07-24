@@ -303,6 +303,7 @@ const SC = {
   novedadesArea: [],     // [ { id, empId, fecha, tipo, horas, descripcion, reportadoPor, areaId } ]
   nominaFormatos: [],    // [ { id, periodo, fileName, fileData|driveUrl, subidoPor, rol, areaNombre, fecha } ]
   solicitudesCert: [],   // solicitudes de certificados laborales, ingresos, paz y salvo...
+  solicitudesCambio: [], // cambios de EPS, AFP, cesantías, caja, banco (requieren aprobación RRHH)
   denuncias:     [],     // [ { id, empId, tipo, descripcion, fecha, anonimo, estado, ... } ]
 };
 
@@ -458,6 +459,7 @@ async function loadFromSupabase() {
     const den_  = await sbFetch('denuncias',       'GET', null, '?select=*&order=created_at.asc');
     const hor_  = await sbFetch('horarios',        'GET', null, '?select=*');
     const sce_  = await sbFetch('solicitudes_certificados','GET', null, '?select=*&order=created_at.asc');
+    const sca_  = await sbFetch('solicitudes_cambio','GET', null, '?select=*&order=created_at.asc');
 
     // Si empleados respondió (aunque sea vacío), Supabase está OK
     if (emps !== null) {
@@ -473,7 +475,8 @@ async function loadFromSupabase() {
       SC.nominaFormatos = (nomF   ||[]).map(dbToNomFormato);
       if (desc_ !== null) SC.descuentos = desc_.map(dbToDescuento);
       if (den_  !== null) SC.denuncias  = den_.map(dbToDenuncia);
-      if (sce_  !== null) SC.solicitudesCert = sce_.map(dbToSolCert);
+      if (sce_  !== null) SC.solicitudesCert   = sce_.map(dbToSolCert);
+      if (sca_  !== null) SC.solicitudesCambio = sca_.map(dbToSolCambio);
       if (hor_  !== null && hor_.length) {
         SC.horarios = {};
         hor_.forEach(r => {
@@ -1031,6 +1034,7 @@ const AUX_TRANSPORTE = 200000;    // auxilio de transporte 2026
 const PLAZO_PERMISO_DIAS      = 2;   // anticipación mínima para solicitar permiso
 const PLAZO_INCAP_DIAS        = 2;   // días máx. para radicar tras finalizar la incapacidad
 const PLAZO_VACACIONES_DIAS   = 15;  // días calendario de anticipación
+const VACACIONES_MIN_DIAS     = 7;   // período mínimo de disfrute
 const DIAS_EPICRISIS          = 2;   // incapacidad > 2 días exige epicrisis
 const RESPUESTA_MAX_DIAS      = 1;   // respuesta máx. 1 día antes del inicio
 
@@ -1077,6 +1081,17 @@ const CAMPOS_SOLO_RRHH = ['name','cedula','email','phone','dir','fechaIngreso',
 function esRRHHoAdmin() {
   return ['superadmin','analista_rrhh'].includes(SC.user?.role);
 }
+// El líder de HSEQ (área 14) NO gestiona personal: solo su portal de
+// empleado y la carga de documentos a la bodega documental.
+function esLiderHSEQ() {
+  return SC.user?.role === 'lider_area' && String(SC.user?.areaId) === '14';
+}
+// Solo RRHH y superadmin editan o eliminan documentos de la bodega
+function puedeEditarBodega() { return esRRHHoAdmin(); }
+function puedeSubirBodega()  { return esRRHHoAdmin() || esLiderHSEQ(); }
+window.esLiderHSEQ      = esLiderHSEQ;
+window.puedeEditarBodega= puedeEditarBodega;
+window.puedeSubirBodega = puedeSubirBodega;
 // ¿Puede editar la ficha completa? (todos los campos)
 function puedeEditarFichaCompleta() { return esRRHHoAdmin(); }
 
@@ -1124,6 +1139,13 @@ function buildSidebar() {
 
   // Lider de área: vista reducida — SIN módulos globales (Candidatos, Vacantes, Bodega, Dashboard)
   if (u.role === 'lider_area') {
+    // Líder HSEQ: acceso de empleado + bodega documental (solo cargar)
+    if (esLiderHSEQ()) {
+      if (u.empId) addNavItem(nav, '🏠', 'Mi Portal', 'portal');
+      addNavSep(nav, 'DOCUMENTOS');
+      addNavItem(nav, '🗄', 'Bodega Documental', 'bodega');
+      return;
+    }
     // Si el líder también tiene ficha de empleado, ve SU propio portal
     if (u.empId) {
       addNavItem(nav, '🏠', 'Mi Portal', 'portal');
@@ -1161,6 +1183,7 @@ function buildSidebar() {
   addNavItem(nav, '💳', 'Descuentos & Préstamos', 'descuentos');
   addNavItem(nav, '💰', 'Formatos de Nómina', 'nomina-formatos');
   addNavItem(nav, '📄', 'Certificados', 'solicitudes-cert');
+  addNavItem(nav, '🔄', 'Cambios de Datos', 'solicitudes-cambio');
   addNavSep(nav, 'REPORTES');
   addNavItem(nav, '📈', 'Reportería RRHH', 'reporteria');
   addNavSep(nav, 'ADMINISTRACIÓN');
@@ -1216,6 +1239,7 @@ const VIEW_TITLES = {
   'nomina-formatos': ['Formatos Mensuales de Nómina', 'Carga exclusiva de Financiera y RRHH'],
   reporteria: ['Reportería RRHH', 'Indicadores por área · RRHH separado de HSEQ'],
   'solicitudes-cert': ['Solicitudes de Certificados', 'Certificados laborales, de ingresos y paz y salvo'],
+  'solicitudes-cambio': ['Solicitudes de Cambio de Datos', 'EPS, pensión, cesantías, caja de compensación y banco'],
   'incapacidades-admin': ['Gestión de Incapacidades', 'Incapacidades Médicas'],
   portal: ['Mi Portal de Empleado', 'Gestión Personal'],
   gerencia: ['Panel de Gerencia', 'Solo Lectura · Indicadores'],
@@ -1230,8 +1254,9 @@ function showView(viewId) {
   // Líder de área: solo puede navegar a sus vistas permitidas (evita acceso a dashboard global,
   // candidatos, bodega, descuentos, etc. por enlaces residuales o consola)
   if (SC.user?.role === 'lider_area') {
-    const permitidas = [...VISTAS_LIDER_AREA];
-    if (String(SC.user?.areaId) === '5') permitidas.push('nomina-formatos'); // solo líder Financiera
+    let permitidas = [...VISTAS_LIDER_AREA];
+    if (String(SC.user?.areaId) === '5')  permitidas.push('nomina-formatos'); // solo líder Financiera
+    if (String(SC.user?.areaId) === '14') permitidas = ['portal','portal-retirado','bodega']; // líder HSEQ
     if (!permitidas.includes(viewId)) viewId = 'empleados';
   }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -1266,6 +1291,7 @@ function showView(viewId) {
   else if (viewId === 'nomina-formatos')   { renderNominaFormatos(); }
   else if (viewId === 'reporteria')        { renderReporteria(); }
   else if (viewId === 'solicitudes-cert')  { renderSolicitudesCert(); }
+  else if (viewId === 'solicitudes-cambio'){ renderSolicitudesCambio(); }
   else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('write')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
   else if (viewId === 'drive-config') { openDrivePanel(); showView('dashboard'); }
@@ -1287,9 +1313,16 @@ function setupCandActions(el) {
   }
 }
 function setupBodegaActions(el) {
-  if (can('write')) {
-    document.getElementById('btn-add-bodega').style.display = '';
+  const btn = document.getElementById('btn-add-bodega');
+  if (puedeSubirBodega()) {
+    if (btn) btn.style.display = '';
     el.innerHTML = `<button class="btn btn-primary btn-sm" onclick="openModal('modal-add-doc-bodega')">+ Subir Documento</button>`;
+    if (esLiderHSEQ()) {
+      el.innerHTML += '<span class="text-xs text-muted" style="margin-left:8px">Puedes cargar documentos; la edición y eliminación la realiza RRHH.</span>';
+    }
+  } else {
+    if (btn) btn.style.display = 'none';
+    el.innerHTML = '';
   }
 }
 function setupPermActions(el) {
@@ -2307,6 +2340,10 @@ function saveVacaciones() {
     }
   }
   const dias = calcDias(inicio, fin);
+  if (dias < VACACIONES_MIN_DIAS) {
+    showNotif(`⛔ El período mínimo de vacaciones es de ${VACACIONES_MIN_DIAS} días. Seleccionaste ${dias}.`, 'error');
+    return;
+  }
   SC.vacaciones.push({
     id: 'v' + Date.now(),
     empId: ctx.empId,
@@ -3385,6 +3422,18 @@ const BODEGA_CATS = {
   otros:       { label:'Otros',       icon:'📂' },
 };
 
+function eliminarDocBodega(id) {
+  if (!puedeEditarBodega()) { showNotif('Solo Recursos Humanos puede eliminar documentos de la bodega', 'error'); return; }
+  const d = SC.bodega.find(x => x.id === id);
+  if (!d || !confirm(`¿Eliminar "${d.name}" de la bodega documental?`)) return;
+  SC.bodega = SC.bodega.filter(x => x.id !== id);
+  sbFetch('bodega','DELETE',null,`?id=eq.${encodeURIComponent(id)}`);
+  registrarAuditoria('eliminar','bodega', id, d.name);
+  showNotif('Documento eliminado');
+  renderBodega();
+}
+window.eliminarDocBodega = eliminarDocBodega;
+
 function renderBodega() {
   const q = (document.getElementById('search-bodega')?.value||'').toLowerCase();
   const cat = document.getElementById('bodega-cat-filter')?.value;
@@ -3419,7 +3468,12 @@ function renderBodega() {
           <div class="text-xs text-muted">${doc.desc}</div>
           <div class="text-xs text-muted mt-1">📅 ${doc.fecha}</div>
         </div>
-        ${doc.fileData?`<button class="btn btn-ghost btn-sm" onclick="openPDFViewerData('${doc.id}',true)">👁️</button>`:`<span class="badge badge-grey">Sin archivo</span>`}
+        <div style="display:flex;gap:4px;align-items:center">
+          ${doc.driveUrl ? `<a href="${doc.driveUrl}" target="_blank" class="btn btn-ghost btn-sm">👁️</a>`
+            : doc.fileData ? `<button class="btn btn-ghost btn-sm" onclick="openPDFViewerData('${doc.id}',true)">👁️</button>`
+            : `<span class="badge badge-grey">Sin archivo</span>`}
+          ${puedeEditarBodega() ? `<button class="btn btn-danger btn-sm" onclick="eliminarDocBodega('${doc.id}')" title="Eliminar (solo RRHH)">🗑</button>` : ''}
+        </div>
       `;
       grid.appendChild(card);
     });
@@ -3429,6 +3483,7 @@ function renderBodega() {
 }
 
 function saveBodegaDoc() {
+  if (!puedeSubirBodega()) { showNotif('No tienes permiso para cargar documentos a la bodega', 'error'); return; }
   const name = document.getElementById('bd-name').value.trim();
   const cat = document.getElementById('bd-cat').value;
   if (!name) { showNotif('Ingresa el nombre del documento', 'error'); return; }
@@ -4149,6 +4204,7 @@ function renderPortal(tab) {
         </div>
       </div>
       ${buildHistorialHtml(emp)}
+      ${buildSolicitudCambioHTML(emp)}
       `;
   }
   else if (tab === 'docs') {
@@ -4309,6 +4365,49 @@ function renderPortal(tab) {
   }
   else if (tab === 'disciplinarios') {
     content.innerHTML = renderDiscPortal();
+  }
+  else if (tab === 'nomina') {
+    if (!emp) { content.innerHTML = '<div class="text-muted text-sm p-4">No se encontró tu ficha de empleado.</div>'; return; }
+    const desp = (emp.nomina || []).slice().sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''));
+    const money = n => '$' + (n||0).toLocaleString('es-CO');
+    const p1 = calcPrimaSemestre(emp, 1), p2 = calcPrimaSemestre(emp, 2);
+    let html = `
+      <div class="section-title mb-3" style="font-size:16px">💰 Mi <span>Nómina</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:18px">
+        <div class="glass-card p-4">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Salario base</div>
+          <div style="font-size:22px;font-weight:800;color:var(--navy);margin-top:4px">${money(emp.salario)}</div>
+        </div>
+        <div class="glass-card p-4">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Prima I semestre</div>
+          <div style="font-size:22px;font-weight:800;color:var(--green);margin-top:4px">${money(p1.valor)}</div>
+        </div>
+        <div class="glass-card p-4">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Prima II semestre</div>
+          <div style="font-size:22px;font-weight:800;color:var(--green);margin-top:4px">${money(p2.valor)}</div>
+        </div>
+      </div>
+      <div class="section-title mb-3" style="font-size:15px">📑 Mis <span>Desprendibles de Pago</span></div>`;
+
+    if (!desp.length) {
+      html += '<div class="glass-card p-5 text-center text-muted text-sm">Aún no hay desprendibles de nómina publicados.<br>Recursos Humanos los carga cada período.</div>';
+    } else {
+      desp.forEach((n, i) => {
+        const url = n.driveUrl || (n.driveId ? driveViewUrl(n.driveId) : null);
+        html += `<div class="doc-item ok" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;margin-bottom:8px">
+          <div class="doc-icon" style="font-size:20px">💰</div>
+          <div class="doc-info" style="flex:1;min-width:0">
+            <div class="doc-name" style="font-weight:600;font-size:13px">${n.nombre || 'Desprendible'}</div>
+            <div class="doc-meta text-xs text-muted">${n.fecha || ''}</div>
+          </div>
+          ${url ? `<a href="${url}" target="_blank" class="btn btn-ghost btn-sm">👁️ Ver</a>`
+                : n.fileData ? `<button class="btn btn-ghost btn-sm" onclick="viewDocFromList('${emp.id}','nomina',${i})">👁️ Ver</button>`
+                : '<span class="badge badge-grey">Sin archivo</span>'}
+        </div>`;
+      });
+    }
+    html += `<div class="text-xs text-muted mt-3">Si falta algún desprendible o encuentras una diferencia, comunícate con Recursos Humanos.</div>`;
+    content.innerHTML = html;
   }
   else if (tab === 'certificados') {
     content.innerHTML = emp ? buildCertificadosHTML(emp)
@@ -10123,7 +10222,8 @@ function renderNominaFormatos() {
   if (!puedeVerNominaMensual()) { showNotif('No tienes acceso a los formatos de nómina','error'); showView('empleados'); return; }
   const acc = document.getElementById('nomf-actions');
   if (acc) acc.innerHTML = puedeSubirNominaMensual()
-    ? `<button class="btn btn-primary btn-sm" onclick="openNominaFormatoModal()">+ Subir Formato del Mes</button>`
+    ? `<button class="btn btn-primary btn-sm" onclick="openNominaFormatoModal()">+ Subir Formato del Mes</button>
+       ${esRRHHoAdmin()?`<button class="btn btn-ghost btn-sm" onclick="openCargaMasivaNomina()" style="margin-left:6px">📑 Publicar Desprendibles</button>`:''}`
     : `<span class="text-xs text-muted">Solo lectura — la carga es exclusiva de Financiera y RRHH</span>`;
   const tb = document.getElementById('nomf-tbody');
   if (!tb) return;
@@ -10696,3 +10796,259 @@ window.rechazarSolCert        = rechazarSolCert;
 window.renderSolicitudesCert  = renderSolicitudesCert;
 window.buildCertificadosHTML  = buildCertificadosHTML;
 window.dbToSolCert            = dbToSolCert;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: SOLICITUD DE CAMBIO DE DATOS (EPS, AFP, cesantías,
+// caja de compensación, banco). El empleado solicita con soporte;
+// RRHH aprueba y el dato se actualiza en su ficha.
+// ═══════════════════════════════════════════════════════════════
+
+const CAMPOS_SOLICITABLES = {
+  eps:          { label:'EPS',                      icon:'🏥', soporte:'Certificado de afiliación a la nueva EPS' },
+  afp:          { label:'Fondo de Pensión',         icon:'🏦', soporte:'Certificado de afiliación al fondo' },
+  fondoCes:     { label:'Fondo de Cesantías',       icon:'💼', soporte:'Certificado de afiliación al fondo' },
+  cajaCom:      { label:'Caja de Compensación',     icon:'🏢', soporte:'Certificado de afiliación a la caja' },
+  banco:        { label:'Banco / Cuenta',           icon:'💳', soporte:'Certificación bancaria (máx. 30 días)' },
+};
+
+function dbToSolCambio(r) {
+  return { id:r.id, empId:r.emp_id, campo:r.campo, valorActual:r.valor_actual||'',
+    valorNuevo:r.valor_nuevo||'', datosExtra:r.datos_extra||'', estado:r.estado||'solicitado',
+    fecha:r.fecha||'', soporteUrl:r.soporte_url||null, soporteNombre:r.soporte_nombre||'',
+    revisadoPor:r.revisado_por||'', fechaRevision:r.fecha_revision||'', motivoRechazo:r.motivo_rechazo||'' };
+}
+async function sbSaveSolCambio(s) {
+  await sbFetch('solicitudes_cambio','POST',{
+    id:s.id, emp_id:s.empId, campo:s.campo, valor_actual:s.valorActual||'',
+    valor_nuevo:s.valorNuevo||'', datos_extra:s.datosExtra||'', estado:s.estado,
+    fecha:s.fecha||'', soporte_url:s.soporteUrl||null, soporte_nombre:s.soporteNombre||'',
+    revisado_por:s.revisadoPor||'', fecha_revision:s.fechaRevision||'', motivo_rechazo:s.motivoRechazo||'',
+  },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+
+// ─── El empleado abre la solicitud ───────────────────────────
+function openSolicitudCambio(campo) {
+  const emp = SC.empleados.find(e => e.id === SC.user?.empId);
+  if (!emp) { showNotif('No se encontró tu ficha de empleado','error'); return; }
+  const c = CAMPOS_SOLICITABLES[campo];
+  if (!c) return;
+  const pend = (SC.solicitudesCambio||[]).some(s => s.empId===emp.id && s.campo===campo && s.estado==='solicitado');
+  if (pend) { showNotif('Ya tienes una solicitud pendiente para este dato','error'); return; }
+
+  SC._cambioCampo = campo;
+  document.getElementById('sca-titulo').textContent    = `${c.icon} Cambiar ${c.label}`;
+  document.getElementById('sca-actual').textContent    = emp[campo] || 'Sin registrar';
+  document.getElementById('sca-label-nuevo').textContent = 'Nuevo ' + c.label;
+  document.getElementById('sca-soporte-req').textContent = c.soporte;
+  document.getElementById('sca-nuevo').value  = '';
+  document.getElementById('sca-extra').value  = '';
+  document.getElementById('sca-file').value   = '';
+  // Datos adicionales solo para banco
+  document.getElementById('sca-extra-group').style.display = campo === 'banco' ? '' : 'none';
+  openModal('modal-solicitud-cambio');
+}
+
+function enviarSolicitudCambio() {
+  const campo = SC._cambioCampo;
+  const emp   = SC.empleados.find(e => e.id === SC.user?.empId);
+  if (!campo || !emp) return;
+  const nuevo = document.getElementById('sca-nuevo')?.value?.trim();
+  const file  = document.getElementById('sca-file')?.files?.[0];
+  if (!nuevo) { showNotif('Indica el nuevo valor','error'); return; }
+  if (!file)  { showNotif('⛔ Debes adjuntar el soporte para que RRHH pueda validar el cambio','error'); return; }
+
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const ref = await uploadToDrive(ev.target.result, file.name, 'cambios_datos', emp.name);
+    const s = {
+      id: 'sca' + Date.now(), empId: emp.id, campo,
+      valorActual: emp[campo] || '', valorNuevo: nuevo,
+      datosExtra: document.getElementById('sca-extra')?.value?.trim() || '',
+      estado: 'solicitado', fecha: hoyISO(),
+      soporteUrl: ref ? driveViewUrl(ref) : null, soporteNombre: file.name,
+      revisadoPor:'', fechaRevision:'', motivoRechazo:'',
+    };
+    if (!SC.solicitudesCambio) SC.solicitudesCambio = [];
+    SC.solicitudesCambio.push(s);
+    await sbSaveSolCambio(s);
+    registrarAuditoria('solicitar','cambio_datos', s.id, `${campo}: ${s.valorActual} → ${nuevo}`);
+    closeModal('modal-solicitud-cambio');
+    showNotif('📤 Solicitud enviada — Recursos Humanos la revisará');
+    renderPortal('perfil');
+  };
+  reader.readAsDataURL(file);
+}
+
+// ─── RRHH aprueba o rechaza ──────────────────────────────────
+function aprobarCambioDatos(solId) {
+  if (!esRRHHoAdmin()) { showNotif('Solo Recursos Humanos aprueba cambios de datos','error'); return; }
+  const s = SC.solicitudesCambio?.find(x => x.id === solId);
+  if (!s) return;
+  const emp = SC.empleados.find(e => e.id === s.empId);
+  if (!emp) return;
+  emp[s.campo] = s.valorNuevo;
+  if (s.campo === 'banco' && s.datosExtra) {
+    // "1234567890 / ahorros" → número y tipo de cuenta
+    const partes = s.datosExtra.split('/').map(x => x.trim());
+    if (partes[0]) emp.numeroCuenta = partes[0];
+    if (partes[1]) emp.tipoCuenta   = partes[1].toLowerCase();
+  }
+  s.estado = 'aprobado'; s.revisadoPor = SC.user?.name || ''; s.fechaRevision = hoyISO();
+  sbSaveEmpleado(emp); sbSaveSolCambio(s);
+  registrarAuditoria('aprobar','cambio_datos', solId, `${s.campo} → ${s.valorNuevo}`);
+  showNotif(`✅ Dato actualizado: ${CAMPOS_SOLICITABLES[s.campo]?.label} de ${emp.name}`);
+  renderSolicitudesCambio();
+}
+
+function rechazarCambioDatos(solId) {
+  if (!esRRHHoAdmin()) return;
+  const s = SC.solicitudesCambio?.find(x => x.id === solId);
+  if (!s) return;
+  const motivo = prompt('Motivo del rechazo (lo verá el empleado):');
+  if (motivo === null) return;
+  s.estado = 'rechazado'; s.motivoRechazo = motivo || '';
+  s.revisadoPor = SC.user?.name || ''; s.fechaRevision = hoyISO();
+  sbSaveSolCambio(s);
+  registrarAuditoria('rechazar','cambio_datos', solId, motivo);
+  renderSolicitudesCambio();
+}
+
+// ─── Panel de RRHH ───────────────────────────────────────────
+function renderSolicitudesCambio() {
+  const el = document.getElementById('solicitudes-cambio-content');
+  if (!el) return;
+  const lista = (SC.solicitudesCambio || []).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const pend  = lista.filter(s => s.estado === 'solicitado');
+  if (!lista.length) {
+    el.innerHTML = '<div class="glass-card p-6 text-center text-muted">No hay solicitudes de cambio de datos.</div>';
+    return;
+  }
+  el.innerHTML = `
+    ${pend.length ? `<div style="background:rgba(245,158,11,.1);border-left:3px solid var(--amber);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px">
+      ⏳ <b>${pend.length}</b> solicitud(es) de cambio de datos pendientes de revisión.</div>` : ''}
+    <div class="glass-card p-4"><div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Empleado</th><th>Dato</th><th>Actual</th><th>Solicitado</th><th>Soporte</th><th>Fecha</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>${lista.map(s => {
+        const emp = SC.empleados.find(e => e.id === s.empId);
+        const c   = CAMPOS_SOLICITABLES[s.campo] || { label:s.campo, icon:'📝' };
+        return `<tr>
+          <td style="font-weight:600">${emp?.name || '—'}</td>
+          <td>${c.icon} ${c.label}</td>
+          <td class="text-sm text-muted">${s.valorActual || '—'}</td>
+          <td class="text-sm" style="font-weight:600">${s.valorNuevo}${s.datosExtra?`<div class="text-xs text-muted">${s.datosExtra}</div>`:''}</td>
+          <td>${s.soporteUrl?`<a href="${s.soporteUrl}" target="_blank" class="btn btn-ghost btn-sm">📄 Ver</a>`:'—'}</td>
+          <td class="text-sm text-muted">${s.fecha}</td>
+          <td><span class="badge ${s.estado==='aprobado'?'badge-green':s.estado==='rechazado'?'badge-red':'badge-yellow'}">${
+            s.estado==='aprobado'?'✅ Aprobado':s.estado==='rechazado'?'❌ Rechazado':'⏳ Pendiente'}</span>
+            ${s.motivoRechazo?`<div class="text-xs text-muted">${s.motivoRechazo}</div>`:''}</td>
+          <td>${s.estado==='solicitado' && esRRHHoAdmin()
+            ? `<button class="btn btn-primary btn-sm" onclick="aprobarCambioDatos('${s.id}')">✅</button>
+               <button class="btn btn-danger btn-sm" onclick="rechazarCambioDatos('${s.id}')">✗</button>` : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div></div>`;
+}
+
+// ─── Tarjetas en el perfil del empleado ──────────────────────
+function buildSolicitudCambioHTML(emp) {
+  if (!emp) return '';
+  const mias = (SC.solicitudesCambio || []).filter(s => s.empId === emp.id);
+  return `<div class="glass-card p-5 mt-4">
+    <div class="section-title mb-2" style="font-size:15px">🔄 Solicitar <span>Cambio de Datos</span></div>
+    <div class="text-xs text-muted mb-3">Para cambiar EPS, fondo de pensión, cesantías, caja de compensación o cuenta bancaria, envía la solicitud con el soporte. Recursos Humanos la revisará y actualizará tu ficha.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+      ${Object.entries(CAMPOS_SOLICITABLES).map(([k,c]) => {
+        const ult = mias.filter(s=>s.campo===k).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''))[0];
+        let estado = '';
+        if (ult?.estado === 'solicitado') estado = '<span class="badge badge-yellow" style="font-size:9px">⏳ En revisión</span>';
+        else if (ult?.estado === 'rechazado') estado = `<span class="badge badge-red" style="font-size:9px" title="${ult.motivoRechazo||''}">❌ Rechazado</span>`;
+        return `<div style="border:1px solid var(--navy-border);border-radius:8px;padding:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--navy)">${c.icon} ${c.label}</div>
+          <div class="text-xs text-muted" style="margin:2px 0 6px">${emp[k] || 'Sin registrar'}</div>
+          ${estado || `<button class="btn btn-ghost btn-sm full-w" onclick="openSolicitudCambio('${k}')">Solicitar cambio</button>`}
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+window.CAMPOS_SOLICITABLES     = CAMPOS_SOLICITABLES;
+window.openSolicitudCambio     = openSolicitudCambio;
+window.enviarSolicitudCambio   = enviarSolicitudCambio;
+window.aprobarCambioDatos      = aprobarCambioDatos;
+window.rechazarCambioDatos     = rechazarCambioDatos;
+window.renderSolicitudesCambio = renderSolicitudesCambio;
+window.buildSolicitudCambioHTML= buildSolicitudCambioHTML;
+window.dbToSolCambio           = dbToSolCambio;
+
+
+// ═══════════════════════════════════════════════════════════════
+// CARGA MASIVA DE DESPRENDIBLES DE NÓMINA
+// RRHH selecciona varios PDF y el sistema los reparte a cada
+// empleado según la cédula que aparezca en el nombre del archivo.
+// ═══════════════════════════════════════════════════════════════
+
+function openCargaMasivaNomina() {
+  if (!esRRHHoAdmin()) { showNotif('Solo Recursos Humanos puede publicar desprendibles','error'); return; }
+  const p = document.getElementById('cmn-periodo');
+  if (p) p.value = new Date().toISOString().slice(0,7);
+  const f = document.getElementById('cmn-files'); if (f) f.value = '';
+  const r = document.getElementById('cmn-resultado'); if (r) r.innerHTML = '';
+  openModal('modal-carga-nomina');
+}
+
+async function procesarCargaMasivaNomina() {
+  if (!esRRHHoAdmin()) return;
+  const periodo = document.getElementById('cmn-periodo')?.value;
+  const files   = document.getElementById('cmn-files')?.files;
+  const out     = document.getElementById('cmn-resultado');
+  if (!periodo)        { showNotif('Selecciona el período','error'); return; }
+  if (!files?.length)  { showNotif('Selecciona los archivos PDF','error'); return; }
+
+  out.innerHTML = '<div class="text-sm text-muted">Procesando…</div>';
+  let ok = 0, sinEmpleado = [];
+
+  for (const file of files) {
+    // Buscar una cédula (6 a 12 dígitos) dentro del nombre del archivo
+    const m = (file.name.match(/\d{6,12}/g) || []);
+    let emp = null;
+    for (const cand of m) {
+      const encontrados = SC.empleados.filter(e => normalizeCedula(e.cedula) === cand);
+      emp = encontrados.find(e => e.status === 'activo') || encontrados[0];
+      if (emp) break;
+    }
+    if (!emp) { sinEmpleado.push(file.name); continue; }
+
+    const data = await new Promise(res => {
+      const r = new FileReader(); r.onload = ev => res(ev.target.result); r.readAsDataURL(file);
+    });
+    const ref = await uploadToDrive(data, file.name, 'nomina', emp.name);
+    if (!emp.nomina) emp.nomina = [];
+    emp.nomina.push({
+      nombre: 'Desprendible ' + periodo,
+      fecha:  periodo,
+      driveId: ref || null,
+      driveUrl: ref ? driveViewUrl(ref) : null,
+      fileData: ref ? null : data,
+    });
+    await sbSaveEmpleado(emp);
+    ok++;
+  }
+
+  registrarAuditoria('publicar','nomina_desprendibles', periodo,
+    `${ok} desprendibles publicados${sinEmpleado.length?` · ${sinEmpleado.length} sin empleado`:''}`);
+
+  out.innerHTML = `
+    <div style="background:rgba(22,163,74,.1);border-left:3px solid var(--green);padding:10px 12px;border-radius:6px;font-size:13px;margin-bottom:8px">
+      ✅ <b>${ok}</b> desprendible(s) publicado(s) para el período ${periodo}.
+    </div>
+    ${sinEmpleado.length ? `<div style="background:rgba(239,68,68,.1);border-left:3px solid var(--red);padding:10px 12px;border-radius:6px;font-size:12px">
+      ⚠️ No se pudo identificar al empleado en ${sinEmpleado.length} archivo(s). El nombre del archivo debe contener la cédula.<br>
+      <span class="text-xs text-muted">${sinEmpleado.slice(0,8).join(', ')}${sinEmpleado.length>8?'…':''}</span>
+    </div>` : ''}`;
+  showNotif(`💰 ${ok} desprendibles publicados`);
+}
+
+window.openCargaMasivaNomina      = openCargaMasivaNomina;
+window.procesarCargaMasivaNomina  = procesarCargaMasivaNomina;
