@@ -10,7 +10,7 @@
 <script src="https://apis.google.com/js/api.js" async defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="icon" href="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">
-<link rel="stylesheet" href="styles.css?v=16">
+<link rel="stylesheet" href="styles.css?v=19">
 </head>
 <body>
 
@@ -1278,7 +1278,7 @@
         </optgroup>
       </select></div>
       <!-- Tratamiento nómina — visible solo para admin/RH -->
-      <div class="form-group" id="perm-tratamiento-group">
+      <div class="form-group" id="perm-tratamiento-group" style="display:none">
         <label class="form-label">Tratamiento en Nómina</label>
         <select class="form-select" id="perm-tratamiento" onchange="updateTratamientoPermiso()">
           <option value="descuento">💸 Se descuenta de nómina</option>
@@ -1319,10 +1319,10 @@
       </div>
       <div class="form-group"><label class="form-label">Motivo / Descripción *</label><textarea class="form-textarea" id="perm-motivo" placeholder="Describe el motivo del permiso..."></textarea></div>
       <div class="form-group">
-        <label class="form-label">Documento de Soporte (opcional)</label>
+        <label class="form-label">Formato de Permiso Firmado *</label>
         <div class="drop-zone" style="padding:14px" ondragover="event.preventDefault()" ondrop="handlePermDrop(event)">
           <input type="file" id="perm-file" accept=".pdf,.jpg,.png" style="display:none" onchange="handlePermFile(event)">
-          <div id="perm-file-lbl" style="font-size:13px;margin:4px 0">📎 Adjuntar documento (carta, permiso médico, etc.)</div>
+          <div id="perm-file-lbl" style="font-size:13px;margin:4px 0">📎 Adjuntar formato firmado por ti y tu jefe directo (obligatorio)</div>
           <button class="btn btn-ghost btn-sm mt-2" onclick="document.getElementById('perm-file').click()">Seleccionar</button>
         </div>
       </div>
@@ -2384,6 +2384,7 @@ function updateTratamientoPermiso() {
   if (descGrp) descGrp.style.display = soloRH ? '' : 'none';
   const notaEl2 = document.getElementById('perm-tratamiento-nota');
   if (notaEl2 && !soloRH) notaEl2.style.display = 'none';
+  if (typeof aplicarVisibilidadCamposRH === 'function') aplicarVisibilidadCamposRH();
 }
 
 function toggleIncapAT() {
@@ -2436,7 +2437,7 @@ function initPermisoModal() {
   document.getElementById('perm-72h-error')?.style && (document.getElementById('perm-72h-error').style.display='none');
   SC.pendingFile = null;
   const lbl = document.getElementById('perm-file-lbl');
-  if(lbl) lbl.textContent = '📎 Adjuntar documento (carta, permiso médico, etc.)';
+  if(lbl) lbl.textContent = '📎 Adjuntar formato firmado por ti y tu jefe directo (obligatorio)';
 }
 
 function checkIncapDias() {
@@ -2521,6 +2522,6 @@ function handlePermDrop(e) {
 }
 </script>
 
-<script src="app.js?v=16"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>

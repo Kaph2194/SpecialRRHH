@@ -82,3 +82,8 @@ create table if not exists public.solicitudes_cambio (
 );
 alter table public.solicitudes_cambio disable row level security;
 select pg_notify('pgrst', 'reload schema');
+
+-- ─── BODEGA: columnas para el archivo en Storage ─────────────
+alter table public.bodega add column if not exists drive_url text;
+alter table public.bodega add column if not exists drive_id  text;
+select pg_notify('pgrst', 'reload schema');

@@ -183,49 +183,49 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 // ═══════════════════════════════════════════════════════════
 let USERS = [
   // ── ADMINISTRADORES ─────────────────────────────────────
-  { id:'u1', user:'superadmin',   pass:'Admin2024*',
+  { id:'u1', user:'superadmin',   
     name:'Administrador',         role:'superadmin',
     roleName:'Super Admin',       canWrite:true },
 
-  { id:'u2', user:'analista.rh',  pass:'Analista2024*',
+  { id:'u2', user:'analista.rh',  
     name:'Analista RRHH',         role:'analista_rrhh',
     roleName:'Analista RRHH',     canWrite:true },
 
-  { id:'u3', user:'lider.rh',     pass:'Lider2024*',
+  { id:'u3', user:'lider.rh',     
     name:'Líder RRHH',            role:'lider_rrhh',
     roleName:'Líder RRHH',        canWrite:false },
 
-  { id:'u3b', user:'lider.area',   pass:'LiderArea2024*',
+  { id:'u3b', user:'lider.area',   
     name:'Líder de Área (Demo)',   role:'lider_area',
     roleName:'Líder de Área',      canWrite:true,
     areaId: null },  // areaId se asigna al crear el usuario
 
-  { id:'u4', user:'gerencia',     pass:'Gerencia2024*',
+  { id:'u4', user:'gerencia',     
     name:'Gerencia',              role:'gerencia',
     roleName:'Gerencia',          canWrite:false },
 
-  { id:'u4b', user:'juridica',    pass:'Juridica2024*',
+  { id:'u4b', user:'juridica',    
     name:'Jurídica',              role:'juridico',
     roleName:'Jurídica',          canWrite:false },  // ve TODO en modo lectura, como gerencia
 
   // ── EMPLEADOS DEMO (cédula = usuario = contraseña inicial) ──
-  { id:'u5', user:'1234567', pass:'1234567',
+  { id:'u5', user:'1234567', 
     name:'Carlos Mejía Torres',   role:'empleado',
     roleName:'Empleado',          canWrite:true, empId:'e1' },
 
-  { id:'u6', user:'2345678', pass:'2345678',
+  { id:'u6', user:'2345678', 
     name:'Laura Ríos Sánchez',    role:'empleado',
     roleName:'Empleado',          canWrite:true, empId:'e2' },
 
-  { id:'u7', user:'3456789', pass:'3456789',
+  { id:'u7', user:'3456789', 
     name:'Andrés Felipe Gómez',   role:'empleado',
     roleName:'Empleado',          canWrite:true, empId:'e3' },
 
-  { id:'u8', user:'4567890', pass:'4567890',
+  { id:'u8', user:'4567890', 
     name:'Valentina Cruz Ospina', role:'empleado',
     roleName:'Empleado',          canWrite:true, empId:'e4' },
 
-  { id:'u9', user:'5678901', pass:'5678901',
+  { id:'u9', user:'5678901', 
     name:'Miguel Herrera Pinto',  role:'empleado',
     roleName:'Empleado',          canWrite:true, empId:'e5' },
 ];
@@ -630,6 +630,7 @@ function dbToBodega(r) {
     id: r.id, name: r.name||'', cat: r.cat||'otros',
     desc: r.descripcion||'', fecha: r.fecha||'',
     fileData: null, fileName: r.file_name||null,
+    driveUrl: r.drive_url||null, driveId: r.drive_id||null,
   };
 }
 
@@ -760,6 +761,7 @@ async function sbSaveBodega(b) {
   const row = {
     id:b.id, name:b.name, cat:b.cat, descripcion:b.desc||'',
     fecha:b.fecha||'', file_name:b.fileName||null,
+    drive_url:b.driveUrl||null, drive_id:b.driveId||null,
   };
   await sbFetch('bodega','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
@@ -924,10 +926,9 @@ function doLogin() {
   loginConAuth(uRaw, p, 'login-error');
 }
 
-function quickLogin(u, p) {
-  document.getElementById('login-user').value = u;
-  document.getElementById('login-pass').value = p;
-  doLogin();
+// Los accesos rápidos se eliminaron: la autenticación es real (Supabase Auth)
+function quickLogin() {
+  showNotif('Ingresa con tu usuario y contraseña.', 'error');
 }
 
 // Normaliza un string de cédula para comparación
@@ -1303,10 +1304,12 @@ function showView(viewId) {
 }
 
 function setupEmpActions(el) {
-  if (can('write')) el.innerHTML = `
+  // Crear e importar empleados es exclusivo de Recursos Humanos
+  if (!el) return;
+  el.innerHTML = puedeEditarFichaCompleta() ? `
     <button class="btn btn-ghost btn-sm" onclick="openImportModal()">📥 Importar Empleados</button>
     <button class="btn btn-ghost btn-sm" onclick="openImportVacacionesModal()">🏖 Importar Vacaciones</button>
-    <button class="btn btn-primary btn-sm" onclick="openAddEmpModal()">+ Nuevo Empleado</button>`;
+    <button class="btn btn-primary btn-sm" onclick="openAddEmpModal()">+ Nuevo Empleado</button>` : '';
 }
 function setupCandActions(el) {
   if (can('write')) {
@@ -1552,6 +1555,7 @@ function renderEmpleados() {
 }
 
 function openAddEmpModal() {
+  if (!puedeEditarFichaCompleta()) { showNotif('Solo Recursos Humanos puede crear empleados', 'error'); return; }
   SC._editEmpId = null;
   SC._pendingEmpFoto = null;
   const prev = document.getElementById('em-foto-preview');
@@ -2613,6 +2617,7 @@ const IMPORT_COLUMNS = {
 //  DÍAS TOMADOS | DESCONTADOS | DÍAS LABORADOS | FECHA LIMITE | DIAS PENDIENTE
 // ═══════════════════════════════════════════════════════════════
 function openImportVacacionesModal() {
+  if (!puedeEditarFichaCompleta()) { showNotif('Solo Recursos Humanos puede importar vacaciones', 'error'); return; }
   const el = document.getElementById('import-vac-preview');
   if (el) el.innerHTML = '';
   const lbl = document.getElementById('import-vac-file-lbl');
@@ -2813,6 +2818,7 @@ window.handleImportVacDrop        = handleImportVacDrop;
 window.confirmImportVacaciones    = confirmImportVacaciones;
 
 function openImportModal() {
+  if (!puedeEditarFichaCompleta()) { showNotif('Solo Recursos Humanos puede importar empleados', 'error'); return; }
   SC._importPreview = [];
   const lbl = document.getElementById('import-file-lbl');
   if(lbl) lbl.textContent = 'Arrastra tu archivo CSV o Excel aquí';
@@ -3492,23 +3498,33 @@ function saveBodegaDoc() {
 
   const bdFileData = SC.pendingFile?.data||null;
   const bdFileName = SC.pendingFile?.name||null;
-  SC.bodega.push({
+  if (!bdFileData) { showNotif('Adjunta el archivo del documento', 'error'); return; }
+
+  const doc = {
     id: 'b' + Date.now(),
     name, cat,
     desc: document.getElementById('bd-desc').value,
     fecha: new Date().toLocaleDateString('es-CO'),
     fileData: bdFileData,
     fileName: bdFileName,
-  });
-  if(bdFileData) uploadToDrive(bdFileData, bdFileName||name+'.pdf', 'bodega', cat);
+    driveUrl: null, driveId: null,
+  };
   SC.pendingFile = null;
   document.getElementById('bd-lbl').textContent = 'Arrastra el archivo aquí';
   closeModal('modal-add-doc-bodega');
-  const lastBod = SC.bodega[SC.bodega.length-1];
-  sbSaveBodega(lastBod);
-  showNotif('Documento subido a Bodega ✅');
-  syncToSheets('bodega');
-  renderBodega();
+  showNotif('Subiendo documento…');
+
+  // Esperar la subida para guardar la URL junto con el registro
+  uploadToDrive(bdFileData, bdFileName||name+'.pdf', 'bodega', cat).then(ref => {
+    if (ref) { doc.driveId = ref; doc.driveUrl = driveViewUrl(ref); doc.fileData = null; }
+    SC.bodega.push(doc);
+    sbSaveBodega(doc);
+    registrarAuditoria('subir','bodega', doc.id, name);
+    showNotif(ref ? 'Documento subido a Bodega ✅'
+                  : '⚠️ Documento registrado, pero el archivo no se guardó. Intenta de nuevo.',
+              ref ? 'success' : 'error');
+    renderBodega();
+  });
 }
 
 // ─── PERMISOS ─────────────────────────────────────────────
@@ -3737,6 +3753,7 @@ function actualizarPermiso(id, status) {
 }
 
 function openAdminPermisoModal() {
+  aplicarVisibilidadCamposRH();
   const sel = document.getElementById('perm-emp');
   sel.innerHTML = '';
   SC.empleados.filter(e => empVisibleParaUsuario(e.id))
@@ -4441,7 +4458,9 @@ function renderPortalBodega() {
     const catInfo = BODEGA_CATS[catKey]||{label:catKey, icon:'📂'};
     html += `<div class="mb-5"><div class="bodega-cat-title">${catInfo.icon} ${catInfo.label}</div><div class="bodega-grid">`;
     docs.forEach(doc => {
-      html += `<div class="bodega-card"><div style="font-size:24px">${catInfo.icon}</div><div style="flex:1"><div style="font-weight:600;font-size:13px">${doc.name}</div><div class="text-xs text-muted">${doc.desc}</div></div>${doc.fileData?`<button class="btn btn-ghost btn-sm" onclick="openPDFViewerData_bodega('${doc.id}')">👁️</button>`:'<span class="badge badge-grey">Sin arch.</span>'}</div>`;
+      html += `<div class="bodega-card"><div style="font-size:24px">${catInfo.icon}</div><div style="flex:1"><div style="font-weight:600;font-size:13px">${doc.name}</div><div class="text-xs text-muted">${doc.desc}</div></div>${doc.driveUrl?`<a href="${doc.driveUrl}" target="_blank" class="btn btn-ghost btn-sm">👁️ Ver</a>`
+   : doc.fileData?`<button class="btn btn-ghost btn-sm" onclick="openPDFViewerData_bodega('${doc.id}')">👁️</button>`
+   : '<span class="badge badge-grey">Sin arch.</span>'}</div>`;
     });
     html += '</div></div>';
   });
@@ -4481,11 +4500,20 @@ function openPortalPermisoModal() {
   document.getElementById('perm-inicio').value='';
   document.getElementById('perm-fin').value='';
   document.getElementById('perm-motivo').value='';
-  // Employees don't see descontable field
-  const dg = document.getElementById('perm-descontable-group');
-  if(dg) dg.style.display = 'none';
+  aplicarVisibilidadCamposRH();
+  if (typeof initPermisoModal === 'function') initPermisoModal();
   openModal('modal-permiso');
 }
+
+// Oculta los campos que SOLO puede definir Recursos Humanos
+function aplicarVisibilidadCamposRH() {
+  const soloRH = esRRHH();
+  ['perm-descontable-group','perm-tratamiento-group','perm-tratamiento-nota'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = soloRH ? '' : 'none';
+  });
+}
+window.aplicarVisibilidadCamposRH = aplicarVisibilidadCamposRH;
 
 function openPortalIncapModal() {
   SC.currentDocContext = { tipo:'incapacidad', empId: SC.user?.empId };
@@ -9859,8 +9887,10 @@ function saveUserAdmin(userId, esLider = false) {
   const newPass2 = document.getElementById(`um-pass2-${userId}`)?.value;
   const newArea  = document.getElementById(`um-area-${userId}`)?.value;
   if (!newName || !newUser) { showNotif('Nombre y usuario son obligatorios', 'error'); return; }
-  if (newPass && newPass !== newPass2) { showNotif('Las contraseñas no coinciden', 'error'); return; }
-  if (newPass && newPass.length < 6)  { showNotif('Contraseña mínimo 6 caracteres', 'error'); return; }
+  if (newPass) {
+    showNotif('Las contraseñas se gestionan desde Supabase → Authentication → Users, o el propio usuario la cambia en su perfil.', 'error');
+    return;
+  }
   const dup = USERS.find(x => x.user === newUser && x.id !== userId);
   if (dup) { showNotif('Ese nombre de usuario ya existe', 'error'); return; }
   u.name = newName;
