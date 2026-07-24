@@ -10,7 +10,7 @@
 <script src="https://apis.google.com/js/api.js" async defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="icon" href="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">
-<link rel="stylesheet" href="styles.css?v=23">
+<link rel="stylesheet" href="styles.css?v=24">
 </head>
 <body>
 
@@ -2513,8 +2513,10 @@ function handlePermFile(e) {
   const f = e.target.files[0]; if(!f) return;
   const reader = new FileReader();
   reader.onload = ev => {
-    if (window.SC) SC.pendingFile = { data: ev.target.result, name: f.name };
-    document.getElementById('perm-file-lbl').textContent = '✅ ' + f.name;
+    window.SC = window.SC || {};
+    SC.pendingFile = { data: ev.target.result, name: f.name };
+    const lbl = document.getElementById('perm-file-lbl');
+    if (lbl) lbl.textContent = '✅ ' + f.name;
   };
   reader.readAsDataURL(f);
 }
@@ -2525,6 +2527,6 @@ function handlePermDrop(e) {
 }
 </script>
 
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>
