@@ -87,7 +87,7 @@ function handlePortalDocUpload(e, tipoId) {
         await sbSaveEmpleado(emp);
         syncToSheets('empleados');
         renderPortal('docs');
-        showNotif('📁 ' + tipoNombre + ' subido a Drive ✅ — Pendiente de revisión por RRHH');
+        showNotif('📁 ' + tipoNombre + ' guardado en la nube ✅ — Pendiente de revisión por RRHH');
       } catch(err) {
         // Drive falló pero igual guardamos en Supabase con fileData temporal
         emp.docs[tipoId].fileData = fileData;
@@ -100,7 +100,7 @@ function handlePortalDocUpload(e, tipoId) {
       emp.docs[tipoId].fileData = fileData;
       await sbSaveEmpleado(emp);
       renderPortal('docs');
-      showNotif('Documento guardado ✅ — Pendiente de revisión (conecta Drive para almacenamiento en la nube)');
+      showNotif('Documento guardado ✅ — Pendiente de revisión por RRHH');
     }
   };
   reader.readAsDataURL(file);
@@ -222,7 +222,7 @@ const GAPI_CONFIG = {
   FOLDER_ROOT:   '15-VqDQLN05gidRkfwuGZPnLGKCFvCxli',
   SHEET_ID:      '1CB6NiSm8uRka02qXy2fnzAdgtTuXgYbKE2T0CfxF-nc',
   DRIVE_EMAIL:   'recursoshumanos@specialcar.com.co',
-  connected:     false,
+  connected:     true,   // ← siempre true: los archivos van a Supabase Storage, no a Google
   tokenClient:   null,
 };
 
@@ -401,6 +401,10 @@ async function sbFetch(table, method='GET', body=null, filters='', extraHeaders=
     if (!res.ok) {
       const err = await res.text();
       console.warn('Supabase error:', res.status, err);
+      // Los errores de escritura se muestran al usuario — nada debe fallar en silencio
+      if (method !== 'GET' && typeof showNotif === 'function') {
+        showNotif('⚠️ No se pudo guardar en la base de datos (' + res.status + '). Detalle en consola (F12).', 'error');
+      }
       return null;
     }
     const text = await res.text();
@@ -428,6 +432,8 @@ async function loadFromSupabase() {
     const bod   = await sbFetch('bodega',          'GET', null, '?select=*&order=created_at.asc');
     const novsA = await sbFetch('novedades_area',  'GET', null, '?select=*&order=created_at.asc');
     const nomF  = await sbFetch('nomina_formatos', 'GET', null, '?select=*&order=created_at.asc');
+    const desc_ = await sbFetch('descuentos',      'GET', null, '?select=*&order=created_at.asc');
+    const den_  = await sbFetch('denuncias',       'GET', null, '?select=*&order=created_at.asc');
 
     // Si empleados respondió (aunque sea vacío), Supabase está OK
     if (emps !== null) {
@@ -441,6 +447,8 @@ async function loadFromSupabase() {
       // Novedades de área ahora viven en Supabase (registro auditable); localStorage queda de respaldo
       if (novsA !== null) SC.novedadesArea = novsA.map(dbToNovArea);
       SC.nominaFormatos = (nomF   ||[]).map(dbToNomFormato);
+      if (desc_ !== null) SC.descuentos = desc_.map(dbToDescuento);
+      if (den_  !== null) SC.denuncias  = den_.map(dbToDenuncia);
       SB_OK = true;
       hideLoadingBanner();
       console.log('✅ Supabase OK —', SC.empleados.length, 'empleados cargados');
@@ -470,7 +478,7 @@ async function loadFromSupabase() {
       });
       persistUsers();
       if (SC.empleados.length > 0) {
-        setTimeout(() => { if(GAPI_CONFIG.connected) syncAllToSheets(); }, 3000);
+        // (sincronización con Google Sheets eliminada — todo vive en Supabase)
       }
       return true;
     }
@@ -1013,9 +1021,7 @@ function startApp() {
 
   // Drive buttons solo visibles para superadmin
   const driveBar = document.getElementById('drive-topbar');
-  if (driveBar) {
-    driveBar.style.display = u.role === 'superadmin' ? '' : 'none';
-  }
+  if (driveBar) driveBar.style.display = 'none'; // sin integración Google
 
   if (u.role === 'empleado') {
     const empData = SC.empleados.find(e => e.id === u.empId);
@@ -1124,7 +1130,6 @@ function buildSidebar() {
   if (u.role === 'superadmin') {
     addNavSep(nav, 'SUPERADMIN');
     addNavItem(nav, '🏢', 'Empresas', 'empresas-admin');
-    addNavItem(nav, '☁️', 'Drive & Sheets', 'drive-config');
     addNavItem(nav, '📊', 'Nómina / Siigo', 'siigo');
     addNavItem(nav, '👤', 'Gestión de Usuarios', 'user-mgmt');
   }
@@ -1738,6 +1743,11 @@ function saveEmpleado() {
       dotacion:           document.getElementById('em-dotacion')?.checked ?? true,
       areaFisica:         document.getElementById('em-area-fisica')?.value||'',
     });
+    // ★ GUARDAR EN SUPABASE (antes solo iba a Google Sheets → se perdía) ★
+    const nuevoEmp = SC.empleados[SC.empleados.length - 1];
+    sbSaveEmpleado(nuevoEmp);
+    registrarAuditoria('crear','empleado',newEmpId,`${name} · CC ${cedula}`);
+
     // Crear usuario automáticamente
     const existeUser = USERS.find(u => u.user === userLogin && u.role === 'empleado');
     if (!existeUser) {
@@ -2320,7 +2330,7 @@ function saveDocEmpleado() {
           }
           sbSaveEmpleado(emp);
           renderEmpTab(currentEmpTab);
-          showNotif('📁 Documento subido a Drive ✅');
+          showNotif('📁 Documento guardado en la nube ✅');
         })
         .catch(() => {
           sbSaveEmpleado(emp);
@@ -6159,6 +6169,42 @@ function saveDescuentosLocal() {
   try { localStorage.setItem('sc_descuentos', JSON.stringify(SC.descuentos)); } catch(e) {}
 }
 
+// Persistencia real en Supabase (localStorage queda solo como respaldo local)
+function dbToDescuento(r) {
+  return { id:r.id, empId:r.emp_id, tipo:r.tipo, monto:parseFloat(r.monto)||0,
+    cuotas:r.cuotas||1, cuotasPagadas:r.cuotas_pagadas||0, descripcion:r.descripcion||'',
+    fecha:r.fecha||'', estado:r.estado||'activo', aprobadoPor:r.aprobado_por||null,
+    creadoPor:r.creado_por||'' };
+}
+async function sbSaveDescuento(d) {
+  if (!d) return;
+  await sbFetch('descuentos','POST',{
+    id:d.id, emp_id:d.empId, tipo:d.tipo, monto:d.monto||0, cuotas:d.cuotas||1,
+    cuotas_pagadas:d.cuotasPagadas||0, descripcion:d.descripcion||'', fecha:d.fecha||'',
+    estado:d.estado||'activo', aprobado_por:d.aprobadoPor||null, creado_por:d.creadoPor||'',
+  },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+async function sbDeleteDescuento(id) {
+  await sbFetch('descuentos','DELETE',null,`?id=eq.${encodeURIComponent(id)}`);
+}
+function dbToDenuncia(r) {
+  return { id:r.id, empId:r.emp_id, empName:r.emp_name||'—', tipo:r.tipo,
+    descripcion:r.descripcion||'', fechaHechos:r.fecha_hechos||'', involucrados:r.involucrados||'',
+    anonimo:r.anonimo||false, estado:r.estado||'pendiente', fecha:r.fecha||'',
+    respuestaRH:r.respuesta_rh||'', gestionadoPor:r.gestionado_por||'' };
+}
+async function sbSaveDenuncia(d) {
+  if (!d) return;
+  await sbFetch('denuncias','POST',{
+    id:d.id, emp_id:d.empId||null, emp_name:d.empName||'—', tipo:d.tipo||'',
+    descripcion:d.descripcion||'', fecha_hechos:d.fechaHechos||'', involucrados:d.involucrados||'',
+    anonimo:d.anonimo||false, estado:d.estado||'pendiente', fecha:d.fecha||'',
+    respuesta_rh:d.respuestaRH||'', gestionado_por:d.gestionadoPor||'',
+  },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+window.sbSaveDescuento = sbSaveDescuento;
+window.sbSaveDenuncia  = sbSaveDenuncia;
+
 function renderDescuentos() {
   const el = document.getElementById('descuentos-content');
   if (!el) return;
@@ -6306,6 +6352,8 @@ function saveDescuento() {
     creadoPor: SC.user?.name || '',
   });
   saveDescuentosLocal();
+  sbSaveDescuento(SC.descuentos[SC.descuentos.length-1]);
+  registrarAuditoria('crear','descuento',SC.descuentos[SC.descuentos.length-1].id,`${tipo} · ${monto}`);
   closeModal('modal-descuento');
   showNotif(esPrestamo ? '⏳ Préstamo registrado — pendiente de aprobación' : '💳 Descuento registrado ✅');
   if (SC.currentView === 'descuentos') renderDescuentos();
@@ -6315,7 +6363,8 @@ function aprobarDescuento(id) {
   if (!d) return;
   d.estado = 'activo';
   d.aprobadoPor = SC.user?.name;
-  saveDescuentosLocal();
+  saveDescuentosLocal(); sbSaveDescuento(d);
+  registrarAuditoria('cambio_estado','descuento',id,'aprobado');
   showNotif('✅ Préstamo aprobado');
   renderDescuentos();
 }
@@ -6323,7 +6372,8 @@ function rechazarDescuento(id) {
   const d = SC.descuentos.find(x=>x.id===id);
   if (!d) return;
   d.estado = 'rechazado';
-  saveDescuentosLocal();
+  saveDescuentosLocal(); sbSaveDescuento(d);
+  registrarAuditoria('cambio_estado','descuento',id,'rechazado');
   showNotif('❌ Préstamo rechazado');
   renderDescuentos();
 }
@@ -6332,14 +6382,16 @@ function registrarCuotaDesc(id) {
   if (!d) return;
   d.cuotasPagadas = (d.cuotasPagadas||0) + 1;
   if (d.cuotasPagadas >= d.cuotas) d.estado = 'pagado';
-  saveDescuentosLocal();
+  saveDescuentosLocal(); sbSaveDescuento(d);
+  registrarAuditoria('cuota','descuento',id,`${d.cuotasPagadas}/${d.cuotas}`);
   showNotif('💳 Cuota registrada — ' + d.cuotasPagadas + '/' + d.cuotas);
   renderDescuentos();
 }
 function eliminarDescuento(id) {
   if (!confirm('¿Eliminar este descuento?')) return;
   SC.descuentos = SC.descuentos.filter(x=>x.id!==id);
-  saveDescuentosLocal();
+  saveDescuentosLocal(); sbDeleteDescuento(id);
+  registrarAuditoria('eliminar','descuento',id,'');
   renderDescuentos();
 }
 
@@ -7557,6 +7609,7 @@ function saveDenuncia() {
   };
   SC.denuncias.push(d);
   try { localStorage.setItem('sc_denuncias', JSON.stringify(SC.denuncias)); } catch(e) {}
+  sbSaveDenuncia(d);
   closeModal('modal-nueva-denuncia');
   showNotif('🔒 Reporte enviado de forma confidencial ✅');
   renderPortalDenuncias();
@@ -8415,6 +8468,8 @@ async function saveSiigoConfigModal() {
 
 // ─── INIT GAPI ────────────────────────────────────────────
 function initGapi() {
+  return; // ── DESACTIVADO: sin integración Google ──
+
   return new Promise((resolve, reject) => {
     if (typeof gapi === 'undefined') { reject('GAPI no cargado'); return; }
     gapi.load('client', async () => {
@@ -8460,6 +8515,8 @@ async function connectGoogle() {
 }
 
 function disconnectGoogle() {
+  return; // ── DESACTIVADO: sin integración Google ──
+
   if (typeof google !== 'undefined' && gapi.client.getToken()) {
     google.accounts.oauth2.revoke(gapi.client.getToken().access_token);
     gapi.client.setToken(null);
@@ -8512,6 +8569,8 @@ async function initDriveFolders() {
 }
 
 async function getOrCreateFolder(name, parentId) {
+  return null; // ── DESACTIVADO: sin integración Google ──
+
   // Search existing
   const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
     + (parentId ? ` and '${parentId}' in parents` : '');
@@ -8526,48 +8585,35 @@ async function getOrCreateFolder(name, parentId) {
 
 // ─── SUBIR ARCHIVO A DRIVE ─────────────────────────────────
 async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
-  if (!GAPI_CONFIG.connected) {
-    // Guardar pendiente para cuando se conecte
-    addDrivePending(base64Data, fileName, folderKey, subfolder);
-    return null;
-  }
+  // ── AHORA SUBE A SUPABASE STORAGE (bucket 'documentos') ──
+  // Se mantiene el nombre de la función para no romper los ~20 puntos que la llaman.
   try {
-    const folder = DRIVE_FOLDERS[folderKey];
-    let parentId = folder?.id || GAPI_CONFIG.FOLDER_ROOT;
-
-    // Crear subcarpeta del empleado si se especifica
-    if (subfolder && parentId) {
-      parentId = await getOrCreateFolder(subfolder, parentId);
-    }
-
-    // Decode base64 → binary
+    if (!base64Data) return null;
     const byteStr = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
-    const mime    = base64Data.includes('data:') ? base64Data.split(':')[1].split(';')[0] : 'application/pdf';
+    const mime    = base64Data.includes('data:') ? base64Data.split(':')[1].split(';')[0] : 'application/octet-stream';
+    const bin   = atob(byteStr);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
-    const boundary = '-------314159265358979323846';
-    const meta     = JSON.stringify({ name: fileName, parents: parentId ? [parentId] : [] });
-    const body     = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mime}\r\nContent-Transfer-Encoding: base64\r\n\r\n${byteStr}\r\n--${boundary}--`;
+    const safe = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+                        .replace(/[^a-zA-Z0-9._-]/g,'_').replace(/_+/g,'_').slice(0,120);
+    const path = [ safe(folderKey || 'otros'),
+                   subfolder ? safe(subfolder) : null,
+                   Date.now() + '_' + safe(fileName || 'archivo') ].filter(Boolean).join('/');
 
-    const res = await gapi.client.request({
-      path: 'https://www.googleapis.com/upload/drive/v3/files',
+    const res = await fetch(`${SB_URL}/storage/v1/object/documentos/${path}`, {
       method: 'POST',
-      params: { uploadType: 'multipart' },
-      headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
-      body,
+      headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': mime, 'x-upsert': 'true' },
+      body: bytes,
     });
-    const fileId = res.result.id;
-    // Hacer el archivo visible para lectura (viewer)
-    if (fileId) {
-      try {
-        await gapi.client.drive.permissions.create({
-          fileId,
-          resource: { role: 'reader', type: 'anyone' },
-        });
-      } catch(e) {}
+    if (!res.ok) {
+      console.warn('Storage upload error:', res.status, await res.text());
+      if (typeof showNotif === 'function') showNotif('⚠️ No se pudo subir el archivo al almacenamiento ('+res.status+')','error');
+      return null;
     }
-    return fileId;
+    return path; // el "fileId" ahora es la ruta dentro del bucket
   } catch(e) {
-    console.error('Drive upload error:', e);
+    console.error('Storage upload error:', e);
     return null;
   }
 }
@@ -8575,10 +8621,13 @@ async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
 // Construir URL de visualización desde fileId de Drive
 function driveViewUrl(fileId) {
   if (!fileId) return null;
-  return `https://drive.google.com/file/d/${fileId}/view`;
+  // Rutas nuevas de Supabase Storage contienen '/'; los IDs antiguos de Drive no.
+  if (String(fileId).includes('/')) return `${SB_URL}/storage/v1/object/public/documentos/${fileId}`;
+  return `https://drive.google.com/file/d/${fileId}/view`;   // compatibilidad con archivos viejos
 }
 function drivePreviewUrl(fileId) {
   if (!fileId) return null;
+  if (String(fileId).includes('/')) return `${SB_URL}/storage/v1/object/public/documentos/${fileId}`;
   return `https://drive.google.com/file/d/${fileId}/preview`;
 }
 
@@ -8590,6 +8639,8 @@ function addDrivePending(data, name, folder, sub) {
 
 // ─── SPREADSHEET ──────────────────────────────────────────
 async function initSpreadsheet() {
+  return null; // ── DESACTIVADO: sin integración Google ──
+
   if (!GAPI_CONFIG.connected) return;
   try {
     if (!GAPI_CONFIG.SHEET_ID) {
@@ -8631,6 +8682,8 @@ async function initSpreadsheet() {
 }
 
 async function writeSheetHeaders(tab) {
+  return null; // ── DESACTIVADO: sin integración Google ──
+
   if (!GAPI_CONFIG.SHEET_ID) return;
   const headers = tab.fields.map(f => f.toUpperCase());
   await gapi.client.sheets.spreadsheets.values.update({
@@ -8645,6 +8698,7 @@ async function writeSheetHeaders(tab) {
 // syncToSheets('empleados') → sincroniza solo esa pestaña
 // syncAllToSheets() → sincroniza todo
 async function syncToSheets(tabKey) {
+  return; // ── DESACTIVADO: la empresa ya no usa Google Sheets; todo queda en Supabase ──
   if (!GAPI_CONFIG.connected || !GAPI_CONFIG.SHEET_ID) {
     // Guardar pendiente
     if (!SC.sheetsPending) SC.sheetsPending = new Set();
@@ -8683,6 +8737,7 @@ async function syncToSheets(tabKey) {
 }
 
 async function syncAllToSheets() {
+  return; // ── DESACTIVADO: sin Google Sheets ──
   for (const key of Object.keys({empleados:1,candidatos:1,permisos:1,incapacidades:1,vacaciones:1,disciplinarios:1,bodega:1})) {
     await syncToSheets(key);
   }
@@ -8870,6 +8925,8 @@ const DRIVE_ROLE_MAP = {
 let DRIVE_ROLE_EMAILS = {};
 
 async function shareDriveFolder(fileId, email, role) {
+  return null; // ── DESACTIVADO: sin integración Google ──
+
   if (!GAPI_CONFIG.connected || !fileId || !email) return;
   try {
     await gapi.client.drive.permissions.create({
