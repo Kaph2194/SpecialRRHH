@@ -87,3 +87,7 @@ select pg_notify('pgrst', 'reload schema');
 alter table public.bodega add column if not exists drive_url text;
 alter table public.bodega add column if not exists drive_id  text;
 select pg_notify('pgrst', 'reload schema');
+
+-- ─── PERMISOS: columna para la URL del formato firmado ───────
+alter table public.permisos add column if not exists file_url text;
+select pg_notify('pgrst', 'reload schema');

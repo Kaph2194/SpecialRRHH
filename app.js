@@ -569,7 +569,7 @@ function dbToPerm(r) {
     diasDescontables: r.dias_descontables, diasNoDescontables: r.dias_no_descontables,
     descontable: r.descontable||'pendiente',
     motivo: r.motivo||'', status: r.status||'pendiente',
-    fileName: r.file_name||null, fileData: null,
+    fileName: r.file_name||null, fileData: null, fileUrl: r.file_url||null,
     fecha: r.fecha||'', fechaHora: r.fecha_hora||'',
   };
 }
@@ -697,6 +697,7 @@ async function sbSavePermiso(p) {
     dias_descontables:p.diasDescontables??null, dias_no_descontables:p.diasNoDescontables??null,
     descontable:p.descontable||'pendiente', motivo:p.motivo||'',
     status:p.status||'pendiente', file_name:p.fileName||null,
+    file_url:p.fileUrl||null,
     fecha:p.fecha||'', fecha_hora:p.fechaHora||'',
   };
   await sbFetch('permisos','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
@@ -3655,8 +3656,11 @@ function openPermisoDetail(id) {
 
     <div class="mt-4">
       <label class="form-label">Documento de Soporte</label>
-      ${p.fileData
-        ? `<div class="doc-item ok"><div class="doc-icon">📄</div><div class="doc-info"><div class="doc-name">${p.fileName||'Documento.pdf'}</div><div class="doc-meta">Adjunto</div></div><button class="btn btn-primary btn-sm" onclick="openPDFViewerData('${p.id}_perm')">👁️ Ver</button></div>`
+      ${(p.fileUrl || p.fileId || p.fileData)
+        ? `<div class="doc-item ok"><div class="doc-icon">📄</div><div class="doc-info"><div class="doc-name">${p.fileName||'Documento.pdf'}</div><div class="doc-meta">Adjunto</div></div>${
+            p.fileUrl ? `<a href="${p.fileUrl}" target="_blank" class="btn btn-primary btn-sm">👁️ Ver</a>`
+            : p.fileId ? `<a href="${driveViewUrl(p.fileId)}" target="_blank" class="btn btn-primary btn-sm">👁️ Ver</a>`
+            : `<button class="btn btn-primary btn-sm" onclick="openPDFViewerData('${p.id}_perm')">👁️ Ver</button>`}</div>`
         : `<div class="doc-item missing"><div class="doc-icon">❌</div><div class="doc-info"><div class="doc-name">Sin documento adjunto</div></div></div>`}
     </div>
 
@@ -3839,8 +3843,7 @@ function savePermiso() {
   const permEmp = SC.empleados.find(x=>x.id===empId);
   const permFileData = SC.pendingFile?.data||null;
   const permFileName = SC.pendingFile?.name||null;
-  if(permFileData) uploadToDrive(permFileData, permFileName||'Permiso_'+tipo+'_'+fechaRef+'.pdf', 'permisos', permEmp?.name||empId);
-  SC.permisos.push({
+  const permiso = {
     id: 'p' + Date.now(),
     empId, tipo, esPorHoras,
     inicio: fechaRef,
@@ -3852,20 +3855,34 @@ function savePermiso() {
     tratamiento,
     esLicencia,
     motivo: document.getElementById('perm-motivo').value,
-    fileData: permFileData,
+    fileData: null,
     fileName: permFileName,
+    fileUrl: null,
     status: 'pendiente',
     fecha: new Date().toLocaleDateString('es-CO'),
     fechaHora: new Date().toISOString(),
-  });
+  };
+  SC.permisos.push(permiso);
   SC.pendingFile = null;
   SC.currentDocContext = null;
   closeModal('modal-permiso');
-  const lastPerm = SC.permisos[SC.permisos.length-1];
-  sbSavePermiso(lastPerm);
-  registrarAuditoria('crear','permiso',lastPerm.id,`${lastPerm.tipo} · emp ${lastPerm.empId}`);
-  showNotif('Permiso solicitado ✅');
-  syncToSheets('permisos');
+  showNotif('Enviando solicitud…');
+
+  const guardarPerm = () => {
+    sbSavePermiso(permiso);
+    registrarAuditoria('crear','permiso',permiso.id,`${permiso.tipo} · emp ${permiso.empId}`);
+    showNotif('Permiso solicitado ✅');
+    if (SC.currentView === 'permisos-admin') renderPermisosAdmin();
+    else if (SC.currentView === 'empleado-detail') renderEmpTab('permisos');
+    else if (SC.currentView === 'portal') renderPortal('permisos');
+  };
+  if (permFileData) {
+    uploadToDrive(permFileData, permFileName||'Permiso_'+tipo+'_'+fechaRef+'.pdf', 'permisos', permEmp?.name||empId)
+      .then(ref => { if (ref) { permiso.fileId = ref; permiso.fileUrl = driveViewUrl(ref); } guardarPerm(); });
+  } else {
+    guardarPerm();
+  }
+  return;
   if (SC.currentView === 'permisos-admin') renderPermisosAdmin();
   else if (SC.currentView === 'empleado-detail') renderEmpTab('permisos');
   else if (SC.currentView === 'portal') renderPortal(currentPortalTab);
