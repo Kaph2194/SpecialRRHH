@@ -938,7 +938,9 @@ function normalizeCedula(s) {
 function doLogout() {
   authCerrarSesion();
   SC.user = null;
+  SB_SESSION = null;
   sessionStorage.removeItem('sc_user');
+  try { localStorage.removeItem('sc_session'); } catch(e) {}
   document.getElementById('app').style.display        = 'none';
   document.getElementById('login-page').style.display = 'flex';
   // Limpiar todos los campos del login
@@ -10544,9 +10546,15 @@ async function authCambiarPassword(nueva) {
 
 // ─── Perfil: rol, área y empleado asociados a la cuenta ──────
 async function cargarPerfil() {
-  const perfiles = await sbFetch('perfiles', 'GET', null, '?select=*');
+  // Filtrar SIEMPRE por el usuario autenticado. Sin este filtro, con RLS
+  // desactivado la consulta devuelve todos los perfiles y se tomaría el primero.
+  const uid = SB_SESSION?.user?.id;
+  if (!uid) return null;
+  const perfiles = await sbFetch('perfiles', 'GET', null,
+    `?user_id=eq.${encodeURIComponent(uid)}&select=*`);
   const p = perfiles && perfiles[0];
   if (!p) return null;
+  if (p.activo === false) return null;   // cuenta desactivada
 
   const NOMBRE_ROL = {
     superadmin:'Super Admin', analista_rrhh:'Analista RRHH', lider_rrhh:'Líder RRHH',
@@ -10581,6 +10589,8 @@ async function loginConAuth(usuarioTxt, password, errorElId) {
   };
   if (!usuarioTxt || !password) { mostrarError('Ingresa tus credenciales.'); return false; }
 
+  guardarSesion(null);   // descartar cualquier sesión anterior
+  SC.user = null;
   // Probar cada correo posible (correo propio o interno por cédula)
   let entro = false;
   for (const correo of correosPosiblesLogin(usuarioTxt)) {
