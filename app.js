@@ -412,7 +412,7 @@ async function sbFetch(table, method='GET', body=null, filters='', extraHeaders=
       method,
       headers: {
         'apikey':        SB_KEY,
-        'Authorization': `Bearer ${SB_KEY}`,
+        'Authorization': `Bearer ${typeof tokenActual === 'function' ? tokenActual() : SB_KEY}`,
         'Content-Type':  'application/json',
         'Prefer':        method === 'POST' ? 'return=representation' : 'return=minimal',
         ...extraHeaders,
@@ -860,16 +860,8 @@ async function init() {
     SC.vacaciones     = [];
   }
 
-  // Restaurar sesión activa
-  const saved = sessionStorage.getItem('sc_user');
-  if (saved) {
-    try {
-      SC.user = JSON.parse(saved);
-      startApp();
-    } catch(e) {
-      sessionStorage.removeItem('sc_user');
-    }
-  }
+  // Restaurar sesión activa (Supabase Auth)
+  restaurarSesionAuth();
 }
 
 // ─── AUTH ──────────────────────────────────────────────────
@@ -906,84 +898,14 @@ function switchLoginMode(mode) {
 // Login empleado: cédula como usuario, contraseña (por defecto = cédula)
 function doLoginEmpleado() {
   const cedRaw = document.getElementById('login-cedula')?.value?.trim() || '';
-  const cedNorm = cedRaw.replace(/[.\s,]/g, '');
-  if (!cedNorm) {
-    document.getElementById('login-error-emp').style.display = 'block';
-    document.getElementById('login-error-emp').textContent = '⚠️ Ingresa tu número de documento.';
-    return;
-  }
-
-  // Buscar usuario persistido (puede tener contraseña cambiada)
-  let found = USERS.find(x => x.role === 'empleado' && x.user === cedNorm);
-
-  // Si no está en USERS, crear dinámicamente desde SC.empleados
-  if (!found) {
-    // Puede haber múltiples registros con la misma cédula (recontrataciones)
-    // Prioridad: activo > sancionado > más reciente retirado
-    const todos = SC.empleados.filter(e => normalizeCedula(e.cedula) === cedNorm);
-    // Prioridad: activo con fecha más reciente > sancionado > retirado más reciente
-    const activos    = todos.filter(e => e.status === 'activo')
-                           .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
-    const sancionados= todos.filter(e => e.status === 'sancionado')
-                           .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
-    const retirados  = todos.filter(e => e.status === 'retirado')
-                           .sort((a,b) => (b.fechaIngreso||'').localeCompare(a.fechaIngreso||''));
-    const emp = activos[0] || sancionados[0] || retirados[0];
-    if (emp) {
-      found = {
-        id:       'u_' + emp.id,
-        user:     cedNorm,
-        pass:     cedNorm,
-        name:     emp.name,
-        role:     'empleado',
-        roleName: 'Empleado',
-        canWrite: true,
-        empId:    emp.id,
-        cedula:   cedNorm,
-      };
-      if (!USERS.find(u => u.user === cedNorm)) {
-        USERS.push(found);
-        persistUsers();
-      }
-    }
-  }
-
-  if (!found) {
-    document.getElementById('login-error-emp').style.display = 'block';
-    document.getElementById('login-error-emp').textContent = '⚠️ Número de documento no encontrado. Verifica e intenta de nuevo.';
-    return;
-  }
-
-  // Validar contraseña
-  const passEl = document.getElementById('login-pass-emp');
-  const pass = passEl ? passEl.value : found.pass; // si no hay campo de pass, usar la guardada
-  if (pass !== found.pass) {
-    document.getElementById('login-error-emp').style.display = 'block';
-    document.getElementById('login-error-emp').textContent = '⚠️ Contraseña incorrecta.';
-    return;
-  }
-
-  document.getElementById('login-error-emp').style.display = 'none';
-  SC.user = found;
-  sessionStorage.setItem('sc_user', JSON.stringify(found));
-  startApp();
+  const pass   = document.getElementById('login-pass-emp')?.value || '';
+  loginConAuth(cedRaw, pass, 'login-error-emp');
 }
 
-// Login administrador: usuario + contraseña
 function doLogin() {
   const uRaw = document.getElementById('login-user').value.trim();
   const p    = document.getElementById('login-pass').value;
-  // Solo admins (no empleados) por este formulario
-  let found = USERS.find(x => x.role !== 'empleado' && x.user === uRaw && x.pass === p);
-  if (!found) {
-    document.getElementById('login-error').style.display = 'block';
-    return;
-  }
-  document.getElementById('login-error').style.display = 'none';
-  SC.user = found;
-  sessionStorage.setItem('sc_user', JSON.stringify(found));
-  registrarAuditoria('login','sesion',found.id,found.roleName||found.role);
-  startApp();
+  loginConAuth(uRaw, p, 'login-error');
 }
 
 function quickLogin(u, p) {
@@ -998,6 +920,7 @@ function normalizeCedula(s) {
 }
 
 function doLogout() {
+  authCerrarSesion();
   SC.user = null;
   sessionStorage.removeItem('sc_user');
   document.getElementById('app').style.display        = 'none';
@@ -1797,6 +1720,11 @@ function saveEmpleado() {
     const nuevoEmp = SC.empleados[SC.empleados.length - 1];
     sbSaveEmpleado(nuevoEmp);
     registrarAuditoria('crear','empleado',newEmpId,`${name} · CC ${cedula}`);
+    // Crear su cuenta de acceso (usuario = cédula o correo propio; contraseña inicial = cédula)
+    crearCuentaEmpleado(nuevoEmp).then(r => {
+      if (r.ok && !r.yaExistia) showNotif('🔑 Cuenta de acceso creada para ' + name);
+      else if (!r.ok) showNotif('⚠️ Empleado guardado, pero no se pudo crear su cuenta: ' + r.msg, 'error');
+    });
 
     // Crear usuario automáticamente
     const existeUser = USERS.find(u => u.user === userLogin && u.role === 'empleado');
@@ -8703,7 +8631,7 @@ async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
 
     const res = await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`, {
       method: 'POST',
-      headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': mime, 'x-upsert': 'true' },
+      headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${tokenActual()}`, 'Content-Type': mime, 'x-upsert': 'true' },
       body: bytes,
     });
     if (!res.ok) {
@@ -9149,41 +9077,21 @@ function showCredsModal(nombre, userLogin) {
 
 // Cambio de contraseña desde portal empleado
 function changePassword() {
-  const oldPass  = document.getElementById('cp-old')?.value;
   const newPass1 = document.getElementById('cp-new1')?.value;
   const newPass2 = document.getElementById('cp-new2')?.value;
-  if (!oldPass || !newPass1 || !newPass2) { showNotif('Completa todos los campos', 'error'); return; }
-  if (newPass1 !== newPass2) { showNotif('Las contraseñas nuevas no coinciden', 'error'); return; }
-  if (newPass1.length < 6)  { showNotif('La contraseña debe tener al menos 6 caracteres', 'error'); return; }
+  if (!newPass1 || !newPass2) { showNotif('Completa los campos de nueva contraseña', 'error'); return; }
+  if (newPass1 !== newPass2)  { showNotif('Las contraseñas nuevas no coinciden', 'error'); return; }
+  if (newPass1.length < 8)    { showNotif('La contraseña debe tener al menos 8 caracteres', 'error'); return; }
 
-  const userObj = USERS.find(u => u.id === SC.user?.id);
-  if (!userObj) { showNotif('Usuario no encontrado', 'error'); return; }
-  if (userObj.pass !== oldPass) { showNotif('La contraseña actual es incorrecta', 'error'); return; }
-
-  // Actualizar en memoria
-  userObj.pass = newPass1;
-  SC.user.pass = newPass1;
-  sessionStorage.setItem('sc_user', JSON.stringify(SC.user));
-
-  // Persistir en sc_users (admins y cambios puntuales)
-  try {
-    const savedU = JSON.parse(localStorage.getItem('sc_users')||'[]');
-    const idx = savedU.findIndex(u => u.id === userObj.id);
-    if (idx >= 0) savedU[idx].pass = newPass1;
-    else savedU.push({ id: userObj.id, pass: newPass1 });
-    localStorage.setItem('sc_users', JSON.stringify(savedU));
-  } catch(e) {}
-
-  // Persistir en sc_emp_users (empleados)
-  if (userObj.role === 'empleado') persistUsers();
-
-  closeModal('modal-change-pass');
-  // Limpiar campos
-  ['cp-old','cp-new1','cp-new2'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
-  showNotif('🔑 Contraseña actualizada correctamente ✅');
+  authCambiarPassword(newPass1)
+    .then(() => {
+      registrarAuditoria('cambio_password','sesion', SC.user?.id, '');
+      showNotif('🔑 Contraseña actualizada ✅');
+      closeModal('modal-change-pass');
+      ['cp-old','cp-new1','cp-new2'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+    })
+    .catch(e => showNotif(e.message || 'No se pudo cambiar la contraseña', 'error'));
 }
-
-// Al iniciar: cargar contraseñas guardadas (permite cambios persistentes)
 function loadSavedPasswords() {
   try {
     const saved = JSON.parse(localStorage.getItem('sc_users')||'[]');
@@ -9985,3 +9893,226 @@ window.saveNominaFormato     = saveNominaFormato;
 window.descargarNomFormato   = descargarNomFormato;
 window.renderReporteria      = renderReporteria;
 window.exportReporteriaCSV   = exportReporteriaCSV;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: SUPABASE AUTH
+// Autenticación real contra el servidor. Cada usuario recibe un
+// token (JWT) que viaja en cada consulta, y las políticas RLS de
+// Supabase deciden qué datos puede ver según su rol y su área.
+// ═══════════════════════════════════════════════════════════════
+
+// Correo interno para empleados que no tienen correo propio.
+const DOMINIO_INTERNO = 'empleados.specialcar.com.co';
+function correoDeCedula(cedula) {
+  return normalizeCedula(cedula) + '@' + DOMINIO_INTERNO;
+}
+// Si el texto tiene "@" se usa tal cual; si no, se asume cédula.
+function resolverCorreoLogin(txt) {
+  const t = String(txt || '').trim();
+  return t.includes('@') ? t.toLowerCase() : correoDeCedula(t);
+}
+
+// ─── Sesión ───────────────────────────────────────────────────
+let SB_SESSION = null;   // { access_token, refresh_token, expires_at, user }
+
+function guardarSesion(s) {
+  SB_SESSION = s;
+  try {
+    if (s) localStorage.setItem('sc_session', JSON.stringify(s));
+    else   localStorage.removeItem('sc_session');
+  } catch(e) {}
+}
+function cargarSesion() {
+  try { SB_SESSION = JSON.parse(localStorage.getItem('sc_session') || 'null'); }
+  catch(e) { SB_SESSION = null; }
+  return SB_SESSION;
+}
+// El token del usuario reemplaza a la clave anónima en cada consulta
+function tokenActual() {
+  return SB_SESSION?.access_token || SB_KEY;
+}
+
+// ─── Llamadas al servicio de Auth ────────────────────────────
+async function authRequest(ruta, body, extra = {}) {
+  const res = await fetch(`${SB_URL}/auth/v1/${ruta}`, {
+    method: 'POST',
+    headers: { 'apikey': SB_KEY, 'Content-Type': 'application/json', ...extra },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error_description || data.msg || data.message || 'Error de autenticación');
+  return data;
+}
+
+async function authLogin(correo, password) {
+  const data = await authRequest('token?grant_type=password', { email: correo, password });
+  guardarSesion({
+    access_token:  data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at:    Date.now() + (data.expires_in || 3600) * 1000,
+    user:          data.user,
+  });
+  return data.user;
+}
+
+// Crea una cuenta SIN cerrar la sesión de quien la está creando
+async function authCrearCuenta(correo, password, metadata) {
+  return await authRequest('signup', { email: correo, password, data: metadata || {} });
+}
+
+async function authRefrescar() {
+  if (!SB_SESSION?.refresh_token) return false;
+  try {
+    const data = await authRequest('token?grant_type=refresh_token', { refresh_token: SB_SESSION.refresh_token });
+    guardarSesion({
+      access_token:  data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at:    Date.now() + (data.expires_in || 3600) * 1000,
+      user:          data.user,
+    });
+    return true;
+  } catch(e) { guardarSesion(null); return false; }
+}
+
+async function authCerrarSesion() {
+  try {
+    if (SB_SESSION?.access_token) {
+      await fetch(`${SB_URL}/auth/v1/logout`, {
+        method: 'POST',
+        headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_SESSION.access_token}` },
+      });
+    }
+  } catch(e) {}
+  guardarSesion(null);
+}
+
+async function authCambiarPassword(nueva) {
+  const res = await fetch(`${SB_URL}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': `Bearer ${SB_SESSION?.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password: nueva }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.msg || data.message || 'No se pudo cambiar la contraseña');
+  return data;
+}
+
+// ─── Perfil: rol, área y empleado asociados a la cuenta ──────
+async function cargarPerfil() {
+  const perfiles = await sbFetch('perfiles', 'GET', null, '?select=*');
+  const p = perfiles && perfiles[0];
+  if (!p) return null;
+
+  const NOMBRE_ROL = {
+    superadmin:'Super Admin', analista_rrhh:'Analista RRHH', lider_rrhh:'Líder RRHH',
+    lider_area:'Líder de Área', gerencia:'Gerencia', juridico:'Jurídica', empleado:'Empleado',
+  };
+  // Enlazar con el registro de empleado (por emp_id o, si no, por cédula)
+  let empId = p.emp_id;
+  if (!empId && p.cedula) {
+    const cands = SC.empleados.filter(e => normalizeCedula(e.cedula) === normalizeCedula(p.cedula));
+    const activo = cands.find(e => e.status === 'activo');
+    empId = (activo || cands[0])?.id || null;
+  }
+  return {
+    id:       p.user_id,
+    user:     p.cedula || SB_SESSION?.user?.email || '',
+    name:     p.nombre || SC.empleados.find(e => e.id === empId)?.name || 'Usuario',
+    role:     p.rol,
+    roleName: NOMBRE_ROL[p.rol] || p.rol,
+    canWrite: !['gerencia','juridico','lider_rrhh'].includes(p.rol),
+    areaId:   p.area_id || null,
+    empId:    empId || null,
+    cedula:   p.cedula || '',
+  };
+}
+
+// ─── Login unificado (empleados y administrativos) ───────────
+async function loginConAuth(usuarioTxt, password, errorElId) {
+  const errEl = document.getElementById(errorElId);
+  const mostrarError = msg => {
+    if (errEl) { errEl.style.display = 'block'; errEl.textContent = '⚠️ ' + msg; }
+    else showNotif(msg, 'error');
+  };
+  if (!usuarioTxt || !password) { mostrarError('Ingresa tus credenciales.'); return false; }
+
+  try {
+    await authLogin(resolverCorreoLogin(usuarioTxt), password);
+  } catch(e) {
+    mostrarError('Usuario o contraseña incorrectos.');
+    return false;
+  }
+
+  // Con sesión activa, recargar los datos ya filtrados por RLS
+  await loadFromSupabase();
+
+  const perfil = await cargarPerfil();
+  if (!perfil) {
+    await authCerrarSesion();
+    mostrarError('Tu cuenta no tiene un perfil asignado. Contacta a Recursos Humanos.');
+    return false;
+  }
+  if (perfil.role === 'empleado' && !perfil.empId) {
+    await authCerrarSesion();
+    mostrarError('No se encontró tu ficha de empleado. Contacta a Recursos Humanos.');
+    return false;
+  }
+
+  SC.user = perfil;
+  if (errEl) errEl.style.display = 'none';
+  registrarAuditoria('login', 'sesion', perfil.id, perfil.roleName);
+  startApp();
+  return true;
+}
+
+// Restaurar sesión al abrir la app
+async function restaurarSesionAuth() {
+  cargarSesion();
+  if (!SB_SESSION) return false;
+  if (SB_SESSION.expires_at && Date.now() > SB_SESSION.expires_at - 60000) {
+    const ok = await authRefrescar();
+    if (!ok) return false;
+  }
+  try {
+    await loadFromSupabase();
+    const perfil = await cargarPerfil();
+    if (!perfil) { guardarSesion(null); return false; }
+    SC.user = perfil;
+    startApp();
+    return true;
+  } catch(e) { guardarSesion(null); return false; }
+}
+
+// ─── Crear la cuenta de un empleado nuevo ────────────────────
+// Se llama automáticamente al registrar un empleado desde RRHH.
+async function crearCuentaEmpleado(emp) {
+  const ced = normalizeCedula(emp.cedula);
+  if (!ced) return { ok:false, msg:'El empleado no tiene cédula' };
+  // Correo propio si lo tiene; si no, correo interno derivado de la cédula
+  const correo = (emp.email && emp.email.includes('@')) ? emp.email.trim().toLowerCase() : correoDeCedula(ced);
+  try {
+    await authCrearCuenta(correo, ced, {
+      rol: 'empleado', emp_id: emp.id, cedula: ced, nombre: emp.name,
+    });
+    registrarAuditoria('crear_cuenta','usuario', emp.id, correo);
+    return { ok:true, correo, passInicial: ced };
+  } catch(e) {
+    const msg = String(e.message || '');
+    if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registrad')) {
+      return { ok:true, correo, yaExistia:true };
+    }
+    return { ok:false, msg: msg || 'No se pudo crear la cuenta' };
+  }
+}
+
+window.correoDeCedula      = correoDeCedula;
+window.loginConAuth        = loginConAuth;
+window.authCerrarSesion    = authCerrarSesion;
+window.authCambiarPassword = authCambiarPassword;
+window.crearCuentaEmpleado = crearCuentaEmpleado;
+window.restaurarSesionAuth = restaurarSesionAuth;
