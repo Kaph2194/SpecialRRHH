@@ -26,7 +26,7 @@ $$ select emp_id from public.perfiles where user_id = auth.uid() and coalesce(ac
 
 create or replace function public.fn_es_rrhh() returns boolean
   language sql stable security definer set search_path = public as
-$$ select public.fn_rol() in ('superadmin','analista_rrhh','juridico') $$;
+$$ select public.fn_rol() in ('superadmin','analista_rrhh','lider_rrhh','juridico') $$;
 
 create or replace function public.fn_lee_todo() returns boolean
   language sql stable security definer set search_path = public as
