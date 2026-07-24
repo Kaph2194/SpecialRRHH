@@ -1,6 +1,7 @@
 function openVacDetailAdmin(empId) {
   const emp = SC.empleados.find(e => e.id === empId);
   if (!emp) return;
+  if (!empVisibleParaUsuario(empId)) { showNotif('Solo puedes ver vacaciones de tu área', 'error'); return; }
   const vacs = SC.vacaciones.filter(v => v.empId === empId);
   const el = document.getElementById('vac-detail-body');
   if (!el) return;
@@ -182,6 +183,10 @@ let USERS = [
     name:'Gerencia',              role:'gerencia',
     roleName:'Gerencia',          canWrite:false },
 
+  { id:'u4b', user:'juridica',    pass:'Juridica2024*',
+    name:'Jurídica',              role:'juridico',
+    roleName:'Jurídica',          canWrite:false },  // ve TODO en modo lectura, como gerencia
+
   // ── EMPLEADOS DEMO (cédula = usuario = contraseña inicial) ──
   { id:'u5', user:'1234567', pass:'1234567',
     name:'Carlos Mejía Torres',   role:'empleado',
@@ -275,6 +280,7 @@ const SC = {
   horarios: {},          // { empId: { tipo:'fijo'|'flexible'|'rotativo', dias:[], entrada:'', salida:'' } }
   descuentos: [],        // [ { id, empId, tipo, monto, cuotas, cuotasPagadas, estado, aprobadoPor, fecha, descripcion } ]
   novedadesArea: [],     // [ { id, empId, fecha, tipo, horas, descripcion, reportadoPor, areaId } ]
+  nominaFormatos: [],    // [ { id, periodo, fileName, fileData|driveUrl, subidoPor, rol, areaNombre, fecha } ]
   denuncias:     [],     // [ { id, empId, tipo, descripcion, fecha, anonimo, estado, ... } ]
 };
 
@@ -306,9 +312,12 @@ const AREAS_SEED = [
   { id:5,  icon:'💰', name:'Finanzas & Contabilidad',         desc:'Gestión financiera y contabilidad.',
     positions:['Contador','Analista Contable','Auxiliar Contable','Coordinador Contable','Gerente Contable','Cajero'],
     subareas:[] },
-  { id:6,  icon:'👥', name:'Recursos Humanos & HSEQ',         desc:'Selección y gestión del talento humano.',
-    positions:['Lider RRHH','Analista RRHH','Lider HSEQ','Analista SST','Coordinador HSEQ','Lider RRHH & HSEQ'],
-    subareas:['RRHH','HSEQ','SIG'] },
+  { id:6,  icon:'👥', name:'Recursos Humanos',                desc:'Selección y gestión del talento humano.',
+    positions:['Lider RRHH','Analista RRHH'],
+    subareas:['RRHH'] },
+  { id:14, icon:'🦺', name:'HSEQ & SIG',                       desc:'Seguridad y salud en el trabajo, calidad y gestión integrada.',
+    positions:['Lider HSEQ','Analista SST','Coordinador HSEQ'],
+    subareas:['HSEQ','SIG'] },
   { id:7,  icon:'📣', name:'Marketing & Medios',              desc:'Estrategia de marca y comunicación.',
     positions:['Director de Marketing','Community Manager','Diseñador Gráfico','Analista Marketing','Director Creativo'],
     subareas:[] },
@@ -417,6 +426,8 @@ async function loadFromSupabase() {
     const discs = await sbFetch('disciplinarios',  'GET', null, '?select=*&order=created_at.asc');
     const cands = await sbFetch('candidatos',      'GET', null, '?select=*&order=created_at.asc');
     const bod   = await sbFetch('bodega',          'GET', null, '?select=*&order=created_at.asc');
+    const novsA = await sbFetch('novedades_area',  'GET', null, '?select=*&order=created_at.asc');
+    const nomF  = await sbFetch('nomina_formatos', 'GET', null, '?select=*&order=created_at.asc');
 
     // Si empleados respondió (aunque sea vacío), Supabase está OK
     if (emps !== null) {
@@ -427,6 +438,9 @@ async function loadFromSupabase() {
       SC.disciplinarios = (discs  ||[]).map(dbToDisc);
       SC.candidatos     = (cands  ||[]).map(dbToCand);
       SC.bodega         = (bod    ||[]).map(dbToBodega);
+      // Novedades de área ahora viven en Supabase (registro auditable); localStorage queda de respaldo
+      if (novsA !== null) SC.novedadesArea = novsA.map(dbToNovArea);
+      SC.nominaFormatos = (nomF   ||[]).map(dbToNomFormato);
       SB_OK = true;
       hideLoadingBanner();
       console.log('✅ Supabase OK —', SC.empleados.length, 'empleados cargados');
@@ -936,6 +950,7 @@ function doLogin() {
   document.getElementById('login-error').style.display = 'none';
   SC.user = found;
   sessionStorage.setItem('sc_user', JSON.stringify(found));
+  registrarAuditoria('login','sesion',found.id,found.roleName||found.role);
   startApp();
 }
 
@@ -1024,11 +1039,26 @@ function startApp() {
 
 function can(action) {
   if (!SC.user) return false;
-  if (SC.user.role === 'gerencia' || SC.user.role === 'lider_rrhh') return false;
+  if (SC.user.role === 'gerencia' || SC.user.role === 'lider_rrhh' || SC.user.role === 'juridico') return false;
   // lider_area solo puede escribir novedades/permisos de su área
   if (SC.user.role === 'lider_area') return action === 'write' ? true : false;
   return SC.user.canWrite;
 }
+
+// ─── VISIBILIDAD POR ÁREA (fail-closed) ───────────────────
+// Un líder de área SOLO ve registros de empleados de su área.
+// Si el líder no tiene areaId asignado, NO ve nada (antes veía todo).
+function empVisibleParaUsuario(empId) {
+  if (SC.user?.role !== 'lider_area') return true;
+  const a = SC.user?.areaId != null && SC.user.areaId !== '' ? String(SC.user.areaId) : null;
+  if (!a) return false; // sin área asignada → sin acceso
+  const e = SC.empleados.find(x => x.id === empId);
+  return !!e && String(e.areaId) === a;
+}
+
+// Vistas permitidas para líder de área (lista blanca de navegación)
+const VISTAS_LIDER_AREA = ['empleados','empleado-detail','novedades-area','malla-area',
+  'permisos-admin','incapacidades-admin','vacaciones-admin','disciplinarios'];
 
 // ─── SIDEBAR ──────────────────────────────────────────────
 function buildSidebar() {
@@ -1046,15 +1076,7 @@ function buildSidebar() {
     return;
   }
 
-  addNavItem(nav, '🏠', 'Dashboard', 'dashboard');
-  addNavSep(nav, 'GESTIÓN');
-  addNavItem(nav, '👤', 'Empleados', 'empleados');
-  addNavItem(nav, '🔍', 'Candidatos', 'candidatos');
-  addNavItem(nav, '📋', 'Vacantes', 'vacantes');
-  addNavSep(nav, 'DOCUMENTOS');
-  addNavItem(nav, '🗄', 'Bodega Documental', 'bodega');
-  addNavSep(nav, 'NÓMINA & GESTIÓN');
-  // Lider de área: vista reducida
+  // Lider de área: vista reducida — SIN módulos globales (Candidatos, Vacantes, Bodega, Dashboard)
   if (u.role === 'lider_area') {
     addNavItem(nav, '👥', 'Mi Equipo', 'empleados');
     addNavSep(nav, 'NOVEDADES');
@@ -1066,13 +1088,28 @@ function buildSidebar() {
     addNavItem(nav, '⚖️', 'Solicitar Proceso Disciplinario', 'disciplinarios');
     addNavSep(nav, 'NÓMINA');
     addNavItem(nav, '📋', 'Mi Malla de Turnos', 'malla-area');
+    // Solo el líder del área Financiera (Finanzas & Contabilidad) sube formatos mensuales de nómina
+    if (String(u.areaId) === '5') {
+      addNavItem(nav, '💰', 'Formatos de Nómina', 'nomina-formatos');
+    }
     return;
   }
+  addNavItem(nav, '🏠', 'Dashboard', 'dashboard');
+  addNavSep(nav, 'GESTIÓN');
+  addNavItem(nav, '👤', 'Empleados', 'empleados');
+  addNavItem(nav, '🔍', 'Candidatos', 'candidatos');
+  addNavItem(nav, '📋', 'Vacantes', 'vacantes');
+  addNavSep(nav, 'DOCUMENTOS');
+  addNavItem(nav, '🗄', 'Bodega Documental', 'bodega');
+  addNavSep(nav, 'NÓMINA & GESTIÓN');
   addNavItem(nav, '🗓', 'Permisos', 'permisos-admin');
   addNavItem(nav, '🏥', 'Incapacidades', 'incapacidades-admin');
   addNavSep(nav, 'NÓMINA');
   addNavItem(nav, '📅', 'Novedades Diarias', 'novedades-diarias');
   addNavItem(nav, '💳', 'Descuentos & Préstamos', 'descuentos');
+  addNavItem(nav, '💰', 'Formatos de Nómina', 'nomina-formatos');
+  addNavSep(nav, 'REPORTES');
+  addNavItem(nav, '📈', 'Reportería RRHH', 'reporteria');
   addNavSep(nav, 'ADMINISTRACIÓN');
   addNavItem(nav, '📐', 'Áreas', 'areas');
   addNavItem(nav, '🎯', 'Perfiles de Cargo', 'perfiles-cargo');
@@ -1081,7 +1118,7 @@ function buildSidebar() {
   if (['superadmin','gerencia','juridico','ceo'].includes(u.role)) {
     addNavItem(nav, '🔒', 'Canal de Denuncias', 'denuncias-admin');
   }
-  if (u.role === 'gerencia' || u.role === 'superadmin' || u.role === 'analista_rrhh' || u.role === 'lider_rrhh') {
+  if (u.role === 'gerencia' || u.role === 'superadmin' || u.role === 'analista_rrhh' || u.role === 'lider_rrhh' || u.role === 'juridico') {
     addNavItem(nav, '📊', 'Panel Gerencia', 'gerencia');
   }
   if (u.role === 'superadmin') {
@@ -1124,6 +1161,8 @@ const VIEW_TITLES = {
   evaluacion: ['Evaluación de Candidato', 'Checklist y Compatibilidad'],
   bodega: ['Bodega Documental', 'Documentos Institucionales'],
   'permisos-admin': ['Gestión de Permisos', 'Solicitudes de Permiso'],
+  'nomina-formatos': ['Formatos Mensuales de Nómina', 'Carga exclusiva de Financiera y RRHH'],
+  reporteria: ['Reportería RRHH', 'Indicadores por área · RRHH separado de HSEQ'],
   'incapacidades-admin': ['Gestión de Incapacidades', 'Incapacidades Médicas'],
   portal: ['Mi Portal de Empleado', 'Gestión Personal'],
   gerencia: ['Panel de Gerencia', 'Solo Lectura · Indicadores'],
@@ -1135,6 +1174,13 @@ const VIEW_TITLES = {
 };
 
 function showView(viewId) {
+  // Líder de área: solo puede navegar a sus vistas permitidas (evita acceso a dashboard global,
+  // candidatos, bodega, descuentos, etc. por enlaces residuales o consola)
+  if (SC.user?.role === 'lider_area') {
+    const permitidas = [...VISTAS_LIDER_AREA];
+    if (String(SC.user?.areaId) === '5') permitidas.push('nomina-formatos'); // solo líder Financiera
+    if (!permitidas.includes(viewId)) viewId = 'empleados';
+  }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const el = document.getElementById(`view-${viewId}`);
   if (el) { el.classList.add('active'); SC.currentView = viewId; }
@@ -1164,7 +1210,9 @@ function showView(viewId) {
   else if (viewId === 'descuentos')        { renderDescuentos(); }
   else if (viewId === 'denuncias-admin')   { renderDenunciasAdmin(); }
   else if (viewId === 'vacaciones-admin')  { renderVacacionesAdmin(); }
-  else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('w')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
+  else if (viewId === 'nomina-formatos')   { renderNominaFormatos(); }
+  else if (viewId === 'reporteria')        { renderReporteria(); }
+  else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('write')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
   else if (viewId === 'drive-config') { openDrivePanel(); showView('dashboard'); }
   else if (viewId === 'user-mgmt') { openUserMgmt(); showView('dashboard'); }
@@ -1329,7 +1377,7 @@ function renderEmpleados() {
   const miAreaId     = SC.user?.areaId ? String(SC.user.areaId) : null;
 
   let filtered = SC.empleados.filter(e => {
-    if (esLiderArea && miAreaId && String(e.areaId) !== miAreaId) return false;
+    if (esLiderArea && (!miAreaId || String(e.areaId) !== miAreaId)) return false;
     if (q  && !e.name.toLowerCase().includes(q) && !(e.cedula||'').includes(q) && !(e.cargo||'').toLowerCase().includes(q)) return false;
     if (fa && String(e.areaId) !== fa) return false;
     if (fe && e.empresaId !== fe) return false;
@@ -1341,10 +1389,14 @@ function renderEmpleados() {
   // Mostrar contador de resultados
   const counter = document.getElementById('emp-counter');
   if (counter) {
-    const total = SC.empleados.length;
-    counter.textContent = filtered.length === total
-      ? total + ' empleados'
-      : filtered.length + ' de ' + total + ' empleados';
+    if (esLiderArea) {
+      counter.textContent = filtered.length + ' empleados en tu área';
+    } else {
+      const total = SC.empleados.length;
+      counter.textContent = filtered.length === total
+        ? total + ' empleados'
+        : filtered.length + ' de ' + total + ' empleados';
+    }
   }
 
   const grid = document.getElementById('empleados-grid');
@@ -1739,9 +1791,9 @@ function openEmpleadoDetail(empId) {
   SC.currentEmpId = empId;
   const emp = SC.empleados.find(e => e.id === empId);
   if (!emp) return;
-  // Lider de área solo puede ver empleados de su área
-  if (SC.user?.role === 'lider_area' && SC.user?.areaId) {
-    if (String(emp.areaId) !== String(SC.user.areaId)) {
+  // Lider de área solo puede ver empleados de su área (fail-closed)
+  if (SC.user?.role === 'lider_area') {
+    if (!SC.user?.areaId || String(emp.areaId) !== String(SC.user.areaId)) {
       showNotif('Solo puedes ver empleados de tu área', 'error'); return;
     }
   }
@@ -2185,9 +2237,11 @@ function saveVacaciones() {
 
 function cambiarEstadoVac(id, estado) {
   const v = SC.vacaciones.find(x => x.id === id);
+  if (v && !empVisibleParaUsuario(v.empId)) { showNotif('No puedes gestionar vacaciones de otra área', 'error'); return; }
   if (v) {
     v.estado = estado;
     sbSaveVac(v);
+    registrarAuditoria('cambio_estado','vacaciones',id,estado);
     syncToSheets('vacaciones');
     showNotif('Estado actualizado ✅');
   }
@@ -3288,14 +3342,8 @@ function renderPermisosAdmin() {
   const tb = document.getElementById('permisos-admin-tbody');
   if (!SC.permisos.length) { tb.innerHTML = '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos registrados.</td></tr>'; return; }
   tb.innerHTML = '';
-  // Filtrar por área si es lider_area
-  const esLA_p = SC.user?.role === 'lider_area';
-  const miArea_p = SC.user?.areaId ? String(SC.user.areaId) : null;
-  const permsFiltrados = SC.permisos.filter(p => {
-    if (!esLA_p || !miArea_p) return true;
-    const emp2 = SC.empleados.find(e => e.id === p.empId);
-    return emp2 && String(emp2.areaId) === miArea_p;
-  });
+  // Filtrar por área si es lider_area (fail-closed: sin areaId no ve nada)
+  const permsFiltrados = SC.permisos.filter(p => empVisibleParaUsuario(p.empId));
   if (!permsFiltrados.length) { tb.innerHTML = '<tr><td colspan="8" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos en tu área.</td></tr>'; return; }
   permsFiltrados.forEach(p => {
     const emp = SC.empleados.find(e => e.id === p.empId);
@@ -3330,6 +3378,7 @@ function renderPermisosAdmin() {
 function openPermisoDetail(id) {
   const p = SC.permisos.find(x => x.id === id);
   if (!p) return;
+  if (!empVisibleParaUsuario(p.empId)) { showNotif('Solo puedes ver permisos de tu área', 'error'); return; }
   const emp = SC.empleados.find(e => e.id === p.empId);
   const el  = document.getElementById('permiso-detail-body');
 
@@ -3484,7 +3533,13 @@ function actualizarPermisoModal(id, status) {
 
 function actualizarPermiso(id, status) {
   const p = SC.permisos.find(x => x.id === id);
-  if (p) { p.status = status; showNotif(`Permiso ${status === 'aprobado' ? 'aprobado' : 'rechazado'} ✅`); }
+  if (!p) return;
+  if (!empVisibleParaUsuario(p.empId)) { showNotif('No puedes gestionar permisos de otra área', 'error'); return; }
+  p.status = status;
+  sbSavePermiso(p);            // persistir en Supabase (antes se perdía al recargar)
+  registrarAuditoria('cambio_estado','permiso',id,status);
+  syncToSheets('permisos');
+  showNotif(`Permiso ${status === 'aprobado' ? 'aprobado' : 'rechazado'} ✅`);
   if (SC.currentView === 'permisos-admin') renderPermisosAdmin();
   else renderDashboard();
 }
@@ -3492,7 +3547,8 @@ function actualizarPermiso(id, status) {
 function openAdminPermisoModal() {
   const sel = document.getElementById('perm-emp');
   sel.innerHTML = '';
-  SC.empleados.forEach(e => sel.insertAdjacentHTML('beforeend', `<option value="${e.id}">${e.name}</option>`));
+  SC.empleados.filter(e => empVisibleParaUsuario(e.id))
+    .forEach(e => sel.insertAdjacentHTML('beforeend', `<option value="${e.id}">${e.name}</option>`));
   document.getElementById('perm-emp-group').style.display = '';
   document.getElementById('perm-inicio').value = '';
   document.getElementById('perm-fin').value = '';
@@ -3589,6 +3645,7 @@ function savePermiso() {
   closeModal('modal-permiso');
   const lastPerm = SC.permisos[SC.permisos.length-1];
   sbSavePermiso(lastPerm);
+  registrarAuditoria('crear','permiso',lastPerm.id,`${lastPerm.tipo} · emp ${lastPerm.empId}`);
   showNotif('Permiso solicitado ✅');
   syncToSheets('permisos');
   if (SC.currentView === 'permisos-admin') renderPermisosAdmin();
@@ -3606,13 +3663,7 @@ function renderIncapAdmin() {
   const tb = document.getElementById('incap-admin-tbody');
   if (!SC.incapacidades.length) { tb.innerHTML = '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:24px">No hay incapacidades.</td></tr>'; return; }
   tb.innerHTML = '';
-  const esLA_i = SC.user?.role === 'lider_area';
-  const miArea_i = SC.user?.areaId ? String(SC.user.areaId) : null;
-  const incapsFiltradas = SC.incapacidades.filter(i => {
-    if (!esLA_i || !miArea_i) return true;
-    const emp2 = SC.empleados.find(e => e.id === i.empId);
-    return emp2 && String(emp2.areaId) === miArea_i;
-  });
+  const incapsFiltradas = SC.incapacidades.filter(i => empVisibleParaUsuario(i.empId));
   if (!incapsFiltradas.length) { tb.innerHTML = '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:24px">No hay incapacidades en tu área.</td></tr>'; return; }
   incapsFiltradas.forEach(i => {
     const emp = SC.empleados.find(e => e.id === i.empId);
@@ -3640,6 +3691,7 @@ function renderIncapAdmin() {
 function openIncapDetail(id) {
   const i = SC.incapacidades.find(x => x.id === id);
   if (!i) return;
+  if (!empVisibleParaUsuario(i.empId)) { showNotif('Solo puedes ver incapacidades de tu área', 'error'); return; }
   const emp = SC.empleados.find(e => e.id === i.empId);
   const el = document.getElementById('incap-detail-body');
   el.innerHTML = `
@@ -3695,14 +3747,21 @@ function actualizarIncapModal(id, status) {
 
 function actualizarIncap(id, status) {
   const i = SC.incapacidades.find(x => x.id === id);
-  if (i) { i.status = status; showNotif(`Incapacidad ${status} ✅`); }
+  if (!i) return;
+  if (!empVisibleParaUsuario(i.empId)) { showNotif('No puedes gestionar incapacidades de otra área', 'error'); return; }
+  i.status = status;
+  sbSaveIncap(i);              // persistir en Supabase (antes se perdía al recargar)
+  registrarAuditoria('cambio_estado','incapacidad',id,status);
+  syncToSheets('incapacidades');
+  showNotif(`Incapacidad ${status} ✅`);
   renderIncapAdmin();
 }
 
 function openAdminIncapModal() {
   const sel = document.getElementById('incap-emp');
   sel.innerHTML = '';
-  SC.empleados.forEach(e => sel.insertAdjacentHTML('beforeend', `<option value="${e.id}">${e.name}</option>`));
+  SC.empleados.filter(e => empVisibleParaUsuario(e.id))
+    .forEach(e => sel.insertAdjacentHTML('beforeend', `<option value="${e.id}">${e.name}</option>`));
   document.getElementById('incap-emp-group').style.display = '';
   SC.pendingFiles = {};
   const cl = document.getElementById('incap-cert-lbl'); if(cl) cl.textContent = 'Certificado de incapacidad (PDF)';
@@ -3766,6 +3825,7 @@ function saveIncapacidad() {
   closeModal('modal-incap');
   const lastIncap = SC.incapacidades[SC.incapacidades.length-1];
   sbSaveIncap(lastIncap);
+  registrarAuditoria('crear','incapacidad',lastIncap.id,`${lastIncap.diagnostico||''} · emp ${lastIncap.empId}`);
   showNotif('Incapacidad radicada ✅');
   syncToSheets('incapacidades');
   if (SC.currentView === 'incapacidades-admin') renderIncapAdmin();
@@ -4662,12 +4722,13 @@ function renderDisciplinarios() {
   const tb = document.getElementById('disc-tbody');
   if (!tb) return;
   tb.innerHTML = '';
-  const esLA_d = SC.user?.role === 'lider_area';
-  const miArea_d = SC.user?.areaId ? String(SC.user.areaId) : null;
   const discFiltrados = SC.disciplinarios.filter(d => {
-    if (!esLA_d || !miArea_d) return true;
-    const emp2 = SC.empleados.find(e => e.id === d.empId);
-    return emp2 && String(emp2.areaId) === miArea_d;
+    if (SC.user?.role !== 'lider_area') return true;
+    const a = SC.user?.areaId != null && SC.user.areaId !== '' ? String(SC.user.areaId) : null;
+    if (!a) return false; // fail-closed
+    // Visible si el empleado es de mi área, si yo lo solicité, o si me piden visto bueno
+    if (empVisibleParaUsuario(d.empId)) return true;
+    return String(d.areaIdSolicitante || '') === a || String(d.liderOtraAreaId || '') === a;
   });
   discFiltrados.forEach(d => {
     const emp  = SC.empleados.find(e => e.id === d.empId);
@@ -5057,6 +5118,13 @@ window.cerrarDiscConDecision  = cerrarDiscConDecision;
 function openDiscDetail(id) {
   const d   = SC.disciplinarios.find(x => x.id === id);
   if (!d) return;
+  if (SC.user?.role === 'lider_area') {
+    const a = SC.user?.areaId != null && SC.user.areaId !== '' ? String(SC.user.areaId) : null;
+    const permitido = a && (empVisibleParaUsuario(d.empId)
+      || String(d.areaIdSolicitante || '') === a
+      || String(d.liderOtraAreaId || '') === a);
+    if (!permitido) { showNotif('No tienes acceso a este proceso disciplinario', 'error'); return; }
+  }
   const emp = SC.empleados.find(e => e.id === d.empId);
   const tipo= TIPOS_DISCIPLINARIO[d.tipo]||{label:d.tipo,icon:'📋',color:'var(--navy)'};
   const el  = document.getElementById('disc-detail-body');
@@ -6580,6 +6648,7 @@ function renderNovedadesDiarias() {
 // ── Novedades Área (Líder) ────────────────────────────────────
 function getMisEmps() {
   const areaId = SC.user?.areaId;
+  if (SC.user?.role === 'lider_area' && !areaId) return []; // fail-closed
   return SC.empleados.filter(e =>
     e.status !== 'retirado' && (areaId ? String(e.areaId) === String(areaId) : true)
   ).sort((a,b) => a.name.localeCompare(b.name, 'es'));
@@ -6774,6 +6843,9 @@ function saveNovedadArea() {
     areaId: SC.user?.areaId||null,
   });
   saveNovedadesAreaLocal();
+  const lastNov = SC.novedadesArea[SC.novedadesArea.length-1];
+  sbSaveNovedadArea(lastNov);   // registro permanente en base de datos
+  registrarAuditoria('crear','novedad_area',lastNov.id,`${tipo} · emp ${empId} · ${fecha}`);
   closeModal('modal-novedad-area');
   showNotif('📅 Novedad reportada ✅');
   if (SC.currentView==='novedades-area')    renderNovedadesAreaCalendar();
@@ -6783,6 +6855,8 @@ function saveNovedadArea() {
 function eliminarNovedadArea(id) {
   SC.novedadesArea = SC.novedadesArea.filter(n=>n.id!==id);
   saveNovedadesAreaLocal();
+  sbDeleteNovedadArea(id);
+  registrarAuditoria('eliminar','novedad_area',id,'');
   if (SC.currentView==='novedades-area')    renderNovedadesAreaCalendar();
   if (SC.currentView==='novedades-diarias') renderNovedadesDiarias();
 }
@@ -9498,3 +9572,251 @@ window.solicitarCert = solicitarCert;
 window.descargarCert = descargarCert;
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: PERSISTENCIA SUPABASE — NOVEDADES DE ÁREA, AUDITORÍA,
+// FORMATOS MENSUALES DE NÓMINA Y REPORTERÍA RRHH
+// ═══════════════════════════════════════════════════════════════
+
+// ── Novedades de área ↔ Supabase ─────────────────────────────
+function dbToNovArea(r) {
+  return {
+    id: r.id, empId: r.emp_id, fecha: r.fecha, tipo: r.tipo,
+    horas: r.horas != null ? parseFloat(r.horas) : null,
+    descripcion: r.descripcion || '',
+    reportadoPor: r.reportado_por || '',
+    areaId: r.area_id != null ? r.area_id : null,
+  };
+}
+async function sbSaveNovedadArea(n) {
+  if (!n) return;
+  const row = {
+    id: n.id, emp_id: n.empId, fecha: n.fecha, tipo: n.tipo,
+    horas: n.horas != null ? n.horas : null,
+    descripcion: n.descripcion || '',
+    reportado_por: n.reportadoPor || '',
+    area_id: n.areaId != null ? String(n.areaId) : null,
+  };
+  await sbFetch('novedades_area','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+async function sbDeleteNovedadArea(id) {
+  await sbFetch('novedades_area','DELETE',null,`?id=eq.${encodeURIComponent(id)}`);
+}
+
+// ── Auditoría: todo cambio importante queda registrado en BD ──
+async function registrarAuditoria(accion, entidad, entidadId, detalle) {
+  try {
+    await sbFetch('auditoria','POST',{
+      usuario:    SC.user?.name || SC.user?.user || 'desconocido',
+      usuario_id: SC.user?.id || null,
+      rol:        SC.user?.role || null,
+      area_id:    SC.user?.areaId != null ? String(SC.user.areaId) : null,
+      accion, entidad,
+      entidad_id: entidadId != null ? String(entidadId) : null,
+      detalle:    detalle || '',
+    },'',{'Prefer':'return=minimal'});
+  } catch(e) { /* la auditoría nunca debe romper el flujo */ }
+}
+
+// ── Formatos mensuales de nómina ──────────────────────────────
+// Regla de negocio: SOLO Financiera (área 5) y Recursos Humanos pueden subirlos.
+function puedeSubirNominaMensual() {
+  const r = SC.user?.role;
+  if (['superadmin','analista_rrhh','lider_rrhh'].includes(r)) return true;      // RRHH
+  if (r === 'lider_area' && String(SC.user?.areaId) === '5')   return true;      // Financiera
+  return false;
+}
+function puedeVerNominaMensual() {
+  return puedeSubirNominaMensual() || ['gerencia','juridico'].includes(SC.user?.role);
+}
+
+function dbToNomFormato(r) {
+  return {
+    id: r.id, periodo: r.periodo, fileName: r.file_name || '',
+    fileData: r.file_data || null, driveUrl: r.drive_url || null,
+    subidoPor: r.subido_por || '', rol: r.rol || '',
+    areaNombre: r.area_nombre || '', fecha: r.fecha || '',
+  };
+}
+async function sbSaveNomFormato(f) {
+  const row = {
+    id: f.id, periodo: f.periodo, file_name: f.fileName || '',
+    file_data: f.fileData || null, drive_url: f.driveUrl || null,
+    subido_por: f.subidoPor || '', rol: f.rol || '',
+    area_nombre: f.areaNombre || '', fecha: f.fecha || '',
+  };
+  await sbFetch('nomina_formatos','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+
+function renderNominaFormatos() {
+  if (!puedeVerNominaMensual()) { showNotif('No tienes acceso a los formatos de nómina','error'); showView('empleados'); return; }
+  const acc = document.getElementById('nomf-actions');
+  if (acc) acc.innerHTML = puedeSubirNominaMensual()
+    ? `<button class="btn btn-primary btn-sm" onclick="openNominaFormatoModal()">+ Subir Formato del Mes</button>`
+    : `<span class="text-xs text-muted">Solo lectura — la carga es exclusiva de Financiera y RRHH</span>`;
+  const tb = document.getElementById('nomf-tbody');
+  if (!tb) return;
+  if (!SC.nominaFormatos.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="text-muted text-sm" style="text-align:center;padding:24px">Aún no se han cargado formatos mensuales.</td></tr>';
+    return;
+  }
+  tb.innerHTML = '';
+  [...SC.nominaFormatos].sort((a,b)=> (b.periodo||'').localeCompare(a.periodo||'')).forEach(f => {
+    const link = f.driveUrl
+      ? `<a href="${f.driveUrl}" target="_blank" class="btn btn-ghost btn-sm">📄 Ver en Drive</a>`
+      : (f.fileData ? `<button class="btn btn-ghost btn-sm" onclick="descargarNomFormato('${f.id}')">⬇ Descargar</button>` : '—');
+    tb.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td><strong>${f.periodo||'—'}</strong></td>
+        <td class="text-sm">${f.fileName||'—'}</td>
+        <td class="text-sm">${f.subidoPor||'—'}</td>
+        <td class="text-xs text-muted">${f.rol||''}${f.areaNombre?(' · '+f.areaNombre):''}</td>
+        <td class="text-xs text-muted">${f.fecha||'—'}</td>
+        <td>${link}</td>
+      </tr>`);
+  });
+}
+
+function openNominaFormatoModal() {
+  if (!puedeSubirNominaMensual()) { showNotif('Solo Financiera y RRHH pueden subir formatos de nómina','error'); return; }
+  const per = document.getElementById('nomf-periodo');
+  if (per) per.value = new Date().toISOString().slice(0,7);
+  const fi = document.getElementById('nomf-file'); if (fi) fi.value = '';
+  openModal('modal-nomina-formato');
+}
+
+function saveNominaFormato() {
+  if (!puedeSubirNominaMensual()) { showNotif('Solo Financiera y RRHH pueden subir formatos de nómina','error'); return; }
+  const periodo = document.getElementById('nomf-periodo')?.value;
+  const file    = document.getElementById('nomf-file')?.files[0];
+  if (!periodo) { showNotif('Selecciona el período (mes)','error'); return; }
+  if (!file)    { showNotif('Adjunta el archivo del formato','error'); return; }
+  if (file.size > 15*1024*1024) { showNotif('El archivo supera los 15 MB permitidos','error'); return; }
+
+  const areaNombre = SC.user?.role === 'lider_area'
+    ? (SC.areas.find(a => String(a.id) === String(SC.user?.areaId))?.name || 'Financiera')
+    : 'Recursos Humanos';
+
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const f = {
+      id: 'nf' + Date.now(),
+      periodo,
+      fileName: file.name,
+      fileData: null, driveUrl: null,
+      subidoPor: SC.user?.name || '',
+      rol: SC.user?.roleName || SC.user?.role || '',
+      areaNombre,
+      fecha: new Date().toLocaleDateString('es-CO'),
+    };
+    if (GAPI_CONFIG.connected) {
+      try {
+        const fid = await uploadToDrive(ev.target.result, `Nomina_${periodo}_${file.name}`, 'nomina', areaNombre);
+        if (fid) f.driveUrl = driveViewUrl(fid);
+      } catch(e) {}
+    }
+    if (!f.driveUrl) f.fileData = ev.target.result; // respaldo en BD si Drive no está conectado
+    SC.nominaFormatos.push(f);
+    await sbSaveNomFormato(f);
+    registrarAuditoria('subir','nomina_formato',f.id,`Período ${periodo} · ${file.name}`);
+    closeModal('modal-nomina-formato');
+    showNotif('💰 Formato de nómina ' + periodo + ' guardado en base de datos ✅');
+    renderNominaFormatos();
+  };
+  reader.readAsDataURL(file);
+}
+
+function descargarNomFormato(id) {
+  const f = SC.nominaFormatos.find(x => x.id === id);
+  if (!f?.fileData) return;
+  const a = document.createElement('a');
+  a.href = f.fileData; a.download = f.fileName || ('Nomina_'+f.periodo);
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+// ── Reportería RRHH (áreas separadas: RRHH ≠ HSEQ) ───────────
+function renderReporteria() {
+  const rolesOk = ['superadmin','analista_rrhh','lider_rrhh','gerencia','juridico'];
+  if (!rolesOk.includes(SC.user?.role)) { showNotif('No tienes acceso a la reportería','error'); showView('empleados'); return; }
+  const mesInput = document.getElementById('rep-mes');
+  if (mesInput && !mesInput.value) mesInput.value = new Date().toISOString().slice(0,7);
+  const mes = mesInput?.value || new Date().toISOString().slice(0,7);
+  const el = document.getElementById('reporteria-content');
+  if (!el) return;
+
+  const enMes  = f => (f||'').startsWith(mes);
+  const vacToca = v => {
+    const ini = (v.inicio||'').slice(0,7), fin = (v.fin||v.inicio||'').slice(0,7);
+    return ini <= mes && fin >= mes;
+  };
+
+  const filas = SC.areas.map(a => {
+    const empsArea = SC.empleados.filter(e => String(e.areaId) === String(a.id));
+    const ids      = new Set(empsArea.map(e => e.id));
+    const activos  = empsArea.filter(e => e.status === 'activo').length;
+    const perms    = SC.permisos.filter(p => ids.has(p.empId) && enMes(p.inicio));
+    const incs     = SC.incapacidades.filter(i => ids.has(i.empId) && enMes(i.fechaInicio));
+    const vacs     = SC.vacaciones.filter(v => ids.has(v.empId) && v.estado==='aprobado' && vacToca(v));
+    const novs     = SC.novedadesArea.filter(n => ids.has(n.empId) && enMes(n.fecha));
+    const diasInc  = incs.reduce((s,i)=>s+(parseInt(i.dias)||0),0);
+    const destaca  = a.id === 6 || a.id === 14; // RRHH y HSEQ separadas
+    return { a, activos, perms, incs, vacs, novs, diasInc, destaca };
+  }).filter(r => r.activos || r.perms.length || r.incs.length || r.vacs.length || r.novs.length);
+
+  el.innerHTML = `
+    <div class="text-sm text-muted mb-3">Período: <strong>${mes}</strong> · Recursos Humanos y HSEQ se reportan como áreas independientes.</div>
+    <table class="data-table">
+      <thead><tr>
+        <th>Área</th><th>Activos</th><th>Permisos</th><th>Aprobados</th>
+        <th>Incapacidades</th><th>Días incap.</th><th>Vacaciones</th><th>Novedades</th>
+      </tr></thead>
+      <tbody>
+        ${filas.map(r => `
+          <tr style="${r.destaca?'background:rgba(17,31,77,.05);font-weight:600':''}">
+            <td>${r.a.icon||''} ${r.a.name}</td>
+            <td class="text-center">${r.activos}</td>
+            <td class="text-center">${r.perms.length}</td>
+            <td class="text-center">${r.perms.filter(p=>p.status==='aprobado').length}</td>
+            <td class="text-center">${r.incs.length}</td>
+            <td class="text-center">${r.diasInc}</td>
+            <td class="text-center">${r.vacs.length}</td>
+            <td class="text-center">${r.novs.length}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function exportReporteriaCSV() {
+  const mes = document.getElementById('rep-mes')?.value || new Date().toISOString().slice(0,7);
+  const nombreArea = id => SC.areas.find(a => String(a.id) === String(id))?.name || 'Sin área';
+  const empArea = empId => nombreArea(SC.empleados.find(e => e.id === empId)?.areaId);
+  const empNom  = empId => SC.empleados.find(e => e.id === empId)?.name || '';
+  const q = s => '"' + String(s??'').replace(/"/g,'""') + '"';
+  const rows = [['Tipo','Área','Empleado','Detalle','Inicio','Fin/Días','Estado'].map(q).join(';')];
+
+  SC.permisos.filter(p => (p.inicio||'').startsWith(mes)).forEach(p =>
+    rows.push([ 'Permiso', empArea(p.empId), empNom(p.empId), p.tipo||'', p.inicio||'', p.fin||p.dias||'', p.status||'' ].map(q).join(';')));
+  SC.incapacidades.filter(i => (i.fechaInicio||'').startsWith(mes)).forEach(i =>
+    rows.push([ 'Incapacidad', empArea(i.empId), empNom(i.empId), i.diagnostico||'', i.fechaInicio||'', i.dias||'', i.status||'' ].map(q).join(';')));
+  SC.vacaciones.filter(v => (v.inicio||'').slice(0,7) <= mes && (v.fin||v.inicio||'').slice(0,7) >= mes).forEach(v =>
+    rows.push([ 'Vacaciones', empArea(v.empId), empNom(v.empId), '', v.inicio||'', v.fin||'', v.estado||'' ].map(q).join(';')));
+  SC.novedadesArea.filter(n => (n.fecha||'').startsWith(mes)).forEach(n =>
+    rows.push([ 'Novedad', empArea(n.empId), empNom(n.empId), n.tipo||'', n.fecha||'', n.horas||'', '' ].map(q).join(';')));
+
+  const blob = new Blob(['\ufeff' + rows.join('\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `Reporteria_RRHH_${mes}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  registrarAuditoria('exportar','reporteria',mes,'CSV mensual');
+}
+
+window.sbSaveNovedadArea   = sbSaveNovedadArea;
+window.sbDeleteNovedadArea = sbDeleteNovedadArea;
+window.registrarAuditoria  = registrarAuditoria;
+window.renderNominaFormatos  = renderNominaFormatos;
+window.openNominaFormatoModal= openNominaFormatoModal;
+window.saveNominaFormato     = saveNominaFormato;
+window.descargarNomFormato   = descargarNomFormato;
+window.renderReporteria      = renderReporteria;
+window.exportReporteriaCSV   = exportReporteriaCSV;

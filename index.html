@@ -856,6 +856,33 @@
     <!-- ═══════════════════════════════════════════════ -->
     <!-- PORTAL RETIRADO                                  -->
     <!-- ═══════════════════════════════════════════════ -->
+    <div id="view-nomina-formatos" class="view">
+      <div class="glass-card p-6">
+        <div class="section-header mb-4">
+          <div class="section-title">💰 Formatos Mensuales de Nómina</div>
+          <div id="nomf-actions"></div>
+        </div>
+        <div class="text-sm text-muted mb-3">La carga mensual es exclusiva del área <strong>Financiera</strong> y de <strong>Recursos Humanos</strong>. Cada carga queda registrada en la base de datos con usuario, rol y fecha.</div>
+        <table class="data-table">
+          <thead><tr><th>Período</th><th>Archivo</th><th>Subido por</th><th>Rol / Área</th><th>Fecha de carga</th><th></th></tr></thead>
+          <tbody id="nomf-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="view-reporteria" class="view">
+      <div class="glass-card p-6">
+        <div class="section-header mb-4">
+          <div class="section-title">📈 Reportería RRHH</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="month" id="rep-mes" class="form-input" style="max-width:170px" onchange="renderReporteria()">
+            <button class="btn btn-primary btn-sm" onclick="exportReporteriaCSV()">⬇ Exportar CSV</button>
+          </div>
+        </div>
+        <div id="reporteria-content"></div>
+      </div>
+    </div>
+
     <div id="view-portal-retirado" class="view">
       <div id="portal-retirado-content"></div>
     </div>
@@ -1144,6 +1171,23 @@
 </div>
 
 <!-- Solicitar Permiso -->
+<div class="modal-overlay" id="modal-nomina-formato">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <div class="modal-title">💰 Subir Formato Mensual de Nómina</div>
+      <button class="modal-close" onclick="closeModal('modal-nomina-formato')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Período (mes)</label>
+        <input type="month" class="form-input" id="nomf-periodo"></div>
+      <div class="form-group"><label class="form-label">Archivo (Excel / PDF, máx. 15 MB)</label>
+        <input type="file" class="form-input" id="nomf-file" accept=".xlsx,.xls,.csv,.pdf"></div>
+      <div class="text-xs text-muted mb-3">La carga quedará registrada en la base de datos con tu usuario, rol y fecha (auditoría).</div>
+      <button class="btn btn-primary" style="width:100%" onclick="saveNominaFormato()">Guardar Formato</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-permiso">
   <div class="modal" style="max-width:520px">
     <div class="modal-header">
