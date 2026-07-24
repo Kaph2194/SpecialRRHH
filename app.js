@@ -302,6 +302,7 @@ const SC = {
   descuentos: [],        // [ { id, empId, tipo, monto, cuotas, cuotasPagadas, estado, aprobadoPor, fecha, descripcion } ]
   novedadesArea: [],     // [ { id, empId, fecha, tipo, horas, descripcion, reportadoPor, areaId } ]
   nominaFormatos: [],    // [ { id, periodo, fileName, fileData|driveUrl, subidoPor, rol, areaNombre, fecha } ]
+  solicitudesCert: [],   // solicitudes de certificados laborales, ingresos, paz y salvo...
   denuncias:     [],     // [ { id, empId, tipo, descripcion, fecha, anonimo, estado, ... } ]
 };
 
@@ -455,6 +456,8 @@ async function loadFromSupabase() {
     const nomF  = await sbFetch('nomina_formatos', 'GET', null, '?select=*&order=created_at.asc');
     const desc_ = await sbFetch('descuentos',      'GET', null, '?select=*&order=created_at.asc');
     const den_  = await sbFetch('denuncias',       'GET', null, '?select=*&order=created_at.asc');
+    const hor_  = await sbFetch('horarios',        'GET', null, '?select=*');
+    const sce_  = await sbFetch('solicitudes_certificados','GET', null, '?select=*&order=created_at.asc');
 
     // Si empleados respondió (aunque sea vacío), Supabase está OK
     if (emps !== null) {
@@ -470,6 +473,16 @@ async function loadFromSupabase() {
       SC.nominaFormatos = (nomF   ||[]).map(dbToNomFormato);
       if (desc_ !== null) SC.descuentos = desc_.map(dbToDescuento);
       if (den_  !== null) SC.denuncias  = den_.map(dbToDenuncia);
+      if (sce_  !== null) SC.solicitudesCert = sce_.map(dbToSolCert);
+      if (hor_  !== null && hor_.length) {
+        SC.horarios = {};
+        hor_.forEach(r => {
+          let dias = []; try { dias = JSON.parse(r.dias_laborales||'[]'); } catch(e) {}
+          SC.horarios[r.emp_id] = { tipo:r.tipo, diasLaborales:dias, entrada:r.entrada,
+            salida:r.salida, descanso:r.descanso, horasSemana:r.horas_semana,
+            descripcion:r.descripcion||'', modificadoPor:r.modificado_por||'' };
+        });
+      }
       SB_OK = true;
       hideLoadingBanner();
       console.log('✅ Supabase OK —', SC.empleados.length, 'empleados cargados');
@@ -1009,6 +1022,32 @@ window.esRRHH = esRRHH;
 // Permiso "menor": por horas y de duración < 2h → lo aprueba el jefe directo
 // (líder del área del empleado) sin pasar por RRHH; a RRHH solo se le notifica.
 const LIMITE_HORAS_JEFE = 2;
+
+// ─── PLAZOS DEL REGLAMENTO INTERNO ────────────────────────────
+// Valores legales Colombia — actualizar cada año
+const SMLV_ACTUAL    = 1623500;   // salario mínimo 2026
+const AUX_TRANSPORTE = 200000;    // auxilio de transporte 2026
+
+const PLAZO_PERMISO_DIAS      = 2;   // anticipación mínima para solicitar permiso
+const PLAZO_INCAP_DIAS        = 2;   // días máx. para radicar tras finalizar la incapacidad
+const PLAZO_VACACIONES_DIAS   = 15;  // días calendario de anticipación
+const DIAS_EPICRISIS          = 2;   // incapacidad > 2 días exige epicrisis
+const RESPUESTA_MAX_DIAS      = 1;   // respuesta máx. 1 día antes del inicio
+
+function diasEntre(a, b) { return Math.floor((new Date(b) - new Date(a)) / 86400000); }
+
+// Semáforo de plazo de respuesta: la solicitud debe resolverse
+// máximo 1 día antes de su fecha de inicio.
+function semaforoPlazo(fechaInicio, estado) {
+  if (!fechaInicio || (estado && estado !== 'pendiente')) return '';
+  const dias = diasEntre(hoyISO(), fechaInicio);
+  if (dias < 0)  return `<span class="badge badge-red" title="El plazo de respuesta ya venció">🔴 Vencido</span>`;
+  if (dias <= RESPUESTA_MAX_DIAS) return `<span class="badge badge-red" title="Debe responderse hoy">🔴 Responder hoy</span>`;
+  if (dias <= 3) return `<span class="badge badge-yellow" title="Faltan ${dias} días para el inicio">🟡 ${dias} días</span>`;
+  return `<span class="badge badge-green" title="Faltan ${dias} días">🟢 ${dias} días</span>`;
+}
+window.semaforoPlazo = semaforoPlazo;
+function hoyISO() { return new Date().toISOString().split('T')[0]; }
 function esPermisoMenor(p) {
   if (!p?.esPorHoras) return false;
   const h = parseFloat(p.dias);
@@ -1024,6 +1063,32 @@ function puedeAprobarPermiso(p) {
 }
 window.esPermisoMenor    = esPermisoMenor;
 window.puedeAprobarPermiso = puedeAprobarPermiso;
+
+// ─── QUIÉN EDITA LA FICHA DEL EMPLEADO ────────────────────
+// RRHH y superadmin: TODOS los campos de TODOS los empleados.
+// Líder de área: solo empleados de su área y solo campos operativos
+// (horario, área física, novedades). Nunca datos contractuales,
+// salariales, bancarios ni de seguridad social.
+const CAMPOS_SOLO_RRHH = ['name','cedula','email','phone','dir','fechaIngreso',
+  'contratoTipo','salario','empresaId','areaId','tipoVinculacion','status',
+  'eps','afp','arl','pctArl','cajaCom','fondoCes','banco','numeroCuenta',
+  'tipoCuenta','subsidioTransporte','dotacion','fechaRetiro'];
+
+function esRRHHoAdmin() {
+  return ['superadmin','analista_rrhh'].includes(SC.user?.role);
+}
+// ¿Puede editar la ficha completa? (todos los campos)
+function puedeEditarFichaCompleta() { return esRRHHoAdmin(); }
+
+// ¿Puede tocar algo de este empleado? (líder: solo su área, campos operativos)
+function puedeEditarEmpleado(empId) {
+  if (esRRHHoAdmin()) return true;
+  if (SC.user?.role !== 'lider_area') return false;
+  return empVisibleParaUsuario(empId);
+}
+window.esRRHHoAdmin           = esRRHHoAdmin;
+window.puedeEditarFichaCompleta = puedeEditarFichaCompleta;
+window.puedeEditarEmpleado    = puedeEditarEmpleado;
 
 // ─── VISIBILIDAD POR ÁREA (fail-closed) ───────────────────
 // Un líder de área SOLO ve registros de empleados de su área.
@@ -1095,6 +1160,7 @@ function buildSidebar() {
   addNavItem(nav, '📅', 'Novedades Diarias', 'novedades-diarias');
   addNavItem(nav, '💳', 'Descuentos & Préstamos', 'descuentos');
   addNavItem(nav, '💰', 'Formatos de Nómina', 'nomina-formatos');
+  addNavItem(nav, '📄', 'Certificados', 'solicitudes-cert');
   addNavSep(nav, 'REPORTES');
   addNavItem(nav, '📈', 'Reportería RRHH', 'reporteria');
   addNavSep(nav, 'ADMINISTRACIÓN');
@@ -1149,6 +1215,7 @@ const VIEW_TITLES = {
   'permisos-admin': ['Gestión de Permisos', 'Solicitudes de Permiso'],
   'nomina-formatos': ['Formatos Mensuales de Nómina', 'Carga exclusiva de Financiera y RRHH'],
   reporteria: ['Reportería RRHH', 'Indicadores por área · RRHH separado de HSEQ'],
+  'solicitudes-cert': ['Solicitudes de Certificados', 'Certificados laborales, de ingresos y paz y salvo'],
   'incapacidades-admin': ['Gestión de Incapacidades', 'Incapacidades Médicas'],
   portal: ['Mi Portal de Empleado', 'Gestión Personal'],
   gerencia: ['Panel de Gerencia', 'Solo Lectura · Indicadores'],
@@ -1198,6 +1265,7 @@ function showView(viewId) {
   else if (viewId === 'vacaciones-admin')  { renderVacacionesAdmin(); }
   else if (viewId === 'nomina-formatos')   { renderNominaFormatos(); }
   else if (viewId === 'reporteria')        { renderReporteria(); }
+  else if (viewId === 'solicitudes-cert')  { renderSolicitudesCert(); }
   else if (viewId === 'disciplinarios') { renderDisciplinarios(); if(can('write')){actions.innerHTML='<button class="btn btn-primary btn-sm" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>';} }
   else if (viewId === 'portal-retirado') { renderPortalRetirado(); }
   else if (viewId === 'drive-config') { openDrivePanel(); showView('dashboard'); }
@@ -1470,6 +1538,10 @@ function openAddEmpModal() {
 function openEditEmpModal(empId) {
   const emp = SC.empleados.find(e => e.id === empId);
   if (!emp) return;
+  if (!puedeEditarFichaCompleta()) {
+    showNotif('Solo Recursos Humanos puede editar la ficha del empleado. Como líder puedes gestionar horarios y novedades de tu equipo.', 'error');
+    return;
+  }
   document.getElementById('modal-emp-title').textContent = 'Editar Empleado';
   document.getElementById('em-name').value = emp.name;
   document.getElementById('em-cedula').value = emp.cedula;
@@ -1621,6 +1693,7 @@ window.calcVacInfo = calcVacInfo;
 window.gerTab = gerTab;
 
 function saveEmpleado() {
+  if (!puedeEditarFichaCompleta()) { showNotif('Solo Recursos Humanos puede crear o editar empleados', 'error'); return; }
   const name = document.getElementById('em-name').value.trim();
   const cedula = document.getElementById('em-cedula').value.trim();
   const areaId = parseInt(document.getElementById('em-area').value);
@@ -1933,7 +2006,15 @@ function renderEmpTab(tab) {
       ${buildPerfilCargoEmpHTML(emp)}`;
   }
   else if (tab === 'carpeta') { renderCarpetaVida(emp, content); }
-  else if (tab === 'contratos') { renderDocSection(emp, 'contratos', content); }
+  else if (tab === 'contratos') {
+    renderDocSection(emp, 'contratos', content);
+    // RRHH debe cargar copia del contrato de cada empleado
+    if (esRRHHoAdmin() && !(emp.contratos||[]).length) {
+      content.insertAdjacentHTML('afterbegin',
+        '<div style="background:rgba(245,158,11,.1);border-left:3px solid var(--amber);padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px">' +
+        '⚠️ Este empleado no tiene copia del contrato cargada. Recursos Humanos debe adjuntarla.</div>');
+    }
+  }
   else if (tab === 'nomina') { renderDocSection(emp, 'nomina', content); }
   else if (tab === 'permisos') { renderEmpPermisos(emp, content); }
   else if (tab === 'incapacidades') { renderEmpIncap(emp, content); }
@@ -2217,6 +2298,14 @@ function saveVacaciones() {
   const inicio = document.getElementById('vac-inicio').value;
   const fin = document.getElementById('vac-fin').value;
   if (!inicio || !fin) { showNotif('Ingresa inicio y fin del período', 'error'); return; }
+  // Anticipación mínima de 15 días calendario (no aplica a RRHH/admin)
+  if (SC.user?.role === 'empleado') {
+    const anticipacion = diasEntre(hoyISO(), inicio);
+    if (anticipacion < PLAZO_VACACIONES_DIAS) {
+      showNotif(`⛔ Las vacaciones deben solicitarse con mínimo ${PLAZO_VACACIONES_DIAS} días calendario de anticipación. Faltan ${anticipacion} días para el inicio.`, 'error');
+      return;
+    }
+  }
   const dias = calcDias(inicio, fin);
   SC.vacaciones.push({
     id: 'v' + Date.now(),
@@ -2224,6 +2313,8 @@ function saveVacaciones() {
     inicio, fin, dias,
     obs: document.getElementById('vac-obs').value,
     estado: 'pendiente',
+    // Doble aprobación: primero el jefe directo, luego RRHH
+    vbJefe: null, vbJefePor: '', vbJefeFecha: '',
     fechaSolicitud: new Date().toLocaleDateString('es-CO'),
   });
   SC.currentDocContext = null;
@@ -2236,8 +2327,33 @@ function saveVacaciones() {
   else if (SC.currentView === 'portal') renderPortal(currentPortalTab);
 }
 
+// Paso 1: visto bueno del jefe directo (líder del área)
+function vistoBuenoVacJefe(id, aprueba) {
+  const v = SC.vacaciones.find(x => x.id === id);
+  if (!v) return;
+  if (!empVisibleParaUsuario(v.empId)) { showNotif('Solo puedes validar vacaciones de tu área', 'error'); return; }
+  if (v.empId === SC.user?.empId) { showNotif('No puedes dar visto bueno a tus propias vacaciones', 'error'); return; }
+  v.vbJefe      = !!aprueba;
+  v.vbJefePor   = SC.user?.name || '';
+  v.vbJefeFecha = hoyISO();
+  if (!aprueba) v.estado = 'rechazado';
+  sbSaveVac(v);
+  registrarAuditoria(aprueba?'visto_bueno':'objecion','vacaciones',id, v.vbJefePor);
+  showNotif(aprueba
+    ? '✅ Visto bueno registrado — pasa a Recursos Humanos para aprobación final'
+    : '❌ Solicitud objetada');
+  if (SC.currentView === 'vacaciones-admin') renderVacacionesAdmin();
+  else if (SC.currentView === 'empleado-detail') renderEmpTab('vacaciones');
+}
+window.vistoBuenoVacJefe = vistoBuenoVacJefe;
+
+// Paso 2: aprobación final de RRHH
 function cambiarEstadoVac(id, estado) {
   const v = SC.vacaciones.find(x => x.id === id);
+  if (v && !esRRHH()) { showNotif('La aprobación final de vacaciones la realiza Recursos Humanos', 'error'); return; }
+  if (v && estado === 'aprobado' && v.vbJefe !== true) {
+    showNotif('⛔ Falta el visto bueno del jefe directo antes de la aprobación de RRHH', 'error'); return;
+  }
   if (v && !empVisibleParaUsuario(v.empId)) { showNotif('No puedes gestionar vacaciones de otra área', 'error'); return; }
   if (v) {
     v.estado = estado;
@@ -3366,7 +3482,7 @@ function renderPermisosAdmin() {
         <td class="text-center">${p.dias}</td>
         <td class="text-sm" style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.motivo||'—'}</td>
         <td>${descLabel}</td>
-        <td>${statusBadge(p.status)}${p.aprobadoPorJefe?'<div style="font-size:10px;color:var(--blue)">👤 Aprobado por jefe directo</div>':''}${esPermisoMenor(p)&&p.status==='pendiente'?`<div style="font-size:10px;color:var(--text-muted)">⏱ &lt;${LIMITE_HORAS_JEFE}h · puede aprobar el jefe</div>`:''}</td>
+        <td>${statusBadge(p.status)} ${semaforoPlazo(p.inicio, p.status)}${p.aprobadoPorJefe?'<div style="font-size:10px;color:var(--blue)">👤 Aprobado por jefe directo</div>':''}${esPermisoMenor(p)&&p.status==='pendiente'?`<div style="font-size:10px;color:var(--text-muted)">⏱ &lt;${LIMITE_HORAS_JEFE}h · puede aprobar el jefe</div>`:''}</td>
         <td>
           <div class="flex gap-2">
             <button class="btn btn-primary btn-sm" onclick="openPermisoDetail('${p.id}')">👁️ Ver / Clasificar</button>
@@ -3605,20 +3721,24 @@ function savePermiso() {
   const horaRef  = esPorHoras ? horaI : '00:00';
   const permisoStart = new Date(fechaRef + 'T' + horaRef + ':00');
 
-  // 72-hour rule — ALL roles must comply, RRHH/admin bypass
+  // Anticipación mínima: 2 días antes del permiso (no aplica a RRHH/admin)
   const isEmp = SC.user?.role === 'empleado';
   const now = new Date();
   const diffHours = (permisoStart - now) / (1000*60*60);
+  const HORAS_MIN = PLAZO_PERMISO_DIAS * 24;
 
-  if (isEmp && diffHours < 72) {
-    // Show inline error in modal
+  if (isEmp && diffHours < HORAS_MIN) {
     const errEl = document.getElementById('perm-72h-error');
     if (errEl) {
-      const horasRestantes = Math.ceil(72 - diffHours);
-      errEl.textContent = `⛔ Faltan ${horasRestantes}h para cumplir las 72 horas mínimas. El permiso más temprano permitido es ${formatDatetime72h(now)}.`;
+      errEl.textContent = `⛔ Los permisos deben solicitarse con mínimo ${PLAZO_PERMISO_DIAS} días de anticipación.`;
       errEl.style.display = 'flex';
     }
-    showNotif('❌ No cumple con las 72 horas de anticipación.', 'error');
+    showNotif(`❌ Debes solicitarlo con ${PLAZO_PERMISO_DIAS} días de anticipación.`, 'error');
+    return;
+  }
+  // Formato de permiso firmado por empleado y jefe directo: obligatorio
+  if (!SC.pendingFile?.data) {
+    showNotif('⛔ Debes adjuntar el formato de permiso diligenciado y firmado por ti y tu jefe directo.', 'error');
     return;
   }
   // Hide error if passed
@@ -3800,14 +3920,27 @@ function saveIncapacidad() {
   const fecha   = document.getElementById('incap-fecha').value;
   if (!diag || !diasVal || !eps || !fecha) { showNotif('Completa todos los campos','error'); return; }
 
+  // Certificado (comprobante) siempre obligatorio
+  if (!SC.pendingFiles?.certificado) {
+    showNotif('⛔ Debes adjuntar el certificado de incapacidad.', 'error'); return;
+  }
   // AT: FURAT obligatorio
   if (esAT && !SC.pendingFiles?.furat) {
     showNotif('⚠️ Accidente de Trabajo requiere adjuntar el reporte FURAT a la ARL.', 'error'); return;
   }
-  // Enfermedad general > 3 días: epicrisis obligatoria
-  if (!esAT && diasVal > 3 && !SC.pendingFiles?.epicrisis) {
-    showNotif('⚠️ Incapacidades mayores a 3 días requieren adjuntar la epicrisis médica.', 'error'); return;
+  // Incapacidad mayor a 2 días: epicrisis obligatoria
+  if (diasVal > DIAS_EPICRISIS && !SC.pendingFiles?.epicrisis) {
+    showNotif(`⛔ Las incapacidades mayores a ${DIAS_EPICRISIS} días requieren adjuntar la epicrisis médica.`, 'error'); return;
   }
+  // Plazo de radicación: máx. 2 días después de finalizar
+  const fechaFinIncap = new Date(fecha); fechaFinIncap.setDate(fechaFinIncap.getDate() + diasVal - 1);
+  const finISO = fechaFinIncap.toISOString().split('T')[0];
+  const diasDesdeFin = diasEntre(finISO, hoyISO());
+  if (SC.user?.role === 'empleado' && diasDesdeFin > PLAZO_INCAP_DIAS) {
+    showNotif(`⛔ El plazo para radicar venció: la incapacidad terminó el ${finISO} y debía radicarse dentro de los ${PLAZO_INCAP_DIAS} días siguientes. Comunícate con Recursos Humanos.`, 'error');
+    return;
+  }
+  const fueraDePlazo = diasDesdeFin > PLAZO_INCAP_DIAS;
 
   const empIncap   = SC.empleados.find(x=>x.id===empId);
   const certData   = SC.pendingFiles?.certificado?.data||null;
@@ -3892,6 +4025,87 @@ function buildHistorialHtml(emp) {
   '</div>';
 }
 
+// Tarjetas de sueldo, primas legales y vacaciones para el portal del empleado
+function calcPrimaSemestre(emp, semestre) {
+  // Prima legal = (salario + auxilio transporte) × días trabajados del semestre / 360
+  const salario = parseFloat(emp.salario) || 0;
+  const aux     = emp.subsidioTransporte !== false && salario <= (SMLV_ACTUAL||1423500)*2 ? (AUX_TRANSPORTE||200000) : 0;
+  const base    = salario + aux;
+  const anio    = new Date().getFullYear();
+  const ini     = semestre === 1 ? `${anio}-01-01` : `${anio}-07-01`;
+  const fin     = semestre === 1 ? `${anio}-06-30` : `${anio}-12-31`;
+  const ingreso = emp.fechaIngreso || ini;
+  const desde   = ingreso > ini ? ingreso : ini;
+  const hoy     = hoyISO();
+  const hasta   = hoy < fin ? hoy : fin;
+  let dias = diasEntre(desde, hasta) + 1;
+  if (dias < 0) dias = 0;
+  if (dias > 180) dias = 180;
+
+  // Descontar novedades NO remuneradas del semestre (no computan para prima)
+  const TIPOS_NO_REMUNERADOS = ['licencia_no_remunerada','permiso_no_remunerado','suspension','ausencia_injustificada'];
+  let diasDescontados = 0;
+  const detalle = [];
+  SC.permisos.filter(p => p.empId === emp.id && p.status === 'aprobado'
+      && p.inicio >= desde && p.inicio <= hasta
+      && (TIPOS_NO_REMUNERADOS.includes(p.tipo) || p.descontable === 'si'))
+    .forEach(p => {
+      const d = p.esPorHoras ? 0 : (parseInt(p.dias) || 0);
+      if (d > 0) { diasDescontados += d; detalle.push(`${p.tipo.replace(/_/g,' ')}: ${d}d`); }
+    });
+  // Las suspensiones disciplinarias tampoco computan
+  SC.disciplinarios.filter(x => x.empId === emp.id && x.sancion === 'suspension'
+      && x.fechaSancion >= desde && x.fechaSancion <= hasta)
+    .forEach(x => { const d = parseInt(x.diasSuspension)||0; if (d>0) { diasDescontados += d; detalle.push(`suspensión: ${d}d`); } });
+
+  const diasNetos = Math.max(0, dias - diasDescontados);
+  return {
+    valor: Math.round(base * diasNetos / 360),
+    dias: diasNetos, diasBrutos: dias, diasDescontados, detalle, base,
+    pagoEn: semestre===1?'30 de junio':'20 de diciembre',
+  };
+}
+
+function buildTarjetasEconomicasEmp(emp) {
+  if (!emp) return '';
+  const salario = parseFloat(emp.salario) || 0;
+  const p1 = calcPrimaSemestre(emp, 1);
+  const p2 = calcPrimaSemestre(emp, 2);
+  const semActual = (new Date().getMonth() < 6) ? 1 : 2;
+  const vI = calcVacInfo(emp);
+  const money = n => '$' + (n||0).toLocaleString('es-CO');
+
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:18px">
+    <div class="glass-card p-4">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">💵 Mi salario base</div>
+      <div style="font-size:24px;font-weight:800;color:var(--navy);margin-top:4px">${money(salario)}</div>
+      <div style="font-size:11px;color:var(--text-muted)">Mensual${emp.subsidioTransporte!==false?' · con auxilio de transporte':''}</div>
+    </div>
+    <div class="glass-card p-4">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">🎁 Prima I semestre</div>
+      <div style="font-size:24px;font-weight:800;color:var(--green);margin-top:4px">${money(p1.valor)}</div>
+      <div style="font-size:11px;color:var(--text-muted)">${p1.dias} días · pago ${p1.pagoEn}${semActual===1?' <b>(en curso)</b>':''}</div>
+      ${p1.diasDescontados?`<div style="font-size:10px;color:var(--amber);margin-top:2px" title="${p1.detalle.join(' · ')}">−${p1.diasDescontados} días por novedades no remuneradas</div>`:''}
+    </div>
+    <div class="glass-card p-4">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">🎁 Prima II semestre</div>
+      <div style="font-size:24px;font-weight:800;color:var(--green);margin-top:4px">${money(p2.valor)}</div>
+      <div style="font-size:11px;color:var(--text-muted)">${p2.dias} días · pago ${p2.pagoEn}${semActual===2?' <b>(en curso)</b>':''}</div>
+      ${p2.diasDescontados?`<div style="font-size:10px;color:var(--amber);margin-top:2px" title="${p2.detalle.join(' · ')}">−${p2.diasDescontados} días por novedades no remuneradas</div>`:''}
+    </div>
+    <div class="glass-card p-4">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">🏖 Vacaciones disponibles</div>
+      <div style="font-size:24px;font-weight:800;color:${vI.diasDisponibles>0?'var(--blue)':'var(--amber)'};margin-top:4px">${vI.diasDisponibles} días</div>
+      <div style="font-size:11px;color:var(--text-muted)">${vI.diasCausados} causados · ${vI.diasTomados} tomados</div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--text-muted);margin:-10px 0 16px 2px">
+    Los valores de prima son estimados según días trabajados; el valor definitivo lo liquida Recursos Humanos.
+  </div>`;
+}
+window.buildTarjetasEconomicasEmp = buildTarjetasEconomicasEmp;
+window.calcPrimaSemestre = calcPrimaSemestre;
+
 function renderPortal(tab) {
   currentPortalTab = tab;
   document.querySelectorAll('#view-portal .tab').forEach(t => t.className = 'tab');
@@ -3916,6 +4130,7 @@ function renderPortal(tab) {
           <button class="btn btn-ghost btn-sm" onclick="openModal('modal-change-pass')">🔑 Cambiar Contraseña</button>
         </div>
       </div>
+      ${buildTarjetasEconomicasEmp(emp)}
       <div class="two-col">
         <div class="glass-card p-5">
           <div class="flex items-center gap-3 mb-5">
@@ -4094,6 +4309,10 @@ function renderPortal(tab) {
   }
   else if (tab === 'disciplinarios') {
     content.innerHTML = renderDiscPortal();
+  }
+  else if (tab === 'certificados') {
+    content.innerHTML = emp ? buildCertificadosHTML(emp)
+      : '<div class="text-muted text-sm p-4">No se encontró tu ficha de empleado.</div>';
   }
   else if (tab === 'bodega') {
     content.innerHTML = `<div class="section-header mb-4"><div class="section-title" style="font-size:16px">🗄 Bodega <span>Documental</span></div></div><div id="portal-bodega-content"></div>`;
@@ -4999,9 +5218,19 @@ function darVistoBuenoDisc(discId, aprobado) {
 function aprobarAperturaDisc(discId) {
   const disc = SC.disciplinarios.find(x => x.id === discId);
   if (!disc) return;
-  // Si requería visto bueno y está rechazado, avisar
+  // El empleado es de otra área: el líder de ESA área debe validar primero
   if (disc.requiereVistoBuenoLider && disc.vistoBuenolider === null) {
-    if (!confirm('⚠️ El líder del área del empleado aún no ha dado respuesta.\n¿Deseas abrir el proceso de todas formas?')) return;
+    showNotif('⛔ No se puede abrir el proceso: falta el visto bueno de ' +
+      (disc.liderOtraAreaNombre || 'el líder del área del empleado'), 'error');
+    return;
+  }
+  if (disc.requiereVistoBuenoLider && disc.vistoBuenolider === false) {
+    showNotif('⛔ El líder del área objetó esta solicitud. El proceso no puede abrirse.', 'error');
+    return;
+  }
+  if (!esRRHHoAdmin()) {
+    showNotif('Solo Recursos Humanos puede abrir formalmente un proceso disciplinario', 'error');
+    return;
   }
   if (!disc.etapas) disc.etapas = {};
   const hoy = new Date().toISOString().split('T')[0];
@@ -5015,6 +5244,7 @@ function aprobarAperturaDisc(discId) {
   disc.etapaActual = 'apertura';
   disc.estado      = 'en_proceso';
   sbSaveDisc(disc);
+  registrarAuditoria('apertura','disciplinario',discId,'Proceso abierto formalmente');
   syncToSheets('disciplinarios');
   showNotif('📂 Proceso abierto formalmente ✅ — Etapa 2 registrada');
   openDiscDetail(discId);
@@ -5080,12 +5310,35 @@ function avanzarEtapaDisc(discId) {
     completada:   true,
     fecha,
     responsable:  SC.user?.name || SC.user?.user || '',
+    rol:          SC.user?.roleName || SC.user?.role || '',
     notas,
     archivos,
   };
+  registrarAuditoria('etapa','disciplinario',discId, siguienteEtapa.label);
 
+  // Solo RRHH conduce el proceso una vez abierto
+  if (!esRRHHoAdmin()) {
+    showNotif('Solo Recursos Humanos puede avanzar las etapas del proceso', 'error');
+    return;
+  }
   // Acciones automáticas por etapa
-  if (siguienteEtapa.key === 'notificacion') disc.notificado = true;
+  if (siguienteEtapa.key === 'notificacion') {
+    if (!archivos.length && !notas) {
+      showNotif('⛔ La notificación al trabajador requiere constancia escrita: adjunta el documento o describe cómo se notificó', 'error');
+      return;
+    }
+    disc.notificado      = true;
+    disc.fechaNotificacion = fecha;
+    // Plazo legal mínimo de 5 días hábiles para descargos
+    const d5 = new Date(fecha); let habiles = 0;
+    while (habiles < 5) { d5.setDate(d5.getDate()+1); const dw = d5.getDay(); if (dw!==0 && dw!==6) habiles++; }
+    disc.fechaLimiteDescargos = d5.toISOString().split('T')[0];
+    registrarAuditoria('notificacion_empleado','disciplinario',discId,
+      `Notificado el ${fecha} · descargos hasta ${disc.fechaLimiteDescargos}`);
+  }
+  if (siguienteEtapa.key === 'descargos' && disc.fechaLimiteDescargos && fecha < disc.fechaLimiteDescargos) {
+    if (!confirm(`El trabajador tiene plazo hasta el ${disc.fechaLimiteDescargos} para presentar descargos (5 días hábiles).\n¿Continuar de todas formas?`)) return;
+  }
   if (siguienteEtapa.key === 'decision')     disc.estado = 'en_proceso';
   if (siguienteEtapa.key === 'impugnacion')  disc.estado = 'en_proceso';
 
@@ -6065,6 +6318,22 @@ function getHorarioEmp(empId) {
     descanso: 60, descripcion: '',
   };
 }
+// Los horarios ahora viven en Supabase, no solo en el navegador
+async function sbSaveHorario(empId, h) {
+  await sbFetch('horarios','POST',{
+    emp_id: empId,
+    tipo: h.tipo||'fijo',
+    dias_laborales: JSON.stringify(h.diasLaborales||[]),
+    entrada: h.entrada||'', salida: h.salida||'',
+    descanso: h.descanso||0, horas_semana: h.horasSemana||0,
+    descripcion: h.descripcion||'',
+    modificado_por: SC.user?.name||'', 
+    modificado_rol: SC.user?.roleName||SC.user?.role||'',
+    fecha: new Date().toISOString(),
+  },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+window.sbSaveHorario = sbSaveHorario;
+
 function saveHorarioLocal() {
   try { localStorage.setItem('sc_horarios', JSON.stringify(SC.horarios)); } catch(e) {}
 }
@@ -6167,8 +6436,12 @@ function toggleHorarioFields(empId) {
 }
 
 function saveHorario(empId) {
+  if (!puedeEditarEmpleado(empId)) {
+    showNotif('Solo puedes modificar horarios de empleados de tu área', 'error'); return;
+  }
   const tipo = document.getElementById('hor-tipo')?.value || 'fijo';
   const existing = getHorarioEmp(empId);
+  const anterior = existing ? `${existing.entrada||''}-${existing.salida||''} (${existing.tipo||''})` : 'sin horario';
   SC.horarios[empId] = {
     tipo,
     diasLaborales: existing.diasLaborales || ['L','M','X','J','V'],
@@ -6179,8 +6452,16 @@ function saveHorario(empId) {
     descripcion: document.getElementById('hor-descripcion')?.value|| '',
   };
   saveHorarioLocal();
-  showNotif('🕐 Horario guardado ✅');
+  const h = SC.horarios[empId];
   const emp = SC.empleados.find(e => e.id === empId);
+  // Notificar a RRHH: todo cambio de horario queda registrado en la base
+  const nuevo = `${h.entrada}-${h.salida} (${h.tipo})`;
+  sbSaveHorario(empId, h);
+  registrarAuditoria('cambio_horario','horario', empId,
+    `${emp?.name||empId}: ${anterior} → ${nuevo}`);
+  showNotif(esRRHHoAdmin()
+    ? '🕐 Horario guardado ✅'
+    : '🕐 Horario guardado ✅ — Recursos Humanos ha sido notificado del cambio');
   if (emp) renderHorarioEmp(emp, document.getElementById('emp-detail-content'));
 }
 
@@ -6246,8 +6527,10 @@ function renderDescuentos() {
 
   const tipoLabel = { prestamo:'💰 Préstamo', anticipo:'📅 Anticipo', deduccion:'📉 Deducción',
     descuento_voluntario:'✍️ Desc. Voluntario', libranza:'🏦 Libranza', otro:'📝 Otro' };
-  const estadoLabel = { pendiente_aprobacion:'⏳ Pendiente Aprobación', aprobado:'✅ Aprobado',
-    activo:'🔵 Activo', pagado:'✔️ Pagado', rechazado:'❌ Rechazado' };
+  const estadoLabel = {
+    solicitado:'⏳ Solicitado por empleado', pendiente_aprobacion:'⏳ Pendiente RRHH',
+    vb_financiera:'🏦 Espera visto bueno Financiera', por_validar:'📋 Falta validar cuotas (RRHH)',
+    aprobado:'✅ Aprobado', activo:'🔵 Activo', pagado:'✔️ Pagado', rechazado:'❌ Rechazado' };
 
   if (!lista.length) {
     el.innerHTML = '<div class="glass-card p-6 text-center text-muted">No hay descuentos registrados.</div>';
@@ -6270,12 +6553,26 @@ function renderDescuentos() {
             <td><span class="badge ${d.estado==='aprobado'||d.estado==='activo'?'badge-green':d.estado==='rechazado'?'badge-red':'badge-grey'}">${estadoLabel[d.estado]||d.estado}</span></td>
             <td class="text-sm text-muted">${d.fecha||'—'}</td>
             <td>
-              ${d.estado==='pendiente_aprobacion' && (SC.user?.role==='superadmin'||SC.user?.role==='gerencia')
-                ? `<button class="btn btn-ghost btn-sm" onclick="aprobarDescuento('${d.id}')">✅</button>
+              ${(d.estado==='solicitado'||d.estado==='pendiente_aprobacion') && esRRHH()
+                ? `<button class="btn btn-primary btn-sm" onclick="aprobarDescuento('${d.id}')">✅ Aprobar</button>
                    <button class="btn btn-danger btn-sm" onclick="rechazarDescuento('${d.id}')">❌</button>` : ''}
-              ${d.estado==='activo' && can('write')
+              ${d.estado==='vb_financiera' && esLiderFinanciera()
+                ? `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+                     <input type="file" id="comprobante-file-${d.id}" accept=".pdf,.jpg,.png" style="font-size:10px;max-width:150px">
+                     <button class="btn btn-primary btn-sm" onclick="vbFinancieraDescuento('${d.id}')">🏦 VB + Comprobante</button>
+                   </div>` : ''}
+              ${d.estado==='vb_financiera' && !esLiderFinanciera()
+                ? '<span class="text-xs text-muted">Espera al líder financiero</span>' : ''}
+              ${d.estado==='por_validar' && esRRHH()
+                ? `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+                     ${d.comprobante?.url?`<a href="${d.comprobante.url}" target="_blank" class="btn btn-ghost btn-sm">📄</a>`:''}
+                     <input type="number" id="val-cuotas-${d.id}" value="${d.cuotas||1}" min="1" style="width:55px;font-size:11px" title="Cuotas">
+                     <input type="text" id="val-desc-${d.id}" value="${(d.descripcion||'').replace(/"/g,'&quot;')}" style="width:130px;font-size:11px" title="Descripción">
+                     <button class="btn btn-primary btn-sm" onclick="validarCuotasDescuento('${d.id}')">✅ Validar</button>
+                   </div>` : ''}
+              ${d.estado==='activo' && esRRHH()
                 ? `<button class="btn btn-ghost btn-sm" onclick="registrarCuotaDesc('${d.id}')">💳 Cuota</button>` : ''}
-              ${can('write') ? `<button class="btn btn-ghost btn-sm" onclick="eliminarDescuento('${d.id}')">🗑</button>` : ''}
+              ${esRRHH() ? `<button class="btn btn-ghost btn-sm" onclick="eliminarDescuento('${d.id}')">🗑</button>` : ''}
             </td>
           </tr>`;
         }).join('')}
@@ -6366,8 +6663,10 @@ function saveDescuento() {
   const fecha = document.getElementById('desc-fecha').value;
   if (!empId||!monto||!desc||!fecha) { showNotif('Completa todos los campos','error'); return; }
 
-  const esPrestamo = tipo === 'prestamo' || tipo === 'libranza';
-  const estado = esPrestamo ? 'pendiente_aprobacion' : 'activo';
+  const esPrestamo = ['prestamo','libranza','adelanto','anticipo'].includes(tipo);
+  const esEmpleadoSol = SC.user?.role === 'empleado';
+  // El empleado solicita; RRHH y financiera completan el flujo
+  const estado = esEmpleadoSol ? 'solicitado' : (esPrestamo ? 'vb_financiera' : 'activo');
 
   SC.descuentos.push({
     id: 'd' + Date.now(),
@@ -6383,19 +6682,92 @@ function saveDescuento() {
   sbSaveDescuento(SC.descuentos[SC.descuentos.length-1]);
   registrarAuditoria('crear','descuento',SC.descuentos[SC.descuentos.length-1].id,`${tipo} · ${monto}`);
   closeModal('modal-descuento');
-  showNotif(esPrestamo ? '⏳ Préstamo registrado — pendiente de aprobación' : '💳 Descuento registrado ✅');
+  showNotif(esEmpleadoSol
+    ? '⏳ Solicitud enviada — Recursos Humanos la revisará'
+    : (esPrestamo ? '⏳ Registrado — pendiente de visto bueno del líder financiero' : '💳 Descuento registrado ✅'));
   if (SC.currentView === 'descuentos') renderDescuentos();
 }
+// ─── FLUJO DE PRÉSTAMOS Y ADELANTOS ──────────────────────────
+// 1. El empleado solicita          → estado: solicitado
+// 2. RRHH aprueba                  → estado: vb_financiera (espera al líder financiero)
+// 3. Líder financiera da VB y sube comprobante → estado: por_validar
+// 4. RRHH valida cuotas y detalle  → estado: activo
+const ESTADOS_PRESTAMO = {
+  solicitado:    { label:'Solicitado por el empleado',      color:'yellow' },
+  vb_financiera: { label:'Aprobado por RRHH · espera Financiera', color:'blue' },
+  por_validar:   { label:'Comprobante cargado · falta validar cuotas', color:'blue' },
+  activo:        { label:'Activo',                          color:'green' },
+  pagado:        { label:'Pagado',                          color:'green' },
+  rechazado:     { label:'Rechazado',                       color:'red' },
+};
+function esLiderFinanciera() {
+  return SC.user?.role === 'lider_area' && String(SC.user?.areaId) === '5';
+}
+window.esLiderFinanciera = esLiderFinanciera;
+
+// Paso 2 — RRHH aprueba la solicitud
 function aprobarDescuento(id) {
   const d = SC.descuentos.find(x=>x.id===id);
   if (!d) return;
-  d.estado = 'activo';
+  if (!esRRHH()) { showNotif('Solo Recursos Humanos aprueba préstamos y adelantos','error'); return; }
+  const esPrestamo = ['prestamo','libranza','adelanto','anticipo'].includes(d.tipo);
   d.aprobadoPor = SC.user?.name;
+  d.fechaAprobacionRH = hoyISO();
+  d.estado = esPrestamo ? 'vb_financiera' : 'activo';
   saveDescuentosLocal(); sbSaveDescuento(d);
-  registrarAuditoria('cambio_estado','descuento',id,'aprobado');
-  showNotif('✅ Préstamo aprobado');
+  registrarAuditoria('aprobar_rrhh','descuento',id, d.estado);
+  showNotif(esPrestamo
+    ? '✅ Aprobado por RRHH — pasa al líder financiero para visto bueno y comprobante'
+    : '✅ Descuento activo');
   renderDescuentos();
 }
+
+// Paso 3 — El líder financiero da visto bueno y adjunta el comprobante
+function vbFinancieraDescuento(id) {
+  const d = SC.descuentos.find(x=>x.id===id);
+  if (!d) return;
+  if (!esLiderFinanciera()) { showNotif('Solo el líder del área Financiera puede dar este visto bueno','error'); return; }
+  if (d.estado !== 'vb_financiera') { showNotif('Este préstamo aún no ha sido aprobado por RRHH','error'); return; }
+  const file = document.getElementById('comprobante-file-'+id)?.files?.[0];
+  if (!file) { showNotif('⛔ Debes adjuntar el comprobante de desembolso','error'); return; }
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const emp = SC.empleados.find(e=>e.id===d.empId);
+    const ref = await uploadToDrive(ev.target.result, file.name, 'prestamos', emp?.name||d.empId);
+    d.comprobante     = ref ? { name:file.name, driveId:ref, url:driveViewUrl(ref) } : { name:file.name, fileData:ev.target.result };
+    d.vbFinanciera    = true;
+    d.vbFinancieraPor = SC.user?.name || '';
+    d.fechaComprobante= hoyISO();
+    d.estado          = 'por_validar';
+    saveDescuentosLocal(); sbSaveDescuento(d);
+    registrarAuditoria('vb_financiera','descuento',id, file.name);
+    showNotif('✅ Visto bueno y comprobante registrados — RRHH validará las cuotas');
+    renderDescuentos();
+  };
+  reader.readAsDataURL(file);
+}
+window.vbFinancieraDescuento = vbFinancieraDescuento;
+
+// Paso 4 — RRHH valida cuotas, descripción y deducciones
+function validarCuotasDescuento(id) {
+  const d = SC.descuentos.find(x=>x.id===id);
+  if (!d) return;
+  if (!esRRHH()) { showNotif('Solo Recursos Humanos valida las cuotas','error'); return; }
+  const cuotas = parseInt(document.getElementById('val-cuotas-'+id)?.value)||d.cuotas;
+  const desc   = document.getElementById('val-desc-'+id)?.value?.trim() || d.descripcion;
+  if (cuotas < 1) { showNotif('Número de cuotas inválido','error'); return; }
+  d.cuotas      = cuotas;
+  d.descripcion = desc;
+  d.valorCuota  = Math.round((d.monto||0)/cuotas);
+  d.estado      = 'activo';
+  d.validadoPor = SC.user?.name || '';
+  d.fechaValidacion = hoyISO();
+  saveDescuentosLocal(); sbSaveDescuento(d);
+  registrarAuditoria('validar_cuotas','descuento',id, `${cuotas} cuotas de ${d.valorCuota}`);
+  showNotif('✅ Préstamo activo — ' + cuotas + ' cuotas de $' + d.valorCuota.toLocaleString('es-CO'));
+  renderDescuentos();
+}
+window.validarCuotasDescuento = validarCuotasDescuento;
 function rechazarDescuento(id) {
   const d = SC.descuentos.find(x=>x.id===id);
   if (!d) return;
@@ -6503,10 +6875,26 @@ function renderVacacionesAdmin() {
       </div>
       ${historial.length ? `
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--navy-border)">
-        ${historial.map(v => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0">
+        ${historial.map(v => {
+          let acciones = '';
+          if (v.estado === 'pendiente') {
+            if (v.vbJefe === null || v.vbJefe === undefined) {
+              acciones = (SC.user?.role==='lider_area' && v.empId!==SC.user?.empId)
+                ? `<button class="btn btn-primary btn-sm" onclick="vistoBuenoVacJefe('${v.id}',true)">✅ Visto bueno</button>
+                   <button class="btn btn-danger btn-sm" onclick="vistoBuenoVacJefe('${v.id}',false)">✗</button>`
+                : '<span class="badge badge-yellow">⏳ Espera visto bueno del jefe</span>';
+            } else if (v.vbJefe === true) {
+              acciones = esRRHH()
+                ? `<span class="badge badge-blue" title="Aprobado por ${v.vbJefePor}">✅ VB jefe</span>
+                   <button class="btn btn-primary btn-sm" onclick="cambiarEstadoVac('${v.id}','aprobado')">Aprobar</button>
+                   <button class="btn btn-danger btn-sm" onclick="cambiarEstadoVac('${v.id}','rechazado')">✗</button>`
+                : `<span class="badge badge-blue">✅ VB jefe · espera RRHH</span>`;
+            }
+          }
+          return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0;gap:8px;flex-wrap:wrap">
           <span style="color:var(--text-muted)">${v.inicio} → ${v.fin} (${v.dias}d)</span>
-          ${statusBadge(v.estado)}
-        </div>`).join('')}
+          <span style="display:flex;gap:6px;align-items:center">${statusBadge(v.estado)}${acciones}</span>
+        </div>`;}).join('')}
       </div>` : ''}
     </div>`;
   }).join('');
@@ -7919,63 +8307,65 @@ function renderPortalRetirado() {
   const el = document.getElementById('portal-retirado-content');
   if(!el) return;
 
+  const contratos = emp?.contratos||[];
+  const nomina    = emp?.nomina||[];
+  const docs      = emp?.docs||{};
+
   let html = `
     <div class="glass-card p-5 mb-4">
       <div class="flex items-center gap-4">
         <div class="emp-detail-avatar" style="width:60px;height:60px;font-size:22px;opacity:.7">${emp?.name?.[0]||'?'}</div>
         <div>
           <div style="font-family:var(--font-display);font-size:18px;font-weight:700;color:var(--navy)">${emp?.name||'—'}</div>
-          <div class="text-sm text-muted">${emp?.cargo||''} · ${emp?.fechaRetiro?'Fecha retiro: '+emp.fechaRetiro:''}</div>
+          <div class="text-sm text-muted">${emp?.cargo||''} · ${emp?.fechaRetiro?'Fecha de retiro: '+emp.fechaRetiro:''}</div>
           <span class="badge badge-red mt-1">Empleado Retirado</span>
         </div>
       </div>
     </div>
     <div class="readonly-banner mb-4">
-      🔒 Tu acceso está limitado. Solo puedes solicitar y descargar certificaciones, contratos y formatos de nómina.
-    </div>
-    <div class="section-title mb-4" style="font-size:16px">📋 Solicitar <span>Certificaciones</span></div>
-    <div class="three-col mb-5">`;
-
-  const certs = [
-    { id:'cert_laboral',  icon:'📄', name:'Certificado Laboral',         desc:'Constancia de tiempo trabajado y cargo' },
-    { id:'cert_salario',  icon:'💰', name:'Certificado de Ingresos',      desc:'Remuneraciones y deducciones' },
-    { id:'cert_reta',     icon:'📊', name:'Certificado de Retención',     desc:'Retención en la fuente del período fiscal' },
-    { id:'cert_pension',  icon:'🏦', name:'Certificado de Aportes',       desc:'Seguridad social y pensión' },
-    { id:'carta_retiro',  icon:'📨', name:'Carta de Retiro',              desc:'Documento formal de desvinculación' },
-    { id:'paz_salvo',     icon:'✅', name:'Paz y Salvo',                  desc:'Certificado de no deudas con la empresa' },
-  ];
-  certs.forEach(c=>{
-    const cert = emp?.certificaciones?.[c.id];
-    html+=`<div class="glass-card p-4" style="cursor:pointer" onclick="solicitarCert('${c.id}')">
-      <div style="font-size:28px;margin-bottom:8px">${c.icon}</div>
-      <div style="font-weight:600;font-size:13px;color:var(--navy);margin-bottom:4px">${c.name}</div>
-      <div class="text-xs text-muted mb-3">${c.desc}</div>
-      ${cert?.status==='emitido'
-        ? `<button class="btn btn-primary btn-sm full-w" onclick="event.stopPropagation();descargarCert('${c.id}')">⬇️ Descargar</button>`
-        : cert?.status==='solicitado'
-        ? `<span class="badge badge-amber">⏳ En proceso</span>`
-        : `<button class="btn btn-ghost btn-sm full-w">📤 Solicitar</button>`}
+      🔒 Acceso limitado: puedes consultar tus documentos, contratos y desprendibles de nómina, y solicitar certificaciones.
     </div>`;
-  });
-  html += `</div>`;
 
-  // Contratos y nómina disponibles
-  const contratos = emp?.contratos||[];
-  const nomina    = emp?.nomina||[];
+  html += buildCertificadosHTML(emp);
+
+  // Contratos y carta de terminación
   html += `<div class="two-col">
     <div>
       <div class="section-title mb-3" style="font-size:15px">📄 Mis <span>Contratos</span></div>`;
-  if(!contratos.length){ html+='<div class="text-muted text-sm">No hay contratos disponibles.</div>'; }
+  if(!contratos.length){ html+='<div class="text-muted text-sm mb-3">No hay contratos disponibles. Solicítalos a Recursos Humanos.</div>'; }
   contratos.forEach((c,i)=>{
-    html+=`<div class="doc-item ok"><div class="doc-icon">📄</div><div class="doc-info"><div class="doc-name">${c.nombre}</div><div class="doc-meta">${c.fecha}</div></div>${c.fileData?`<button class="btn btn-ghost btn-sm" onclick="viewDocFromList('${emp.id}','contratos',${i})">👁️</button>`:''}`;
+    const url = c.driveUrl || (c.driveId ? driveViewUrl(c.driveId) : null);
+    html+=`<div class="doc-item ok"><div class="doc-icon">📄</div><div class="doc-info"><div class="doc-name">${c.nombre||'Contrato'}</div><div class="doc-meta">${c.fecha||''}</div></div>${
+      url ? `<a href="${url}" target="_blank" class="btn btn-ghost btn-sm">👁️ Ver</a>`
+          : c.fileData ? `<button class="btn btn-ghost btn-sm" onclick="viewDocFromList('${emp.id}','contratos',${i})">👁️ Ver</button>` : ''}</div>`;
   });
   html+=`</div><div>
-    <div class="section-title mb-3" style="font-size:15px">💰 Mis <span>Nóminas</span></div>`;
-  if(!nomina.length){ html+='<div class="text-muted text-sm">No hay formatos disponibles.</div>'; }
+    <div class="section-title mb-3" style="font-size:15px">💰 Mis <span>Desprendibles de Nómina</span></div>`;
+  if(!nomina.length){ html+='<div class="text-muted text-sm mb-3">No hay desprendibles disponibles.</div>'; }
   nomina.forEach((n,i)=>{
-    html+=`<div class="doc-item ok"><div class="doc-icon">💰</div><div class="doc-info"><div class="doc-name">${n.nombre}</div><div class="doc-meta">${n.fecha}</div></div>${n.fileData?`<button class="btn btn-ghost btn-sm" onclick="viewDocFromList('${emp.id}','nomina',${i})">👁️</button>`:''}`;
+    const url = n.driveUrl || (n.driveId ? driveViewUrl(n.driveId) : null);
+    html+=`<div class="doc-item ok"><div class="doc-icon">💰</div><div class="doc-info"><div class="doc-name">${n.nombre||'Nómina'}</div><div class="doc-meta">${n.fecha||''}</div></div>${
+      url ? `<a href="${url}" target="_blank" class="btn btn-ghost btn-sm">👁️ Ver</a>`
+          : n.fileData ? `<button class="btn btn-ghost btn-sm" onclick="viewDocFromList('${emp.id}','nomina',${i})">👁️ Ver</button>` : ''}</div>`;
   });
   html+=`</div></div>`;
+
+  // Sus propios documentos de la carpeta de vida
+  html += `<div class="section-title mb-3 mt-4" style="font-size:15px">📁 Mis <span>Documentos</span></div>`;
+  const propios = TIPOS_DOC_EMPLEADO.filter(t => docs[t.id]);
+  if (!propios.length) {
+    html += '<div class="text-muted text-sm">No hay documentos disponibles en tu carpeta.</div>';
+  } else {
+    propios.forEach(t => {
+      const d = docs[t.id];
+      const url = d.driveUrl || (d.driveFileId ? driveViewUrl(d.driveFileId) : null);
+      html += `<div class="doc-item ok"><div class="doc-icon">${d.aprobado?'✅':'📄'}</div>
+        <div class="doc-info"><div class="doc-name">${t.name}</div>
+        <div class="doc-meta">${d.fecha||''} · ${d.fileName||''}</div></div>${
+        url ? `<a href="${url}" target="_blank" class="btn btn-ghost btn-sm">👁️ Ver</a>`
+            : d.fileData ? `<button class="btn btn-ghost btn-sm" onclick="viewDocFile('${emp.id}','${t.id}')">👁️ Ver</button>` : ''}</div>`;
+    });
+  }
   el.innerHTML = html;
 }
 
@@ -10124,3 +10514,185 @@ window.authCerrarSesion    = authCerrarSesion;
 window.authCambiarPassword = authCambiarPassword;
 window.crearCuentaEmpleado = crearCuentaEmpleado;
 window.restaurarSesionAuth = restaurarSesionAuth;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: SOLICITUD DE CERTIFICADOS
+// Disponible para empleados activos y retirados. Toda solicitud
+// queda registrada en Supabase para que RRHH la gestione.
+// ═══════════════════════════════════════════════════════════════
+
+const TIPOS_CERTIFICADO = [
+  { id:'cert_laboral',   icon:'📄', name:'Certificado Laboral',        desc:'Constancia de cargo, salario y tiempo trabajado', activos:true,  retirados:true },
+  { id:'cert_ingresos',  icon:'💰', name:'Certificado de Ingresos',    desc:'Ingresos y retenciones del período',             activos:true,  retirados:true },
+  { id:'paz_salvo',      icon:'✅', name:'Paz y Salvo',                desc:'Constancia de no tener deudas con la empresa',   activos:true,  retirados:true },
+  { id:'cert_reta',      icon:'📊', name:'Certificado de Retención',   desc:'Retención en la fuente del período fiscal',      activos:true,  retirados:true },
+  { id:'cert_aportes',   icon:'🏦', name:'Certificado de Aportes',     desc:'Seguridad social y pensión',                     activos:true,  retirados:true },
+  { id:'carta_retiro',   icon:'📨', name:'Carta de Terminación',       desc:'Documento formal de finalización del contrato',  activos:false, retirados:true },
+];
+
+function dbToSolCert(r) {
+  return { id:r.id, empId:r.emp_id, tipo:r.tipo, estado:r.estado||'solicitado',
+    motivo:r.motivo||'', dirigidoA:r.dirigido_a||'', fecha:r.fecha||'',
+    emitidoPor:r.emitido_por||'', fechaEmision:r.fecha_emision||'',
+    archivoUrl:r.archivo_url||null, archivoNombre:r.archivo_nombre||'' };
+}
+async function sbSaveSolCert(s) {
+  await sbFetch('solicitudes_certificados','POST',{
+    id:s.id, emp_id:s.empId, tipo:s.tipo, estado:s.estado, motivo:s.motivo||'',
+    dirigido_a:s.dirigidoA||'', fecha:s.fecha||'', emitido_por:s.emitidoPor||'',
+    fecha_emision:s.fechaEmision||'', archivo_url:s.archivoUrl||null,
+    archivo_nombre:s.archivoNombre||'',
+  },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+
+// ─── El empleado solicita ────────────────────────────────────
+function solicitarCertificado(tipoId) {
+  const empId = SC.user?.empId;
+  if (!empId) { showNotif('No se encontró tu ficha de empleado','error'); return; }
+  const t = TIPOS_CERTIFICADO.find(x => x.id === tipoId);
+  const yaPendiente = SC.solicitudesCert?.some(s =>
+    s.empId === empId && s.tipo === tipoId && s.estado === 'solicitado');
+  if (yaPendiente) { showNotif('Ya tienes una solicitud pendiente de este certificado','error'); return; }
+
+  SC._certPendiente = tipoId;
+  const tl = document.getElementById('sc-cert-titulo');
+  if (tl) tl.textContent = (t?.icon||'') + ' ' + (t?.name||'Certificado');
+  const dg = document.getElementById('sc-cert-dirigido'); if (dg) dg.value = '';
+  const mt = document.getElementById('sc-cert-motivo');   if (mt) mt.value = '';
+  openModal('modal-solicitar-cert');
+}
+
+function enviarSolicitudCert() {
+  const tipoId = SC._certPendiente;
+  const empId  = SC.user?.empId;
+  if (!tipoId || !empId) return;
+  const s = {
+    id: 'sc' + Date.now(), empId, tipo: tipoId, estado: 'solicitado',
+    dirigidoA: document.getElementById('sc-cert-dirigido')?.value?.trim() || 'A quien interese',
+    motivo:    document.getElementById('sc-cert-motivo')?.value?.trim() || '',
+    fecha: hoyISO(), emitidoPor:'', fechaEmision:'', archivoUrl:null, archivoNombre:'',
+  };
+  if (!SC.solicitudesCert) SC.solicitudesCert = [];
+  SC.solicitudesCert.push(s);
+  sbSaveSolCert(s);
+  registrarAuditoria('solicitar','certificado', s.id,
+    TIPOS_CERTIFICADO.find(x=>x.id===tipoId)?.name || tipoId);
+  closeModal('modal-solicitar-cert');
+  showNotif('📄 Solicitud enviada — Recursos Humanos la gestionará');
+  if (SC.currentView === 'portal-retirado') renderPortalRetirado();
+  else renderPortal(currentPortalTab || 'certificados');
+}
+
+// ─── RRHH emite el certificado ───────────────────────────────
+function emitirCertificado(solId) {
+  if (!esRRHH()) { showNotif('Solo Recursos Humanos emite certificados','error'); return; }
+  const s = SC.solicitudesCert?.find(x => x.id === solId);
+  if (!s) return;
+  const file = document.getElementById('cert-file-'+solId)?.files?.[0];
+  if (!file) { showNotif('Adjunta el certificado firmado','error'); return; }
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const emp = SC.empleados.find(e => e.id === s.empId);
+    const ref = await uploadToDrive(ev.target.result, file.name, 'certificados', emp?.name || s.empId);
+    s.archivoUrl    = ref ? driveViewUrl(ref) : null;
+    s.archivoNombre = file.name;
+    s.estado        = 'emitido';
+    s.emitidoPor    = SC.user?.name || '';
+    s.fechaEmision  = hoyISO();
+    await sbSaveSolCert(s);
+    registrarAuditoria('emitir','certificado', solId, file.name);
+    showNotif('✅ Certificado emitido — el empleado ya puede descargarlo');
+    renderSolicitudesCert();
+  };
+  reader.readAsDataURL(file);
+}
+
+function rechazarSolCert(solId) {
+  if (!esRRHH()) return;
+  const s = SC.solicitudesCert?.find(x => x.id === solId);
+  if (!s) return;
+  s.estado = 'rechazado';
+  s.emitidoPor = SC.user?.name || '';
+  sbSaveSolCert(s);
+  registrarAuditoria('rechazar','certificado', solId, '');
+  renderSolicitudesCert();
+}
+
+// ─── Panel de RRHH ───────────────────────────────────────────
+function renderSolicitudesCert() {
+  const el = document.getElementById('solicitudes-cert-content');
+  if (!el) return;
+  const lista = (SC.solicitudesCert || []).slice()
+    .sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''));
+  const pend = lista.filter(s => s.estado === 'solicitado');
+
+  if (!lista.length) {
+    el.innerHTML = '<div class="glass-card p-6 text-center text-muted">No hay solicitudes de certificados.</div>';
+    return;
+  }
+  el.innerHTML = `
+    ${pend.length ? `<div style="background:rgba(245,158,11,.1);border-left:3px solid var(--amber);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px">
+      ⏳ Tienes <b>${pend.length}</b> solicitud(es) de certificado pendientes por emitir.</div>` : ''}
+    <div class="glass-card p-4"><div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Empleado</th><th>Certificado</th><th>Dirigido a</th><th>Motivo</th><th>Solicitado</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>${lista.map(s => {
+        const emp = SC.empleados.find(e => e.id === s.empId);
+        const t   = TIPOS_CERTIFICADO.find(x => x.id === s.tipo);
+        return `<tr>
+          <td style="font-weight:600">${emp?.name || '—'}${emp?.status==='retirado'?' <span class="badge badge-red" style="font-size:9px">Retirado</span>':''}</td>
+          <td>${t?.icon || ''} ${t?.name || s.tipo}</td>
+          <td class="text-sm">${s.dirigidoA || '—'}</td>
+          <td class="text-sm text-muted">${s.motivo || '—'}</td>
+          <td class="text-sm text-muted">${s.fecha || '—'}</td>
+          <td><span class="badge ${s.estado==='emitido'?'badge-green':s.estado==='rechazado'?'badge-red':'badge-yellow'}">${
+            s.estado==='emitido' ? '✅ Emitido' : s.estado==='rechazado' ? '❌ Rechazado' : '⏳ Pendiente'}</span></td>
+          <td>${s.estado === 'solicitado' && esRRHH()
+            ? `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+                 <input type="file" id="cert-file-${s.id}" accept=".pdf" style="font-size:10px;max-width:130px">
+                 <button class="btn btn-primary btn-sm" onclick="emitirCertificado('${s.id}')">📤 Emitir</button>
+                 <button class="btn btn-danger btn-sm" onclick="rechazarSolCert('${s.id}')">✗</button>
+               </div>`
+            : s.archivoUrl ? `<a href="${s.archivoUrl}" target="_blank" class="btn btn-ghost btn-sm">⬇ Ver</a>` : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div></div>`;
+}
+
+// ─── Tarjetas de certificados para el portal ─────────────────
+function buildCertificadosHTML(emp) {
+  const retirado = emp?.status === 'retirado';
+  const disponibles = TIPOS_CERTIFICADO.filter(t => retirado ? t.retirados : t.activos);
+  const mias = (SC.solicitudesCert || []).filter(s => s.empId === emp?.id);
+
+  return `<div class="section-title mb-3" style="font-size:15px">📄 Solicitar <span>Certificados</span></div>
+  <div class="three-col mb-5">
+    ${disponibles.map(c => {
+      const ultima = mias.filter(s => s.tipo === c.id)
+        .sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''))[0];
+      let accion;
+      if (ultima?.estado === 'emitido' && ultima.archivoUrl) {
+        accion = `<a href="${ultima.archivoUrl}" target="_blank" class="btn btn-primary btn-sm full-w">⬇️ Descargar</a>`;
+      } else if (ultima?.estado === 'solicitado') {
+        accion = `<span class="badge badge-yellow">⏳ En proceso desde ${ultima.fecha}</span>`;
+      } else {
+        accion = `<button class="btn btn-ghost btn-sm full-w" onclick="solicitarCertificado('${c.id}')">📤 Solicitar</button>`;
+      }
+      return `<div class="glass-card p-4">
+        <div style="font-size:28px;margin-bottom:8px">${c.icon}</div>
+        <div style="font-weight:600;font-size:13px;color:var(--navy);margin-bottom:4px">${c.name}</div>
+        <div class="text-xs text-muted mb-3">${c.desc}</div>
+        ${accion}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+window.TIPOS_CERTIFICADO      = TIPOS_CERTIFICADO;
+window.solicitarCertificado   = solicitarCertificado;
+window.enviarSolicitudCert    = enviarSolicitudCert;
+window.emitirCertificado      = emitirCertificado;
+window.rechazarSolCert        = rechazarSolCert;
+window.renderSolicitudesCert  = renderSolicitudesCert;
+window.buildCertificadosHTML  = buildCertificadosHTML;
+window.dbToSolCert            = dbToSolCert;

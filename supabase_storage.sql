@@ -27,3 +27,38 @@ create policy "app_read_docs" on storage.objects
 
 -- Verificar:
 -- select id, public from storage.buckets;
+
+-- ─── TABLA DE HORARIOS (antes solo en el navegador) ──────────
+create table if not exists public.horarios (
+  emp_id         text primary key,
+  tipo           text default 'fijo',
+  dias_laborales text default '[]',
+  entrada        text default '',
+  salida         text default '',
+  descanso       int default 0,
+  horas_semana   int default 0,
+  descripcion    text default '',
+  modificado_por text default '',
+  modificado_rol text default '',
+  fecha          timestamptz default now()
+);
+alter table public.horarios disable row level security;
+select pg_notify('pgrst', 'reload schema');
+
+-- ─── SOLICITUDES DE CERTIFICADOS ─────────────────────────────
+create table if not exists public.solicitudes_certificados (
+  id             text primary key,
+  emp_id         text,
+  tipo           text,
+  estado         text default 'solicitado',
+  motivo         text default '',
+  dirigido_a     text default '',
+  fecha          text default '',
+  emitido_por    text default '',
+  fecha_emision  text default '',
+  archivo_url    text,
+  archivo_nombre text default '',
+  created_at     timestamptz default now()
+);
+alter table public.solicitudes_certificados disable row level security;
+select pg_notify('pgrst', 'reload schema');
