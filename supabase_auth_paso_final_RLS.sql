@@ -26,7 +26,7 @@ $$ select emp_id from public.perfiles where user_id = auth.uid() and coalesce(ac
 
 create or replace function public.fn_es_rrhh() returns boolean
   language sql stable security definer set search_path = public as
-$$ select public.fn_rol() in ('superadmin','analista_rrhh') $$;
+$$ select public.fn_rol() in ('superadmin','analista_rrhh','juridico') $$;
 
 create or replace function public.fn_lee_todo() returns boolean
   language sql stable security definer set search_path = public as
@@ -160,6 +160,10 @@ create policy "den_sel" on public.denuncias for select using (
   public.fn_rol() in ('superadmin','analista_rrhh','gerencia','juridico') or emp_id = public.fn_emp()
 );
 create policy "den_ins" on public.denuncias for insert with check (auth.uid() is not null);
+drop policy if exists "den_wri" on public.denuncias;
+create policy "den_wri" on public.denuncias for update using (
+  public.fn_rol() in ('superadmin','analista_rrhh','juridico','gerencia')
+);
 
 -- Auditoría: cualquiera inserta; solo superadmin/gerencia/jurídica leen
 drop policy if exists "aud_sel" on public.auditoria;

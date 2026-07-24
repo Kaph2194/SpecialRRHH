@@ -1011,7 +1011,7 @@ function startApp() {
 
 function can(action) {
   if (!SC.user) return false;
-  if (SC.user.role === 'gerencia' || SC.user.role === 'lider_rrhh' || SC.user.role === 'juridico') return false;
+  if (SC.user.role === 'gerencia' || SC.user.role === 'lider_rrhh') return false;
   // lider_area solo puede escribir novedades/permisos de su área
   if (SC.user.role === 'lider_area') return action === 'write' ? true : false;
   return SC.user.canWrite;
@@ -1021,7 +1021,7 @@ function can(action) {
 // Regla de negocio: SOLO Recursos Humanos aprueba o rechaza.
 // El líder de área los ve (para planear su equipo) pero NO decide.
 function esRRHH() {
-  return ['superadmin','analista_rrhh'].includes(SC.user?.role);
+  return ['superadmin','analista_rrhh','juridico'].includes(SC.user?.role);
 }
 window.esRRHH = esRRHH;
 
@@ -1082,7 +1082,7 @@ const CAMPOS_SOLO_RRHH = ['name','cedula','email','phone','dir','fechaIngreso',
   'tipoCuenta','subsidioTransporte','dotacion','fechaRetiro'];
 
 function esRRHHoAdmin() {
-  return ['superadmin','analista_rrhh'].includes(SC.user?.role);
+  return ['superadmin','analista_rrhh','juridico'].includes(SC.user?.role);
 }
 // El líder de HSEQ (área 14) NO gestiona personal: solo su portal de
 // empleado y la carga de documentos a la bodega documental.
@@ -10606,7 +10606,7 @@ async function cargarPerfil() {
     name:     p.nombre || SC.empleados.find(e => e.id === empId)?.name || 'Usuario',
     role:     p.rol,
     roleName: NOMBRE_ROL[p.rol] || p.rol,
-    canWrite: !['gerencia','juridico','lider_rrhh'].includes(p.rol),
+    canWrite: !['gerencia','lider_rrhh'].includes(p.rol),
     areaId:   p.area_id || null,
     empId:    empId || null,
     cedula:   p.cedula || '',
