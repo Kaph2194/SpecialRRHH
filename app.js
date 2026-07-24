@@ -1267,6 +1267,10 @@ function showView(viewId) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const el = document.getElementById(`view-${viewId}`);
   if (el) { el.classList.add('active'); SC.currentView = viewId; }
+  // Volver el scroll al tope para que el contenido no aparezca corrido hacia abajo
+  const ca = document.getElementById('content-area');
+  if (ca) ca.scrollTop = 0;
+  window.scrollTo(0, 0);
   setActiveNav(viewId);
   const titles = VIEW_TITLES[viewId] || [viewId, ''];
   document.getElementById('topbar-title').textContent = titles[0];
@@ -8197,7 +8201,7 @@ function renderDenunciasAdmin() {
   const pendientes = lista.filter(d=>d.estado==='pendiente').length;
 
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px;width:100%">
       <div class="stat-card"><div class="stat-label">Total Reportes</div><div class="stat-value">${lista.length}</div></div>
       <div class="stat-card"><div class="stat-label">⏳ Pendientes</div><div class="stat-value" style="color:var(--amber)">${pendientes}</div></div>
       <div class="stat-card"><div class="stat-label">🔍 En Revisión</div><div class="stat-value">${lista.filter(d=>d.estado==='en_proceso').length}</div></div>
