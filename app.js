@@ -3582,10 +3582,11 @@ function openPermisoDetail(id) {
   const el  = document.getElementById('permiso-detail-body');
 
   // Calcular duración total como número para los campos de split
+  // Para permisos por horas, calcular desde las horas reales (no depender de p.dias)
   const durTotal = p.esPorHoras
-    ? parseFloat(p.dias) || 0
+    ? (parseFloat(calcHoras(p.horaInicio, p.horaFin)) || parseFloat(p.dias) || 0)
     : parseInt(p.dias) || calcDias(p.inicio, p.fin);
-  const durLabel = p.esPorHoras ? (durTotal + ' horas') : (durTotal + ' día(s)');
+  const durLabel = p.esPorHoras ? (durTotal + ' hora(s)') : (durTotal + ' día(s)');
 
   // Split guardado
   const dDesc = parseInt(p.diasDescontables ?? (p.descontable==='si' ? durTotal : p.descontable==='no' ? 0 : ''));
@@ -3628,7 +3629,7 @@ function openPermisoDetail(id) {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
         <div>
-          <label class="form-label" style="color:var(--red)">Días / Horas Descontables</label>
+          <label class="form-label" style="color:var(--red)">${p.esPorHoras?'Horas':'Días'} Descontables</label>
           <input class="form-input" type="number" id="pd-desc" min="0" max="${durTotal}"
             value="${isNaN(dDesc)?'':dDesc}"
             placeholder="0"
@@ -3636,7 +3637,7 @@ function openPermisoDetail(id) {
           <div class="text-xs text-muted mt-1">Se descuentan de nómina</div>
         </div>
         <div>
-          <label class="form-label" style="color:var(--green)">Días / Horas NO Descontables</label>
+          <label class="form-label" style="color:var(--green)">${p.esPorHoras?'Horas':'Días'} NO Descontables</label>
           <input class="form-input" type="number" id="pd-nodesc" min="0" max="${durTotal}"
             value="${isNaN(dNoDe)?'':dNoDe}"
             placeholder="0"
@@ -3645,6 +3646,15 @@ function openPermisoDetail(id) {
         </div>
       </div>
       <div id="pd-aviso" class="info-box text-xs mb-3" style="display:none"></div>
+      <div style="margin-bottom:12px">
+        <label class="form-label">Tratamiento en Nómina</label>
+        <select class="form-select" id="pd-tratamiento">
+          <option value="descuento"${p.tratamiento==='descuento'?' selected':''}>💸 Se descuenta de nómina</option>
+          <option value="compensacion"${p.tratamiento==='compensacion'?' selected':''}>🔄 Se repone el tiempo</option>
+          <option value="remunerado"${p.tratamiento==='remunerado'?' selected':''}>✅ Remunerado (no descuenta)</option>
+          <option value="pendiente"${(!p.tratamiento||p.tratamiento==='pendiente')?' selected':''}>⏳ Pendiente de definir</option>
+        </select>
+      </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
         💡 La suma de descontables + no descontables debe ser igual a la duración total (${durLabel})
       </div>
@@ -3717,9 +3727,13 @@ function guardarClasificacionPermiso(id) {
   if (!p) return;
   const d  = parseInt(document.getElementById('pd-desc')?.value)   ?? null;
   const nd = parseInt(document.getElementById('pd-nodesc')?.value) ?? null;
+  const trat = document.getElementById('pd-tratamiento')?.value;
   p.diasDescontables   = isNaN(d)  ? null : d;
   p.diasNoDescontables = isNaN(nd) ? null : nd;
   p.descontable = d > 0 && nd === 0 ? 'si' : d === 0 && nd > 0 ? 'no' : 'mixto';
+  if (trat) p.tratamiento = trat;
+  sbSavePermiso(p);
+  registrarAuditoria('clasificar','permiso', id, `${p.tratamiento} · desc ${p.diasDescontables||0}`);
   showNotif('Clasificación guardada ✅');
   openPermisoDetail(id);
   renderPermisosAdmin();
