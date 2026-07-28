@@ -568,6 +568,8 @@ function dbToPerm(r) {
     horaInicio: r.hora_inicio||null, horaFin: r.hora_fin||null,
     diasDescontables: r.dias_descontables, diasNoDescontables: r.dias_no_descontables,
     descontable: r.descontable||'pendiente',
+    tratamiento: r.tratamiento||'pendiente', esLicencia: r.es_licencia||false,
+    aprobadoPor: r.aprobado_por||null, aprobadoPorJefe: r.aprobado_por_jefe||false,
     motivo: r.motivo||'', status: r.status||'pendiente',
     fileName: r.file_name||null, fileData: null, fileUrl: r.file_url||null,
     fecha: r.fecha||'', fechaHora: r.fecha_hora||'',
@@ -696,6 +698,10 @@ async function sbSavePermiso(p) {
     hora_inicio:p.horaInicio||null, hora_fin:p.horaFin||null,
     dias_descontables:p.diasDescontables??null, dias_no_descontables:p.diasNoDescontables??null,
     descontable:p.descontable||'pendiente', motivo:p.motivo||'',
+    tratamiento:p.tratamiento||'pendiente', es_licencia:p.esLicencia||false,
+    aprobado_por:p.aprobadoPor||null, aprobado_por_rol:p.aprobadoPorRol||null,
+    aprobado_por_jefe:p.aprobadoPorJefe||false, notificado_rrhh:p.notificadoRRHH||false,
+    fecha_decision:p.fechaDecision||null,
     status:p.status||'pendiente', file_name:p.fileName||null,
     file_url:p.fileUrl||null,
     fecha:p.fecha||'', fecha_hora:p.fechaHora||'',
@@ -2306,6 +2312,9 @@ function renderEmpVacaciones(emp, container) {
           <div class="flex gap-2 items-center">
             ${statusBadge(v.estado)}
             ${canAct && v.estado!=='disfrutado' ? `<button class="btn btn-ghost btn-sm" onclick="cambiarEstadoVac('${v.id}','disfrutado')">✓ Marcar disfrutado</button>` : ''}
+            ${canAct && esRRHH() && v.estado==='disfrutado' ? `<button class="btn btn-ghost btn-sm" onclick="revertirVacaciones('${v.id}')" title="Volver a pendiente">↩️ Revertir</button>` : ''}
+            ${canAct && esRRHH() ? `<button class="btn btn-ghost btn-sm" onclick="editarDiasVacaciones('${v.id}')" title="Corregir fechas/días">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="eliminarVacaciones('${v.id}')" title="Eliminar registro">🗑</button>` : ''}
           </div>
         </div>`).join('') : `<div class="text-xs text-muted" style="border-top:1px solid var(--surface);padding-top:8px">Sin vacaciones registradas en este período.</div>`}
     </div>`;
@@ -2403,19 +2412,64 @@ window.vistoBuenoVacJefe = vistoBuenoVacJefe;
 function cambiarEstadoVac(id, estado) {
   const v = SC.vacaciones.find(x => x.id === id);
   if (v && !esRRHH()) { showNotif('La aprobación final de vacaciones la realiza Recursos Humanos', 'error'); return; }
-  if (v && estado === 'aprobado' && v.vbJefe !== true) {
-    showNotif('⛔ Falta el visto bueno del jefe directo antes de la aprobación de RRHH', 'error'); return;
-  }
   if (v && !empVisibleParaUsuario(v.empId)) { showNotif('No puedes gestionar vacaciones de otra área', 'error'); return; }
   if (v) {
     v.estado = estado;
     sbSaveVac(v);
     registrarAuditoria('cambio_estado','vacaciones',id,estado);
-    syncToSheets('vacaciones');
     showNotif('Estado actualizado ✅');
   }
   renderEmpTab('vacaciones');
 }
+window.cambiarEstadoVac = cambiarEstadoVac;
+
+// Revertir un período disfrutado (RRHH corrige un error de registro)
+function revertirVacaciones(id) {
+  if (!esRRHH()) { showNotif('Solo Recursos Humanos puede revertir vacaciones', 'error'); return; }
+  const v = SC.vacaciones.find(x => x.id === id);
+  if (!v) return;
+  if (!confirm(`¿Revertir el período ${v.inicio} → ${v.fin} (${v.dias} días)?\nVolverá a estado pendiente y los días dejarán de contar como tomados.`)) return;
+  v.estado = 'pendiente';
+  sbSaveVac(v);
+  registrarAuditoria('revertir','vacaciones', id, `${v.inicio}→${v.fin}`);
+  showNotif('↩️ Período revertido a pendiente');
+  renderEmpTab('vacaciones');
+}
+window.revertirVacaciones = revertirVacaciones;
+
+// Corregir las fechas/días de un período mal registrado
+function editarDiasVacaciones(id) {
+  if (!esRRHH()) { showNotif('Solo Recursos Humanos puede corregir vacaciones', 'error'); return; }
+  const v = SC.vacaciones.find(x => x.id === id);
+  if (!v) return;
+  const nuevoIni = prompt('Fecha de inicio (AAAA-MM-DD):', v.inicio);
+  if (nuevoIni === null) return;
+  const nuevoFin = prompt('Fecha de fin (AAAA-MM-DD):', v.fin);
+  if (nuevoFin === null) return;
+  const dias = calcDias(nuevoIni, nuevoFin);
+  if (isNaN(dias) || dias < 1) { showNotif('Fechas inválidas', 'error'); return; }
+  const antes = `${v.inicio}→${v.fin} (${v.dias}d)`;
+  v.inicio = nuevoIni; v.fin = nuevoFin; v.dias = dias;
+  sbSaveVac(v);
+  registrarAuditoria('editar','vacaciones', id, `${antes} → ${nuevoIni}→${nuevoFin} (${dias}d)`);
+  showNotif(`✅ Corregido a ${dias} días`);
+  renderEmpTab('vacaciones');
+}
+window.editarDiasVacaciones = editarDiasVacaciones;
+
+// Eliminar un registro de vacaciones
+function eliminarVacaciones(id) {
+  if (!esRRHH()) { showNotif('Solo Recursos Humanos puede eliminar vacaciones', 'error'); return; }
+  const v = SC.vacaciones.find(x => x.id === id);
+  if (!v) return;
+  if (!confirm(`¿Eliminar definitivamente el período ${v.inicio} → ${v.fin} (${v.dias} días)?`)) return;
+  SC.vacaciones = SC.vacaciones.filter(x => x.id !== id);
+  sbFetch('vacaciones','DELETE',null,`?id=eq.${encodeURIComponent(id)}`);
+  registrarAuditoria('eliminar','vacaciones', id, `${v.inicio}→${v.fin}`);
+  showNotif('🗑 Período eliminado');
+  renderEmpTab('vacaciones');
+}
+window.eliminarVacaciones = eliminarVacaciones;
 
 // ─── calcHoras helper ─────────────────────────────────────
 function calcHoras(h1, h2) {
@@ -3537,13 +3591,50 @@ function saveBodegaDoc() {
 }
 
 // ─── PERMISOS ─────────────────────────────────────────────
+function aprobarPermisoRapido(id) {
+  const p = SC.permisos.find(x => x.id === id);
+  if (!p) return;
+  // Si aún no tiene clasificación de nómina, avisar pero permitir aprobar
+  if (esRRHH() && p.diasDescontables == null) {
+    if (!confirm('Este permiso aún no tiene clasificación de nómina (descontable/tratamiento).\n¿Aprobar de todas formas? Podrás clasificarlo después desde "Ver / Clasificar".')) return;
+  }
+  actualizarPermiso(id, 'aprobado');
+}
+window.aprobarPermisoRapido = aprobarPermisoRapido;
+
+let _filtroPermisos = 'pendiente';
+function filtrarPermisos(estado) {
+  _filtroPermisos = estado;
+  document.querySelectorAll('.filtro-perm-btn').forEach(b => b.classList.toggle('active', b.dataset.f === estado));
+  renderPermisosAdmin();
+}
+window.filtrarPermisos = filtrarPermisos;
+
 function renderPermisosAdmin() {
   const tb = document.getElementById('permisos-admin-tbody');
-  if (!SC.permisos.length) { tb.innerHTML = '<tr><td colspan="7" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos registrados.</td></tr>'; return; }
+  // Barra de filtros + contador de pendientes
+  const cont = document.getElementById('permisos-admin-filtros');
+  const visibles = SC.permisos.filter(p => empVisibleParaUsuario(p.empId));
+  const nPend = visibles.filter(p => p.status === 'pendiente').length;
+  if (cont) {
+    cont.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        ${nPend ? `<span style="background:rgba(245,158,11,.15);color:var(--amber);padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600">⏳ ${nPend} pendiente(s) por aprobar</span>` : '<span style="color:var(--green);font-size:13px">✅ No hay permisos pendientes</span>'}
+        <div style="flex:1"></div>
+        ${['pendiente','aprobado','rechazado','todos'].map(f => `
+          <button class="btn btn-sm filtro-perm-btn ${_filtroPermisos===f?'btn-primary active':'btn-ghost'}" data-f="${f}" onclick="filtrarPermisos('${f}')">
+            ${f==='pendiente'?'Pendientes':f==='aprobado'?'Aprobados':f==='rechazado'?'Rechazados':'Todos'}</button>`).join('')}
+      </div>`;
+  }
+  if (!tb) return;
+  if (!SC.permisos.length) { tb.innerHTML = '<tr><td colspan="8" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos registrados.</td></tr>'; return; }
   tb.innerHTML = '';
   // Filtrar por área si es lider_area (fail-closed: sin areaId no ve nada)
-  const permsFiltrados = SC.permisos.filter(p => empVisibleParaUsuario(p.empId));
-  if (!permsFiltrados.length) { tb.innerHTML = '<tr><td colspan="8" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos en tu área.</td></tr>'; return; }
+  let permsFiltrados = visibles;
+  if (_filtroPermisos !== 'todos') permsFiltrados = permsFiltrados.filter(p => p.status === _filtroPermisos);
+  // Los pendientes primero
+  permsFiltrados = permsFiltrados.slice().sort((a,b) => (a.status==='pendiente'?-1:1) - (b.status==='pendiente'?-1:1));
+  if (!permsFiltrados.length) { tb.innerHTML = `<tr><td colspan="8" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos ${_filtroPermisos==='todos'?'':'en este estado'}.</td></tr>`; return; }
   permsFiltrados.forEach(p => {
     const emp = SC.empleados.find(e => e.id === p.empId);
     const fechaHora = p.esPorHoras
@@ -3567,7 +3658,10 @@ function renderPermisosAdmin() {
         <td>${statusBadge(p.status)} ${semaforoPlazo(p.inicio, p.status)}${p.aprobadoPorJefe?'<div style="font-size:10px;color:var(--blue)">👤 Aprobado por jefe directo</div>':''}${esPermisoMenor(p)&&p.status==='pendiente'?`<div style="font-size:10px;color:var(--text-muted)">⏱ &lt;${LIMITE_HORAS_JEFE}h · puede aprobar el jefe</div>`:''}</td>
         <td>
           <div class="flex gap-2">
-            <button class="btn btn-primary btn-sm" onclick="openPermisoDetail('${p.id}')">👁️ Ver / Clasificar</button>
+            <button class="btn btn-ghost btn-sm" onclick="openPermisoDetail('${p.id}')">👁️ Ver / Clasificar</button>
+            ${p.status==='pendiente' && puedeAprobarPermiso(p) ? `
+              <button class="btn btn-primary btn-sm" onclick="aprobarPermisoRapido('${p.id}')" title="Aprobar">✅</button>
+              <button class="btn btn-danger btn-sm" onclick="actualizarPermiso('${p.id}','rechazado')" title="Rechazar">❌</button>` : ''}
           </div>
         </td>
       </tr>`);
