@@ -1188,6 +1188,7 @@ function buildSidebar() {
   addNavSep(nav, 'NÓMINA & GESTIÓN');
   addNavItem(nav, '🗓', 'Permisos', 'permisos-admin');
   addNavItem(nav, '🏥', 'Incapacidades', 'incapacidades-admin');
+  addNavItem(nav, '🏖', 'Vacaciones', 'vacaciones-admin');
   addNavSep(nav, 'NÓMINA');
   addNavItem(nav, '📅', 'Novedades Diarias', 'novedades-diarias');
   addNavItem(nav, '💳', 'Descuentos & Préstamos', 'descuentos');
@@ -1246,6 +1247,8 @@ const VIEW_TITLES = {
   evaluacion: ['Evaluación de Candidato', 'Checklist y Compatibilidad'],
   bodega: ['Bodega Documental', 'Documentos Institucionales'],
   'permisos-admin': ['Gestión de Permisos', 'Solicitudes de Permiso'],
+  'vacaciones-admin': ['Gestión de Vacaciones', 'Aprobación y control de días'],
+  'incapacidades-admin': ['Gestión de Incapacidades', 'Radicación y validación'],
   'nomina-formatos': ['Formatos Mensuales de Nómina', 'Carga exclusiva de Financiera y RRHH'],
   reporteria: ['Reportería RRHH', 'Indicadores por área · RRHH separado de HSEQ'],
   'solicitudes-cert': ['Solicitudes de Certificados', 'Certificados laborales, de ingresos y paz y salvo'],
@@ -7163,13 +7166,42 @@ function renderVacacionesAdmin() {
     </div>`;
   }).join('');
 
+  // Bandeja: todas las solicitudes pendientes (aprobar sin entrar a cada empleado)
+  const solPend = SC.vacaciones
+    .filter(v => misEmps.some(e=>e.id===v.empId) && v.estado==='pendiente')
+    .sort((a,b)=>(a.inicio||'').localeCompare(b.inicio||''));
+  const bandeja = `
+    <div class="glass-card p-4 mb-4" style="border:2px solid ${solPend.length?'var(--amber)':'var(--navy-border)'}">
+      <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">
+        ⏳ Solicitudes Pendientes de Aprobación ${solPend.length?`<span class="badge badge-yellow">${solPend.length}</span>`:''}
+      </div>
+      ${solPend.length ? solPend.map(v => {
+        const emp = SC.empleados.find(e=>e.id===v.empId);
+        const vI  = calcVacInfo(emp);
+        const excede = v.dias > vI.diasDisponibles;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:10px;border-top:1px solid var(--surface)">
+          <div>
+            <span style="font-weight:600">${emp?.name||'—'}</span>
+            <span class="text-sm text-muted"> · ${v.inicio} → ${v.fin} (${v.dias} días)</span>
+            ${v.vbJefe===true?'<span class="badge badge-blue" style="font-size:9px">✅ VB jefe</span>':''}
+            ${excede?`<div style="font-size:11px;color:var(--red)">⚠️ Excede sus ${vI.diasDisponibles} días disponibles</div>`:`<div style="font-size:11px;color:var(--text-muted)">Disponibles: ${vI.diasDisponibles} días</div>`}
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-primary btn-sm" onclick="cambiarEstadoVac('${v.id}','aprobado')">✅ Aprobar</button>
+            <button class="btn btn-danger btn-sm" onclick="cambiarEstadoVac('${v.id}','rechazado')">❌</button>
+          </div>
+        </div>`;
+      }).join('') : '<div class="text-muted text-sm">No hay solicitudes pendientes.</div>'}
+    </div>`;
+
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
       <div class="stat-card"><div class="stat-label">Empleados en área</div><div class="stat-value">${totalEmps}</div></div>
       <div class="stat-card"><div class="stat-label">🏖 De vacaciones hoy</div><div class="stat-value" style="color:var(--blue)">${enVacHoy}</div></div>
       <div class="stat-card"><div class="stat-label">⏳ Solicitudes pendientes</div><div class="stat-value" style="color:var(--amber)">${pendientes}</div></div>
       <div class="stat-card"><div class="stat-label">✅ Períodos aprobados</div><div class="stat-value" style="color:var(--green)">${aprobadas}</div></div>
     </div>
+    ${bandeja}
     ${filas || '<div class="text-muted text-sm p-4">Sin empleados en el área.</div>'}`;
 }
 window.renderVacacionesAdmin = renderVacacionesAdmin;
