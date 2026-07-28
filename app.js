@@ -483,7 +483,8 @@ async function loadFromSupabase() {
           let dias = []; try { dias = JSON.parse(r.dias_laborales||'[]'); } catch(e) {}
           SC.horarios[r.emp_id] = { tipo:r.tipo, diasLaborales:dias, entrada:r.entrada,
             salida:r.salida, descanso:r.descanso, horasSemana:r.horas_semana,
-            descripcion:r.descripcion||'', modificadoPor:r.modificado_por||'' };
+            descripcion:r.descripcion||'', modificadoPor:r.modificado_por||'',
+            mesActualizado:r.mes_actualizado||null };
         });
       }
       SB_OK = true;
@@ -723,6 +724,7 @@ async function sbSaveVac(v) {
   const row = {
     id:v.id, emp_id:v.empId, inicio:v.inicio, fin:v.fin,
     dias:v.dias, obs:v.obs||'', estado:v.estado||'pendiente',
+    periodo:v.periodo||null, dias_calendario:v.diasCalendario||null,
     fecha_solicitud:v.fechaSolicitud||'',
   };
   await sbFetch('vacaciones','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
@@ -1512,6 +1514,28 @@ function renderEmpleados() {
     return;
   }
   grid.innerHTML = '';
+
+  // Alerta mensual de horarios: líderes y RRHH ven a quién falta cargar/actualizar el horario del mes
+  document.getElementById('aviso-horarios-mes')?.remove();
+  if (esLiderArea || esRRHHoAdmin()) {
+    const mesActual = new Date().toISOString().slice(0,7);
+    const mesNombre = new Date().toLocaleDateString('es-CO', { month:'long', year:'numeric' });
+    const pendientesHor = filtered.filter(e => e.status === 'activo' &&
+      (!SC.horarios[e.id] || SC.horarios[e.id].mesActualizado !== mesActual));
+    if (pendientesHor.length) {
+      const aviso = document.createElement('div');
+      aviso.id = 'aviso-horarios-mes';
+      aviso.style.cssText = 'background:rgba(245,158,11,.12);border-left:4px solid var(--amber);padding:14px 16px;border-radius:8px;margin-bottom:16px';
+      aviso.innerHTML = `
+        <div style="font-weight:700;color:var(--navy);margin-bottom:6px">🕐 Horarios pendientes de ${mesNombre}</div>
+        <div class="text-sm text-muted" style="margin-bottom:10px">Debes cargar o actualizar el horario de <strong>${pendientesHor.length}</strong> empleado(s) para este mes:</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${pendientesHor.slice(0,20).map(e => `<button class="btn btn-ghost btn-sm" onclick="openEmpleadoDetail('${e.id}');setTimeout(()=>renderEmpTab('horario'),100)" style="font-size:12px">${e.name.split(' ').slice(0,2).join(' ')} ⏱</button>`).join('')}
+          ${pendientesHor.length>20?`<span class="text-xs text-muted" style="align-self:center">y ${pendientesHor.length-20} más…</span>`:''}
+        </div>`;
+      grid.parentNode.insertBefore(aviso, grid);
+    }
+  }
 
   const wrap = document.createElement('div');
   wrap.className = 'emp-cards-grid';
@@ -2346,6 +2370,20 @@ function openVacacionesModal(empId) {
   document.getElementById('vac-inicio').value = '';
   document.getElementById('vac-fin').value = '';
   document.getElementById('vac-obs').value = '';
+  const dh = document.getElementById('vac-dias-habiles'); if (dh) dh.style.display = 'none';
+  // Cargar los períodos anuales del empleado en el selector
+  const sel = document.getElementById('vac-periodo');
+  if (sel) {
+    const emp = SC.empleados.find(e => e.id === empId);
+    const vI = emp ? calcVacInfo(emp) : { periodos: [] };
+    sel.innerHTML = '';
+    (vI.periodos || []).forEach((p, i) => {
+      const disp = (p.dias || 15) - (p.tomados || 0);
+      sel.insertAdjacentHTML('beforeend',
+        `<option value="${p.label || ('Período '+(i+1))}">${p.label || ('Período '+(i+1))} · ${disp} día(s) disponibles</option>`);
+    });
+    if (!sel.options.length) sel.insertAdjacentHTML('beforeend', '<option value="Período actual">Período actual</option>');
+  }
   openModal('modal-vacaciones');
 }
 
@@ -2363,18 +2401,22 @@ function saveVacaciones() {
       return;
     }
   }
-  const dias = calcDias(inicio, fin);
-  if (dias < 1) { showNotif('Selecciona un período válido', 'error'); return; }
+  const dias = calcDiasHabilesVac(inicio, fin);
+  if (dias < 1) { showNotif('El período seleccionado no tiene días hábiles (solo domingos/festivos)', 'error'); return; }
+  const diasCalendario = calcDias(inicio, fin);
   // No exceder los días disponibles
   const vInfo = calcVacInfo(SC.empleados.find(e => e.id === ctx.empId));
   if (SC.user?.role === 'empleado' && dias > vInfo.diasDisponibles) {
-    showNotif(`⛔ Solicitaste ${dias} días pero solo tienes ${vInfo.diasDisponibles} disponibles.`, 'error');
+    showNotif(`⛔ Solicitaste ${dias} días hábiles pero solo tienes ${vInfo.diasDisponibles} disponibles.`, 'error');
     return;
   }
+  const periodoSel = document.getElementById('vac-periodo')?.value || '';
   SC.vacaciones.push({
     id: 'v' + Date.now(),
     empId: ctx.empId,
     inicio, fin, dias,
+    diasCalendario,
+    periodo: periodoSel,
     obs: document.getElementById('vac-obs').value,
     estado: 'pendiente',
     // Doble aprobación: primero el jefe directo, luego RRHH
@@ -2475,6 +2517,27 @@ function eliminarVacaciones(id) {
 window.eliminarVacaciones = eliminarVacaciones;
 
 // ─── calcHoras helper ─────────────────────────────────────
+// Jornada máxima legal vigente (Ley 2101/2021):
+// 42h desde el 15-jul-2025; 44h entre 15-jul-2024 y 14-jul-2025.
+function jornadaLegalActual(fecha) {
+  const f = fecha ? new Date(fecha) : new Date();
+  if (f >= new Date('2025-07-15')) return 42;
+  if (f >= new Date('2024-07-15')) return 44;
+  return 46;
+}
+function validarJornada(input) {
+  const max = jornadaLegalActual();
+  const av = document.getElementById('hor-jornada-aviso');
+  const val = parseInt(input.value) || 0;
+  if (!av) return;
+  if (val > max) {
+    av.style.color = 'var(--red)';
+    av.textContent = `⚠️ Supera la jornada máxima legal de ${max} horas semanales.`;
+  } else { av.textContent = ''; }
+}
+window.jornadaLegalActual = jornadaLegalActual;
+window.validarJornada = validarJornada;
+
 function calcHoras(h1, h2) {
   if (!h1 || !h2) return 0;
   const [hh1, mm1] = h1.split(':').map(Number);
@@ -6581,7 +6644,7 @@ const DIAS_LABEL  = { L:'Lunes',M:'Martes',X:'Miércoles',J:'Jueves',V:'Viernes'
 function getHorarioEmp(empId) {
   return SC.horarios[empId] || {
     tipo: 'fijo', diasLaborales: ['L','M','X','J','V'],
-    entrada: '08:00', salida: '17:00', horasSemana: 48,
+    entrada: '08:00', salida: '17:00', horasSemana: jornadaLegalActual(),
     descanso: 60, descripcion: '',
   };
 }
@@ -6593,7 +6656,7 @@ async function sbSaveHorario(empId, h) {
     dias_laborales: JSON.stringify(h.diasLaborales||[]),
     entrada: h.entrada||'', salida: h.salida||'',
     descanso: h.descanso||0, horas_semana: h.horasSemana||0,
-    descripcion: h.descripcion||'',
+    descripcion: h.descripcion||'', mes_actualizado: h.mesActualizado||null,
     modificado_por: SC.user?.name||'', 
     modificado_rol: SC.user?.roleName||SC.user?.role||'',
     fecha: new Date().toISOString(),
@@ -6632,8 +6695,10 @@ function renderHorarioEmp(emp, container) {
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Horas Semanales</label>
-          <input class="form-input" id="hor-horas" type="number" value="${h.horasSemana||48}" min="1" max="60">
+          <label class="form-label">Horas Semanales <span class="text-xs text-muted">(máx. legal: ${jornadaLegalActual()}h)</span></label>
+          <input class="form-input" id="hor-horas" type="number" value="${h.horasSemana||jornadaLegalActual()}" min="1" max="60"
+            oninput="validarJornada(this)">
+          <div id="hor-jornada-aviso" class="text-xs" style="margin-top:4px"></div>
         </div>
       </div>
       <div id="hor-fijo-fields" style="${h.tipo==='fijo'?'':'display:none'}">
@@ -6715,8 +6780,10 @@ function saveHorario(empId) {
     entrada:     document.getElementById('hor-entrada')?.value    || '08:00',
     salida:      document.getElementById('hor-salida')?.value     || '17:00',
     descanso:    parseInt(document.getElementById('hor-descanso')?.value||'60'),
-    horasSemana: parseInt(document.getElementById('hor-horas')?.value||'48'),
+    horasSemana: parseInt(document.getElementById('hor-horas')?.value||String(jornadaLegalActual())),
     descripcion: document.getElementById('hor-descripcion')?.value|| '',
+    mesActualizado: new Date().toISOString().slice(0,7),   // 'AAAA-MM'
+    actualizadoPor: SC.user?.name || '',
   };
   saveHorarioLocal();
   const h = SC.horarios[empId];
@@ -7182,7 +7249,7 @@ function renderVacacionesAdmin() {
         return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:10px;border-top:1px solid var(--surface)">
           <div>
             <span style="font-weight:600">${emp?.name||'—'}</span>
-            <span class="text-sm text-muted"> · ${v.inicio} → ${v.fin} (${v.dias} días)</span>
+            <span class="text-sm text-muted"> · ${v.inicio} → ${v.fin} (${v.dias} días hábiles${v.periodo?' · '+v.periodo:''})</span>
             ${v.vbJefe===true?'<span class="badge badge-blue" style="font-size:9px">✅ VB jefe</span>':''}
             ${excede?`<div style="font-size:11px;color:var(--red)">⚠️ Excede sus ${vI.diasDisponibles} días disponibles</div>`:`<div style="font-size:11px;color:var(--text-muted)">Disponibles: ${vI.diasDisponibles} días</div>`}
           </div>
@@ -8595,6 +8662,37 @@ function calcDias(inicio, fin) {
   const d1 = new Date(inicio), d2 = new Date(fin);
   return Math.max(1, Math.round((d2-d1)/(1000*60*60*24))+1);
 }
+
+// ─── DÍAS HÁBILES DE VACACIONES (Colombia) ───────────────────
+// Cuenta los días entre dos fechas EXCLUYENDO domingos y festivos.
+// El sábado SÍ cuenta como hábil (jornada estándar colombiana).
+const FESTIVOS_CO = {
+  // 2025 y 2026 verificados con calendario oficial; 2027 calculado (Ley Emiliani)
+  2025: ['01-01','01-06','03-24','04-17','04-18','05-01','06-02','06-23','06-30','07-20','08-07','08-18','10-13','11-03','11-17','12-08','12-25'],
+  2026: ['01-01','01-12','03-23','04-02','04-03','05-01','05-18','06-08','06-15','06-29','07-20','08-07','08-17','10-12','11-02','11-16','12-08','12-25'],
+  2027: ['01-01','01-11','03-22','03-25','03-26','05-01','05-10','05-31','06-07','06-21','07-05','07-20','08-16','10-18','11-01','11-15','12-08','12-25'],
+};
+function esFestivoCO(fecha) {
+  const y = fecha.getFullYear();
+  const mmdd = String(fecha.getMonth()+1).padStart(2,'0') + '-' + String(fecha.getDate()).padStart(2,'0');
+  return (FESTIVOS_CO[y] || []).includes(mmdd);
+}
+// Días hábiles de vacaciones entre inicio y fin (inclusive)
+function calcDiasHabilesVac(inicio, fin) {
+  if (!inicio || !fin) return 0;
+  const d = new Date(inicio + 'T00:00:00');
+  const hasta = new Date(fin + 'T00:00:00');
+  if (hasta < d) return 0;
+  let habiles = 0;
+  while (d <= hasta) {
+    const dow = d.getDay();              // 0 = domingo
+    if (dow !== 0 && !esFestivoCO(d)) habiles++;
+    d.setDate(d.getDate() + 1);
+  }
+  return habiles;
+}
+window.calcDiasHabilesVac = calcDiasHabilesVac;
+window.esFestivoCO = esFestivoCO;
 
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 

@@ -10,7 +10,7 @@
 <script src="https://apis.google.com/js/api.js" async defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="icon" href="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">
-<link rel="stylesheet" href="styles.css?v=33">
+<link rel="stylesheet" href="styles.css?v=35">
 </head>
 <body>
 
@@ -1570,10 +1570,15 @@
       <button class="modal-close" onclick="closeModal('modal-vacaciones')">✕</button>
     </div>
     <div class="modal-body">
+      <div class="form-group"><label class="form-label">Período del que se toman los días *</label>
+        <select class="form-select" id="vac-periodo"></select></div>
       <div class="form-grid">
         <div class="form-group"><label class="form-label">Fecha Inicio *</label><input class="form-input" id="vac-inicio" onchange="checkVacFechas()" type="date"></div>
         <div class="form-group"><label class="form-label">Fecha Fin *</label><input class="form-input" id="vac-fin" onchange="checkVacFechas()" type="date"></div>
       </div>
+      <div id="vac-dias-habiles" class="info-box mb-3" style="font-size:13px;display:none"></div>
+      <div id="vac-fecha-error" class="warning-72h mb-3" style="display:none"></div>
+      <div class="info-box mb-3" style="font-size:12px">🏖 Se cuentan <strong>días hábiles</strong> (no domingos ni festivos; el sábado sí cuenta). Anticipación mínima: 15 días calendario.</div>
       <div class="form-group"><label class="form-label">Observaciones</label><textarea class="form-textarea" id="vac-obs" placeholder="Notas del período de vacaciones..."></textarea></div>
     </div>
     <div class="modal-footer">
@@ -2498,15 +2503,22 @@ function checkVacFechas() {
   if (!ini || !fin) { if(err) err.style.display='none'; if(btn) btn.disabled=false; return; }
   const hoy0 = new Date(new Date().toDateString());
   const antic = Math.floor((new Date(ini+'T00:00:00') - hoy0)/86400000);
-  const dur   = Math.floor((new Date(fin+'T00:00:00') - new Date(ini+'T00:00:00'))/86400000) + 1;
+  const habiles = window.calcDiasHabilesVac ? window.calcDiasHabilesVac(ini, fin) : 0;
+  const calendario = Math.floor((new Date(fin+'T00:00:00') - new Date(ini+'T00:00:00'))/86400000) + 1;
   const esEmp = SC.user?.role === 'empleado';
   let msg = '';
   const emp0 = window.SC?.empleados?.find(e => e.id === (window.SC?.currentDocContext?.empId || window.SC?.user?.empId));
   const disp = emp0 && window.calcVacInfo ? window.calcVacInfo(emp0).diasDisponibles : null;
   if (new Date(fin) < new Date(ini)) msg = '⛔ La fecha de fin debe ser posterior a la de inicio.';
-  else if (dur < 1) msg = '⛔ Selecciona un período válido.';
+  else if (habiles < 1) msg = '⛔ El período solo tiene domingos/festivos (0 días hábiles).';
   else if (esEmp && antic < 15) msg = `⛔ Las vacaciones requieren mínimo 15 días calendario de anticipación. Faltan ${antic} día(s).`;
-  else if (esEmp && disp !== null && dur > disp) msg = `⛔ Solicitaste ${dur} días pero solo tienes ${disp} disponibles.`;
+  else if (esEmp && disp !== null && habiles > disp) msg = `⛔ Solicitaste ${habiles} días hábiles pero solo tienes ${disp} disponibles.`;
+  // Mostrar el desglose de días
+  const dh = document.getElementById('vac-dias-habiles');
+  if (dh && !msg) {
+    dh.style.display = 'flex';
+    dh.innerHTML = `📅 <strong>${habiles} día(s) hábil(es)</strong> de vacaciones (${calendario} días calendario, se excluyen ${calendario-habiles} domingos/festivos)`;
+  } else if (dh) { dh.style.display = 'none'; }
   if (err) { err.style.display = msg ? 'flex' : 'none'; err.textContent = msg; }
   if (btn) { btn.disabled = !!msg; btn.style.opacity = msg ? '.45' : '1'; }
 }
@@ -2529,6 +2541,6 @@ function handlePermDrop(e) {
 }
 </script>
 
-<script src="app.js?v=33"></script>
+<script src="app.js?v=35"></script>
 </body>
 </html>
