@@ -11573,6 +11573,8 @@ window.renderEmpRetro = renderEmpRetro;
 
 function openRetroModal(empId) {
   SC._retroEmpId = empId;
+  SC._retroCentral = false;
+  const g = document.getElementById('retro-emp-central-group'); if (g) g.style.display = 'none';
   document.getElementById('retro-tipo').value = 'retroalimentacion';
   document.getElementById('retro-titulo').value = '';
   document.getElementById('retro-desc').value = '';
@@ -11591,9 +11593,13 @@ function handleRetroFile(e) {
 window.handleRetroFile = handleRetroFile;
 
 function guardarRetro() {
-  const empId = SC._retroEmpId;
+  let empId = SC._retroEmpId;
+  if (SC._retroCentral) {
+    empId = document.getElementById('retro-emp-central')?.value;
+    if (!empId) { showNotif('Selecciona el empleado', 'error'); return; }
+  }
   const emp = SC.empleados.find(e => e.id === empId);
-  if (!emp) return;
+  if (!emp) { showNotif('Empleado no encontrado', 'error'); return; }
   const tipo = document.getElementById('retro-tipo').value;
   const titulo = document.getElementById('retro-titulo').value.trim();
   const desc = document.getElementById('retro-desc').value.trim();
@@ -11613,7 +11619,8 @@ function guardarRetro() {
     registrarAuditoria('crear','retroalimentacion', registro.id, `${tipo} · ${emp.name}`);
     closeModal('modal-retro');
     showNotif('📝 Documento registrado ✅');
-    renderEmpTab('retro');
+    if (SC._retroCentral) { SC._retroCentral = false; renderRetroCentral(); }
+    else renderEmpTab('retro');
   };
 
   if (SC._retroFile) {
@@ -11640,3 +11647,92 @@ function eliminarRetro(id, empId) {
 }
 window.eliminarRetro = eliminarRetro;
 window.dbToRetro = dbToRetro;
+
+
+// ═══════════════════════════════════════════════════════════════
+// VISTA CENTRAL: RETROALIMENTACIONES Y MEMORANDOS (módulo RRHH)
+// Permite crear y ver documentos de cualquier empleado sin entrar
+// a su ficha.
+// ═══════════════════════════════════════════════════════════════
+
+function switchDiscTab(tab) {
+  document.getElementById('discpanel-procesos').style.display = tab === 'procesos' ? '' : 'none';
+  document.getElementById('discpanel-retro').style.display    = tab === 'retro' ? '' : 'none';
+  const tp = document.getElementById('tabdisc-procesos');
+  const tr = document.getElementById('tabdisc-retro');
+  [tp, tr].forEach(t => { if (t) { t.style.borderBottomColor = 'transparent'; t.style.color = 'var(--text-muted)'; } });
+  const activo = tab === 'procesos' ? tp : tr;
+  if (activo) { activo.style.borderBottomColor = 'var(--navy)'; activo.style.color = 'var(--navy)'; }
+  if (tab === 'retro') renderRetroCentral();
+}
+window.switchDiscTab = switchDiscTab;
+
+function renderRetroCentral() {
+  const el = document.getElementById('retro-central-content');
+  if (!el) return;
+  // Solo empleados visibles para el usuario (RRHH ve todos; líder su área)
+  const visibles = SC.empleados.filter(e => empVisibleParaUsuario(e.id));
+  const idsVis = new Set(visibles.map(e => e.id));
+  const lista = (SC.retros || []).filter(r => idsVis.has(r.empId))
+    .sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''));
+
+  if (!lista.length) {
+    el.innerHTML = '<div class="glass-card p-6 text-center text-muted">No hay retroalimentaciones ni memorandos registrados.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="glass-card p-4"><div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Empleado</th><th>Tipo</th><th>Título</th><th>Fecha</th><th>Registrado por</th><th>Firma</th><th></th></tr></thead>
+    <tbody>${lista.map(r => {
+      const emp = SC.empleados.find(e => e.id === r.empId);
+      const t = TIPOS_RETRO[r.tipo] || { label:r.tipo, icon:'📄' };
+      return `<tr>
+        <td style="font-weight:600">${emp?.name || '—'}</td>
+        <td>${t.icon} ${t.label}</td>
+        <td class="text-sm">${r.titulo || '—'}</td>
+        <td class="text-sm text-muted">${r.fecha}</td>
+        <td class="text-sm text-muted">${r.creadoPor}</td>
+        <td>${r.requiereFirma ? (r.firmado ? '<span class="badge badge-green">✅</span>' : '<span class="badge badge-yellow">✍️</span>') : '—'}</td>
+        <td style="display:flex;gap:4px">
+          ${r.archivoUrl ? `<a href="${r.archivoUrl}" target="_blank" class="btn btn-ghost btn-sm">📎</a>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="openEmpleadoDetail('${r.empId}');setTimeout(()=>renderEmpTab('retro'),100)" title="Ver en ficha">👁️</button>
+          ${esRRHHoAdmin() ? `<button class="btn btn-danger btn-sm" onclick="eliminarRetroCentral('${r.id}')">🗑</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div></div>`;
+}
+window.renderRetroCentral = renderRetroCentral;
+
+function eliminarRetroCentral(id) {
+  if (!esRRHHoAdmin()) return;
+  const r = SC.retros.find(x => x.id === id);
+  if (!r || !confirm(`¿Eliminar "${r.titulo || TIPOS_RETRO[r.tipo]?.label}"?`)) return;
+  SC.retros = SC.retros.filter(x => x.id !== id);
+  sbFetch('retroalimentaciones','DELETE',null,`?id=eq.${encodeURIComponent(id)}`);
+  registrarAuditoria('eliminar','retroalimentacion', id, '');
+  renderRetroCentral();
+}
+window.eliminarRetroCentral = eliminarRetroCentral;
+
+// Modal central: primero se elige el empleado, luego el documento
+function openRetroModalCentral() {
+  const sel = document.getElementById('retro-emp-central');
+  if (sel) {
+    const visibles = SC.empleados.filter(e => empVisibleParaUsuario(e.id) && e.status === 'activo')
+      .sort((a,b) => a.name.localeCompare(b.name));
+    sel.innerHTML = '<option value="">— Selecciona un empleado —</option>' +
+      visibles.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  }
+  document.getElementById('retro-emp-central-group').style.display = '';
+  SC._retroEmpId = null;
+  document.getElementById('retro-tipo').value = 'retroalimentacion';
+  document.getElementById('retro-titulo').value = '';
+  document.getElementById('retro-desc').value = '';
+  document.getElementById('retro-firma').checked = false;
+  document.getElementById('retro-file').value = '';
+  document.getElementById('retro-file-lbl').textContent = '📎 Adjuntar documento (PDF, Word, Excel) — opcional';
+  SC._retroFile = null;
+  SC._retroCentral = true;
+  openModal('modal-retro');
+}
+window.openRetroModalCentral = openRetroModalCentral;

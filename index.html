@@ -10,7 +10,7 @@
 <script src="https://apis.google.com/js/api.js" async defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="icon" href="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">
-<link rel="stylesheet" href="styles.css?v=37">
+<link rel="stylesheet" href="styles.css?v=38">
 </head>
 <body>
 
@@ -841,14 +841,32 @@
     <!-- ═══════════════════════════════════════════════ -->
     <div id="view-disciplinarios" class="view">
       <div class="section-header mb-4">
-        <div class="section-title">Procesos <span>Disciplinarios</span></div>
-        <button class="btn btn-primary btn-sm" id="btn-add-disc" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>
+        <div class="section-title">Gestión <span>Disciplinaria</span></div>
       </div>
-      <div class="glass-card p-4">
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th>Descripción</th><th>Estado</th><th>Notificado</th><th>Acciones</th></tr></thead>
-          <tbody id="disc-tbody"></tbody>
-        </table></div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid var(--navy-border)">
+        <button class="tab-disc active" id="tabdisc-procesos" onclick="switchDiscTab('procesos')" style="background:none;border:none;padding:10px 16px;cursor:pointer;font-weight:600;border-bottom:2px solid var(--navy);margin-bottom:-2px;color:var(--navy)">⚖️ Procesos Disciplinarios</button>
+        <button class="tab-disc" id="tabdisc-retro" onclick="switchDiscTab('retro')" style="background:none;border:none;padding:10px 16px;cursor:pointer;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-muted)">📝 Retroalimentaciones y Memorandos</button>
+      </div>
+
+      <div id="discpanel-procesos">
+        <div class="section-header mb-3">
+          <div class="text-sm text-muted">Procesos disciplinarios formales con sus 8 etapas reglamentarias</div>
+          <button class="btn btn-primary btn-sm" id="btn-add-disc" onclick="openAddDisciplinarioModal()">+ Nuevo Proceso</button>
+        </div>
+        <div class="glass-card p-4">
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th>Descripción</th><th>Estado</th><th>Notificado</th><th>Acciones</th></tr></thead>
+            <tbody id="disc-tbody"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="discpanel-retro" style="display:none">
+        <div class="section-header mb-3">
+          <div class="text-sm text-muted">Retroalimentaciones, memorandos, reconocimientos y actas de compromiso</div>
+          <button class="btn btn-primary btn-sm" onclick="openRetroModalCentral()">+ Nuevo Documento</button>
+        </div>
+        <div id="retro-central-content"></div>
       </div>
     </div>
 
@@ -1193,6 +1211,10 @@
       <button class="modal-close" onclick="closeModal('modal-retro')">✕</button>
     </div>
     <div class="modal-body">
+      <div class="form-group" id="retro-emp-central-group" style="display:none">
+        <label class="form-label">Empleado *</label>
+        <select class="form-select" id="retro-emp-central"></select>
+      </div>
       <div class="form-group"><label class="form-label">Tipo de documento *</label>
         <select class="form-select" id="retro-tipo">
           <option value="retroalimentacion">💬 Retroalimentación</option>
@@ -2578,6 +2600,6 @@ function handlePermDrop(e) {
 }
 </script>
 
-<script src="app.js?v=37"></script>
+<script src="app.js?v=38"></script>
 </body>
 </html>
