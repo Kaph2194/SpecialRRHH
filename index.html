@@ -10,7 +10,7 @@
 <script src="https://apis.google.com/js/api.js" async defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="icon" href="assets/specialcar.png" style="width:52px;height:52px;object-fit:contain;border-radius:8px">
-<link rel="stylesheet" href="styles.css?v=35">
+<link rel="stylesheet" href="styles.css?v=37">
 </head>
 <body>
 
@@ -228,6 +228,7 @@
         <div class="tab" onclick="empTab('incapacidades',this)">🏥 Incapacidades</div>
         <div class="tab" onclick="empTab('vacaciones',this)">🏖 Vacaciones</div>
         <div class="tab" onclick="empTab('disc',this)">⚖️ Disciplinarios</div>
+        <div class="tab" onclick="empTab('retro',this)">📝 Retro. y Memorandos</div>
         <div class="tab" onclick="empTab('horario',this)">🕐 Horario</div>
         <div class="tab" onclick="empTab('descuentos',this)">💳 Descuentos</div>
       </div>
@@ -1185,6 +1186,42 @@
 </div>
 
 <!-- Solicitar Permiso -->
+<div class="modal-overlay" id="modal-retro">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <div class="modal-title">📝 Nueva Retroalimentación / Memorando</div>
+      <button class="modal-close" onclick="closeModal('modal-retro')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Tipo de documento *</label>
+        <select class="form-select" id="retro-tipo">
+          <option value="retroalimentacion">💬 Retroalimentación</option>
+          <option value="reconocimiento">🏆 Reconocimiento / Felicitación</option>
+          <option value="memorando">📝 Memorando</option>
+          <option value="llamado_atencion">⚠️ Llamado de Atención</option>
+          <option value="compromiso">🤝 Acta de Compromiso</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">Título</label>
+        <input type="text" class="form-input" id="retro-titulo" placeholder="Ej: Retroalimentación desempeño Q3"></div>
+      <div class="form-group"><label class="form-label">Descripción / Contenido *</label>
+        <textarea class="form-input" id="retro-desc" rows="5" placeholder="Detalle del documento..."></textarea></div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="retro-firma"> <span class="text-sm">Requiere firma del empleado</span>
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Adjunto</label>
+        <input type="file" id="retro-file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.png" style="display:none" onchange="handleRetroFile(event)">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('retro-file').click()">
+          <span id="retro-file-lbl">📎 Adjuntar documento (PDF, Word, Excel) — opcional</span>
+        </button>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarRetro()">Guardar Documento</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-carga-nomina">
   <div class="modal" style="max-width:480px">
     <div class="modal-header">
@@ -2541,6 +2578,6 @@ function handlePermDrop(e) {
 }
 </script>
 
-<script src="app.js?v=35"></script>
+<script src="app.js?v=37"></script>
 </body>
 </html>

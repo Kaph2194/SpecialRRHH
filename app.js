@@ -304,6 +304,7 @@ const SC = {
   nominaFormatos: [],    // [ { id, periodo, fileName, fileData|driveUrl, subidoPor, rol, areaNombre, fecha } ]
   solicitudesCert: [],   // solicitudes de certificados laborales, ingresos, paz y salvo...
   solicitudesCambio: [], // cambios de EPS, AFP, cesantías, caja, banco (requieren aprobación RRHH)
+  retros: [],            // retroalimentaciones, memorandos, reconocimientos
   denuncias:     [],     // [ { id, empId, tipo, descripcion, fecha, anonimo, estado, ... } ]
 };
 
@@ -460,6 +461,7 @@ async function loadFromSupabase() {
     const hor_  = await sbFetch('horarios',        'GET', null, '?select=*');
     const sce_  = await sbFetch('solicitudes_certificados','GET', null, '?select=*&order=created_at.asc');
     const sca_  = await sbFetch('solicitudes_cambio','GET', null, '?select=*&order=created_at.asc');
+    const rtr_  = await sbFetch('retroalimentaciones','GET', null, '?select=*&order=created_at.asc');
 
     // Si empleados respondió (aunque sea vacío), Supabase está OK
     if (emps !== null) {
@@ -477,12 +479,15 @@ async function loadFromSupabase() {
       if (den_  !== null) SC.denuncias  = den_.map(dbToDenuncia);
       if (sce_  !== null) SC.solicitudesCert   = sce_.map(dbToSolCert);
       if (sca_  !== null) SC.solicitudesCambio = sca_.map(dbToSolCambio);
+      if (rtr_  !== null) SC.retros = rtr_.map(dbToRetro);
       if (hor_  !== null && hor_.length) {
         SC.horarios = {};
         hor_.forEach(r => {
           let dias = []; try { dias = JSON.parse(r.dias_laborales||'[]'); } catch(e) {}
-          SC.horarios[r.emp_id] = { tipo:r.tipo, diasLaborales:dias, entrada:r.entrada,
-            salida:r.salida, descanso:r.descanso, horasSemana:r.horas_semana,
+          let diasDet = {};
+          try { diasDet = r.dias_detalle ? JSON.parse(r.dias_detalle) : {}; } catch(e) {}
+          SC.horarios[r.emp_id] = { tipo:r.tipo, diasLaborales:dias, dias:diasDet,
+            entrada:r.entrada, salida:r.salida, descanso:r.descanso, horasSemana:r.horas_semana,
             descripcion:r.descripcion||'', modificadoPor:r.modificado_por||'',
             mesActualizado:r.mes_actualizado||null };
         });
@@ -2098,6 +2103,7 @@ function renderEmpTab(tab) {
   else if (tab === 'incapacidades') { renderEmpIncap(emp, content); }
   else if (tab === 'vacaciones') { renderEmpVacaciones(emp, content); }
   else if (tab === 'disc')       { renderEmpDisc(emp, content); }
+  else if (tab === 'retro')      { renderEmpRetro(emp, content); }
   else if (tab === 'horario')    { renderHorarioEmp(emp, content); }
   else if (tab === 'descuentos') { renderDescuentosEmp(emp, content); }
 }
@@ -6643,9 +6649,8 @@ const DIAS_LABEL  = { L:'Lunes',M:'Martes',X:'Miércoles',J:'Jueves',V:'Viernes'
 
 function getHorarioEmp(empId) {
   return SC.horarios[empId] || {
-    tipo: 'fijo', diasLaborales: ['L','M','X','J','V'],
-    entrada: '08:00', salida: '17:00', horasSemana: jornadaLegalActual(),
-    descanso: 60, descripcion: '',
+    tipo: 'fijo', diasLaborales: ['L','M','X','J','V'], dias: {},
+    horasSemana: jornadaLegalActual(), descripcion: '',
   };
 }
 // Los horarios ahora viven en Supabase, no solo en el navegador
@@ -6654,6 +6659,7 @@ async function sbSaveHorario(empId, h) {
     emp_id: empId,
     tipo: h.tipo||'fijo',
     dias_laborales: JSON.stringify(h.diasLaborales||[]),
+    dias_detalle: JSON.stringify(h.dias||{}),
     entrada: h.entrada||'', salida: h.salida||'',
     descanso: h.descanso||0, horas_semana: h.horasSemana||0,
     descripcion: h.descripcion||'', mes_actualizado: h.mesActualizado||null,
@@ -6702,24 +6708,34 @@ function renderHorarioEmp(emp, container) {
         </div>
       </div>
       <div id="hor-fijo-fields" style="${h.tipo==='fijo'?'':'display:none'}">
-        <div class="form-group mb-3">
-          <label class="form-label">Días laborales</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${diasChecks}</div>
+        <label class="form-label mb-2">Horario por día — marca los días laborales, sus horas y si tienen almuerzo</label>
+        <div style="overflow-x:auto">
+          <table class="data-table" style="font-size:13px">
+            <thead><tr>
+              <th>Día</th><th>Labora</th><th>Entrada</th><th>Salida</th><th>Almuerzo</th><th>Horas</th>
+            </tr></thead>
+            <tbody id="hor-dias-tbody">
+              ${DIAS_SEMANA.map(d => {
+                const dd = (h.dias && h.dias[d]) || {};
+                const activo = h.diasLaborales.includes(d);
+                return `<tr data-dia="${d}" style="${activo?'':'opacity:.5'}">
+                  <td style="font-weight:600">${DIAS_LABEL[d]}</td>
+                  <td><input type="checkbox" ${activo?'checked':''} onchange="onHorDiaToggle('${emp.id}','${d}',this)"></td>
+                  <td><input type="time" class="form-input" style="padding:4px;font-size:12px;width:110px" value="${dd.entrada||'08:00'}" onchange="recalcHorSemana('${emp.id}')" data-f="entrada"></td>
+                  <td><input type="time" class="form-input" style="padding:4px;font-size:12px;width:110px" value="${dd.salida||'17:00'}" onchange="recalcHorSemana('${emp.id}')" data-f="salida"></td>
+                  <td><input type="checkbox" ${dd.almuerzo!==false?'checked':''} onchange="recalcHorSemana('${emp.id}')" data-f="almuerzo" title="Descuenta 1 hora"></td>
+                  <td class="hor-dia-horas" style="font-weight:600;text-align:center">—</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+            <tfoot><tr style="border-top:2px solid var(--navy)">
+              <td colspan="5" style="text-align:right;font-weight:700">Total semanal:</td>
+              <td id="hor-total-semana" style="font-weight:800;text-align:center;font-size:15px">—</td>
+            </tr></tfoot>
+          </table>
         </div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">Hora de Entrada</label>
-            <input class="form-input" id="hor-entrada" type="time" value="${h.entrada||'08:00'}">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Hora de Salida</label>
-            <input class="form-input" id="hor-salida" type="time" value="${h.salida||'17:00'}">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Descanso (min)</label>
-            <input class="form-input" id="hor-descanso" type="number" value="${h.descanso||60}" min="0" max="120">
-          </div>
-        </div>
+        <div id="hor-total-aviso" class="text-xs mt-2" style="min-height:16px"></div>
+        <div class="text-xs text-muted mt-1">☕ El almuerzo descuenta 1 hora del cómputo. La jornada máxima legal es de ${jornadaLegalActual()} horas semanales.</div>
       </div>
       <div id="hor-flexible-fields" style="${h.tipo!=='fijo'?'':'display:none'}">
         <div class="form-group">
@@ -6733,15 +6749,60 @@ function renderHorarioEmp(emp, container) {
     <div class="glass-card p-4">
       <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:8px">📊 Resumen del horario</div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px">
-        <span>📅 Días: <strong>${h.diasLaborales.join('-')}</strong></span>
-        <span>⏰ Entrada: <strong>${h.entrada}</strong></span>
-        <span>🔚 Salida: <strong>${h.salida}</strong></span>
-        <span>☕ Descanso: <strong>${h.descanso} min</strong></span>
-        <span>📈 Horas/semana: <strong>${h.horasSemana}h</strong></span>
+        <span>📅 Días laborales: <strong>${h.diasLaborales.join('-')||'—'}</strong></span>
+        <span>📈 Horas/semana: <strong>${h.horasSemana||0}h</strong></span>
+        ${h.mesActualizado?`<span>🗓 Actualizado: <strong>${h.mesActualizado}</strong></span>`:''}
       </div>
     </div>` : ''}
   `;
+  // Calcular el total al abrir
+  if (h.tipo === 'fijo') setTimeout(() => recalcHorSemana(emp.id), 50);
 }
+
+// Activa/desactiva un día en la tabla de horario
+function onHorDiaToggle(empId, dia, checkbox) {
+  const tr = checkbox.closest('tr');
+  if (tr) tr.style.opacity = checkbox.checked ? '1' : '.5';
+  recalcHorSemana(empId);
+}
+window.onHorDiaToggle = onHorDiaToggle;
+
+// Suma las horas de los días activos y valida contra la jornada legal
+function recalcHorSemana(empId) {
+  const tbody = document.getElementById('hor-dias-tbody');
+  if (!tbody) return;
+  let total = 0;
+  tbody.querySelectorAll('tr').forEach(tr => {
+    const labora = tr.querySelector('input[type=checkbox]')?.checked;
+    const celdaHoras = tr.querySelector('.hor-dia-horas');
+    if (!labora) { if (celdaHoras) celdaHoras.textContent = '—'; return; }
+    const entrada  = tr.querySelector('input[data-f=entrada]')?.value;
+    const salida   = tr.querySelector('input[data-f=salida]')?.value;
+    const almuerzo = tr.querySelector('input[data-f=almuerzo]')?.checked;
+    let horas = parseFloat(calcHoras(entrada, salida)) || 0;
+    if (almuerzo) horas = Math.max(0, horas - 1);   // el almuerzo descuenta 1 hora
+    total += horas;
+    if (celdaHoras) celdaHoras.textContent = horas.toFixed(1) + 'h';
+  });
+  const totEl = document.getElementById('hor-total-semana');
+  const avisoEl = document.getElementById('hor-total-aviso');
+  const max = jornadaLegalActual();
+  if (totEl) {
+    totEl.textContent = total.toFixed(1) + 'h';
+    totEl.style.color = total > max ? 'var(--red)' : 'var(--green)';
+  }
+  if (avisoEl) {
+    if (total > max) {
+      avisoEl.style.color = 'var(--red)';
+      avisoEl.textContent = `⚠️ El total (${total.toFixed(1)}h) supera la jornada máxima legal de ${max} horas semanales. Ajusta los horarios.`;
+    } else {
+      avisoEl.style.color = 'var(--text-muted)';
+      avisoEl.textContent = `✅ ${total.toFixed(1)}h de ${max}h permitidas — quedan ${(max-total).toFixed(1)}h disponibles.`;
+    }
+  }
+  return total;
+}
+window.recalcHorSemana = recalcHorSemana;
 
 function toggleDiaHorario(empId, checkbox) {
   const dia = checkbox.dataset.dia;
@@ -6773,26 +6834,44 @@ function saveHorario(empId) {
   }
   const tipo = document.getElementById('hor-tipo')?.value || 'fijo';
   const existing = getHorarioEmp(empId);
-  const anterior = existing ? `${existing.entrada||''}-${existing.salida||''} (${existing.tipo||''})` : 'sin horario';
+  const anterior = `${existing.horasSemana||0}h (${existing.tipo||''})`;
+
+  let dias = {}, diasLaborales = [], horasSemana = 0;
+  if (tipo === 'fijo') {
+    const total = recalcHorSemana(empId);
+    const max = jornadaLegalActual();
+    if (total > max) {
+      if (!confirm(`El total de ${total.toFixed(1)}h supera la jornada máxima legal de ${max}h semanales.\n¿Guardar de todas formas?`)) return;
+    }
+    document.querySelectorAll('#hor-dias-tbody tr').forEach(tr => {
+      const d = tr.dataset.dia;
+      const labora = tr.querySelector('input[type=checkbox]')?.checked;
+      if (!labora) return;
+      diasLaborales.push(d);
+      dias[d] = {
+        entrada:  tr.querySelector('input[data-f=entrada]')?.value || '08:00',
+        salida:   tr.querySelector('input[data-f=salida]')?.value  || '17:00',
+        almuerzo: tr.querySelector('input[data-f=almuerzo]')?.checked || false,
+      };
+    });
+    horasSemana = total;
+  }
+
   SC.horarios[empId] = {
     tipo,
-    diasLaborales: existing.diasLaborales || ['L','M','X','J','V'],
-    entrada:     document.getElementById('hor-entrada')?.value    || '08:00',
-    salida:      document.getElementById('hor-salida')?.value     || '17:00',
-    descanso:    parseInt(document.getElementById('hor-descanso')?.value||'60'),
-    horasSemana: parseInt(document.getElementById('hor-horas')?.value||String(jornadaLegalActual())),
-    descripcion: document.getElementById('hor-descripcion')?.value|| '',
+    dias,
+    diasLaborales: tipo === 'fijo' ? diasLaborales : (existing.diasLaborales || ['L','M','X','J','V']),
+    horasSemana: tipo === 'fijo' ? horasSemana : parseInt(document.getElementById('hor-horas')?.value||String(jornadaLegalActual())),
+    descripcion: document.getElementById('hor-descripcion')?.value || '',
     mesActualizado: new Date().toISOString().slice(0,7),   // 'AAAA-MM'
     actualizadoPor: SC.user?.name || '',
   };
   saveHorarioLocal();
   const h = SC.horarios[empId];
   const emp = SC.empleados.find(e => e.id === empId);
-  // Notificar a RRHH: todo cambio de horario queda registrado en la base
-  const nuevo = `${h.entrada}-${h.salida} (${h.tipo})`;
   sbSaveHorario(empId, h);
   registrarAuditoria('cambio_horario','horario', empId,
-    `${emp?.name||empId}: ${anterior} → ${nuevo}`);
+    `${emp?.name||empId}: ${anterior} → ${h.horasSemana.toFixed?h.horasSemana.toFixed(1):h.horasSemana}h`);
   showNotif(esRRHHoAdmin()
     ? '🕐 Horario guardado ✅'
     : '🕐 Horario guardado ✅ — Recursos Humanos ha sido notificado del cambio');
@@ -11424,3 +11503,140 @@ async function procesarCargaMasivaNomina() {
 
 window.openCargaMasivaNomina      = openCargaMasivaNomina;
 window.procesarCargaMasivaNomina  = procesarCargaMasivaNomina;
+
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO: RETROALIMENTACIONES Y MEMORANDOS
+// Documentos que RRHH o el líder registran sobre un empleado,
+// independientes del proceso disciplinario formal.
+// ═══════════════════════════════════════════════════════════════
+
+const TIPOS_RETRO = {
+  retroalimentacion: { label:'Retroalimentación',        icon:'💬', color:'var(--blue)'  },
+  reconocimiento:    { label:'Reconocimiento / Felicitación', icon:'🏆', color:'var(--green)' },
+  memorando:         { label:'Memorando',                 icon:'📝', color:'var(--amber)' },
+  llamado_atencion:  { label:'Llamado de Atención',       icon:'⚠️', color:'var(--amber)' },
+  compromiso:        { label:'Acta de Compromiso',        icon:'🤝', color:'var(--navy)'  },
+};
+
+function dbToRetro(r) {
+  return { id:r.id, empId:r.emp_id, tipo:r.tipo, titulo:r.titulo||'', descripcion:r.descripcion||'',
+    fecha:r.fecha||'', creadoPor:r.creado_por||'', archivoUrl:r.archivo_url||null,
+    archivoNombre:r.archivo_nombre||'', requiereFirma:r.requiere_firma||false, firmado:r.firmado||false };
+}
+async function sbSaveRetro(x) {
+  await sbFetch('retroalimentaciones','POST',{
+    id:x.id, emp_id:x.empId, tipo:x.tipo, titulo:x.titulo||'', descripcion:x.descripcion||'',
+    fecha:x.fecha||'', creado_por:x.creadoPor||'', archivo_url:x.archivoUrl||null,
+    archivo_nombre:x.archivoNombre||'', requiere_firma:x.requiereFirma||false, firmado:x.firmado||false,
+  },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+
+function renderEmpRetro(emp, container) {
+  if (!emp) { container.innerHTML = '<div class="text-muted">No se encontró empleado.</div>'; return; }
+  const puedeCrear = esRRHHoAdmin() || (SC.user?.role === 'lider_area' && puedeEditarEmpleado(emp.id));
+  const lista = (SC.retros || []).filter(r => r.empId === emp.id)
+    .sort((a,b) => (b.fecha||'').localeCompare(a.fecha||''));
+
+  let html = `
+    <div class="section-header mb-4">
+      <div class="section-title" style="font-size:16px">📝 Retroalimentaciones y <span>Memorandos</span></div>
+      ${puedeCrear ? `<button class="btn btn-primary btn-sm" onclick="openRetroModal('${emp.id}')">+ Nuevo Documento</button>` : ''}
+    </div>`;
+
+  if (!lista.length) {
+    html += '<div class="glass-card p-6 text-center text-muted">No hay retroalimentaciones ni memorandos registrados.</div>';
+  } else {
+    html += '<div style="display:flex;flex-direction:column;gap:10px">';
+    lista.forEach(r => {
+      const t = TIPOS_RETRO[r.tipo] || { label:r.tipo, icon:'📄', color:'var(--navy)' };
+      html += `<div class="glass-card p-4" style="border-left:4px solid ${t.color}">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <div style="font-weight:700;color:var(--navy)">${t.icon} ${r.titulo || t.label}</div>
+            <div class="text-xs text-muted" style="margin:2px 0 8px">${t.label} · ${r.fecha} · por ${r.creadoPor}</div>
+            <div class="text-sm" style="white-space:pre-wrap">${r.descripcion || ''}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;align-items:end">
+            ${r.archivoUrl ? `<a href="${r.archivoUrl}" target="_blank" class="btn btn-ghost btn-sm">📎 Ver adjunto</a>` : ''}
+            ${r.requiereFirma ? (r.firmado ? '<span class="badge badge-green">✅ Firmado</span>' : '<span class="badge badge-yellow">✍️ Pendiente firma</span>') : ''}
+            ${esRRHHoAdmin() ? `<button class="btn btn-danger btn-sm" onclick="eliminarRetro('${r.id}','${emp.id}')">🗑</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+window.renderEmpRetro = renderEmpRetro;
+
+function openRetroModal(empId) {
+  SC._retroEmpId = empId;
+  document.getElementById('retro-tipo').value = 'retroalimentacion';
+  document.getElementById('retro-titulo').value = '';
+  document.getElementById('retro-desc').value = '';
+  document.getElementById('retro-firma').checked = false;
+  document.getElementById('retro-file').value = '';
+  document.getElementById('retro-file-lbl').textContent = '📎 Adjuntar documento (PDF, Word, Excel) — opcional';
+  SC._retroFile = null;
+  openModal('modal-retro');
+}
+window.openRetroModal = openRetroModal;
+
+function handleRetroFile(e) {
+  const f = e.target.files[0]; if (!f) return;
+  readFile(f, d => { SC._retroFile = { data:d, name:f.name }; document.getElementById('retro-file-lbl').textContent = '✅ ' + f.name; });
+}
+window.handleRetroFile = handleRetroFile;
+
+function guardarRetro() {
+  const empId = SC._retroEmpId;
+  const emp = SC.empleados.find(e => e.id === empId);
+  if (!emp) return;
+  const tipo = document.getElementById('retro-tipo').value;
+  const titulo = document.getElementById('retro-titulo').value.trim();
+  const desc = document.getElementById('retro-desc').value.trim();
+  if (!desc) { showNotif('Escribe la descripción del documento', 'error'); return; }
+
+  const registro = {
+    id: 'rt' + Date.now(), empId, tipo, titulo,
+    descripcion: desc, fecha: hoyISO(), creadoPor: SC.user?.name || '',
+    requiereFirma: document.getElementById('retro-firma').checked,
+    firmado: false, archivoUrl: null, archivoNombre: '',
+  };
+  if (!SC.retros) SC.retros = [];
+
+  const finalizar = () => {
+    SC.retros.push(registro);
+    sbSaveRetro(registro);
+    registrarAuditoria('crear','retroalimentacion', registro.id, `${tipo} · ${emp.name}`);
+    closeModal('modal-retro');
+    showNotif('📝 Documento registrado ✅');
+    renderEmpTab('retro');
+  };
+
+  if (SC._retroFile) {
+    uploadToDrive(SC._retroFile.data, SC._retroFile.name, 'retroalimentaciones', emp.name).then(ref => {
+      if (ref) { registro.archivoUrl = driveViewUrl(ref); registro.archivoNombre = SC._retroFile.name; }
+      SC._retroFile = null;
+      finalizar();
+    });
+  } else {
+    finalizar();
+  }
+}
+window.guardarRetro = guardarRetro;
+
+function eliminarRetro(id, empId) {
+  if (!esRRHHoAdmin()) { showNotif('Solo Recursos Humanos puede eliminar', 'error'); return; }
+  const r = SC.retros.find(x => x.id === id);
+  if (!r || !confirm(`¿Eliminar "${r.titulo || TIPOS_RETRO[r.tipo]?.label}"?`)) return;
+  SC.retros = SC.retros.filter(x => x.id !== id);
+  sbFetch('retroalimentaciones','DELETE',null,`?id=eq.${encodeURIComponent(id)}`);
+  registrarAuditoria('eliminar','retroalimentacion', id, '');
+  showNotif('Documento eliminado');
+  renderEmpTab('retro');
+}
+window.eliminarRetro = eliminarRetro;
+window.dbToRetro = dbToRetro;
