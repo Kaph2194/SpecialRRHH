@@ -231,6 +231,7 @@
         <div class="tab" onclick="empTab('retro',this)">📝 Retro. y Memorandos</div>
         <div class="tab" onclick="empTab('horario',this)">🕐 Horario</div>
         <div class="tab" onclick="empTab('descuentos',this)">💳 Descuentos</div>
+        <div class="tab" onclick="empTab('capacitacion',this)">🎓 Inducción y Capacitación</div>
       </div>
       <div id="emp-tab-content"></div>
     </div>
@@ -357,6 +358,7 @@
         <div class="tab" onclick="portalTab('contratos',this)">📄 Mis Contratos</div>
         <div class="tab" onclick="portalTab('vacaciones',this)">🏖 Mis Vacaciones</div>
         <div class="tab" onclick="portalTab('nomina',this)">💰 Mi Nómina</div>
+        <div class="tab" onclick="portalTab('capacitaciones',this)">🎓 Mis Capacitaciones</div>
         <div class="tab" onclick="portalTab('certificados',this)">📄 Certificados</div>
         <div class="tab" onclick="portalTab('bodega',this)">🗄 Bodega</div>
         <div class="tab" onclick="portalTab('denuncias',this)">🔒 Denuncias</div>
@@ -382,8 +384,24 @@
         <div class="tab" onclick="gerTab('candidatos',this)">🔍 Candidatos</div>
         <div class="tab" onclick="gerTab('scores',this)">📈 Scores</div>
         <div class="tab" onclick="gerTab('empresas',this)">🏛 Empresas</div>
+        <div class="tab" onclick="gerTab('hseq',this)">🦺 HSEQ & Capacitación</div>
       </div>
       <div id="ger-content"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- HSEQ & SIG                                      -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="view-hseq" class="view">
+      <div id="hseq-root"></div>
+    </div>
+
+    <!-- COMITÉS (acceso de lectura para los integrantes) -->
+    <div id="view-comite-copasst" class="view">
+      <div id="comite-copasst-content"></div>
+    </div>
+    <div id="view-comite-cocolab" class="view">
+      <div id="comite-cocolab-content"></div>
     </div>
 
     <!-- ═══════════════════════════════════════════════ -->
@@ -1240,6 +1258,299 @@
         </button>
       </div>
       <button class="btn btn-primary" style="width:100%" onclick="guardarRetro()">Guardar Documento</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ MODALES · HSEQ, INDUCCIONES Y CAPACITACIONES ═══════════ -->
+
+<!-- Crear / editar capacitación -->
+<div class="modal-overlay" id="modal-capacitacion">
+  <div class="modal" style="max-width:660px;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-cap-title">🎓 Nueva Capacitación</div>
+      <button class="modal-close" onclick="closeModal('modal-capacitacion')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Nombre de la capacitación *</label>
+        <input type="text" class="form-input" id="cap-titulo" placeholder="Ej: Inducción General SST"></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Tipo *</label>
+          <select class="form-select" id="cap-tipo">
+            <option value="induccion">🚀 Inducción</option>
+            <option value="reinduccion">🔄 Reinducción</option>
+            <option value="capacitacion">🎓 Capacitación</option>
+            <option value="entrenamiento">🛠 Entrenamiento en el puesto</option>
+            <option value="sst">🦺 Capacitación SST</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">Área destinataria</label>
+          <select class="form-select" id="cap-area"></select></div>
+        <div class="form-group"><label class="form-label">Categoría / Tema</label>
+          <input type="text" class="form-input" id="cap-categoria" placeholder="Ej: Alturas, Calidad, Convivencia"></div>
+        <div class="form-group"><label class="form-label">Instructor / Facilitador</label>
+          <input type="text" class="form-input" id="cap-instructor" placeholder="Nombre o entidad"></div>
+        <div class="form-group"><label class="form-label">Duración (horas)</label>
+          <input type="number" step="0.5" min="0" class="form-input" id="cap-duracion" placeholder="Ej: 4"></div>
+        <div class="form-group"><label class="form-label">Vigencia del certificado (meses)</label>
+          <input type="number" min="0" class="form-input" id="cap-vigencia" placeholder="0 = no vence"></div>
+        <div class="form-group"><label class="form-label">Fecha</label>
+          <input type="date" class="form-input" id="cap-fecha"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Descripción / Objetivos</label>
+        <textarea class="form-input" id="cap-desc" rows="3" placeholder="Contenido y objetivos de la capacitación..."></textarea></div>
+      <div class="form-group" style="display:flex;gap:20px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="cap-obligatoria" checked> <span class="text-sm">Obligatoria</span></label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="cap-activa" checked> <span class="text-sm">Activa</span></label>
+      </div>
+
+      <hr class="divider">
+      <div class="form-label" style="margin-bottom:8px">📚 Material de la capacitación</div>
+      <div class="info-box mb-3" style="font-size:12px">
+        Sube presentaciones y documentos, o pega el enlace de un video (YouTube, Drive, Vimeo).
+        El colaborador verá todo el material en su portal.
+      </div>
+      <div id="cap-mats-list" style="margin-bottom:10px"></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Tipo de material</label>
+          <select class="form-select" id="cap-mat-tipo">
+            <option value="presentacion">📊 Presentación</option>
+            <option value="documento">📄 Documento</option>
+            <option value="video">🎬 Video</option>
+            <option value="enlace">🔗 Enlace</option>
+            <option value="evaluacion">📝 Evaluación</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">Nombre visible</label>
+          <input type="text" class="form-input" id="cap-mat-nombre" placeholder="Ej: Presentación módulo 1"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Enlace (para videos o páginas)</label>
+        <div style="display:flex;gap:8px">
+          <input type="url" class="form-input" id="cap-mat-url" placeholder="https://..." style="flex:1">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="agregarCapEnlace()">🔗 Agregar</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <input type="file" id="cap-mat-file" style="display:none"
+          accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.mp4,.jpg,.jpeg,.png"
+          onchange="handleCapMaterialFile(event)">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('cap-mat-file').click()">
+          📎 Subir archivo (PDF, PowerPoint, Word, video)
+        </button>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarCapacitacion()">Guardar Capacitación</button>
+    </div>
+  </div>
+</div>
+
+<!-- Asignar capacitación a varios colaboradores -->
+<div class="modal-overlay" id="modal-asignar-cap">
+  <div class="modal" style="max-width:560px;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title">👥 Asignar Capacitación</div>
+      <button class="modal-close" onclick="closeModal('modal-asignar-cap')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="info-box mb-3" style="font-size:13px">
+        Capacitación: <b id="asig-cap-nombre">—</b>
+      </div>
+      <div class="filter-bar mb-3">
+        <select class="form-select" id="asig-area" style="width:180px" onchange="renderAsignarLista()"></select>
+        <input class="form-input search-input" id="asig-buscar" placeholder="🔍 Buscar colaborador..." oninput="renderAsignarLista()">
+      </div>
+      <div class="flex gap-2 mb-2">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleTodosAsignar(true)">✅ Seleccionar todos</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleTodosAsignar(false)">⬜ Quitar selección</button>
+      </div>
+      <div id="asig-lista" style="max-height:320px;overflow-y:auto;border:1px solid var(--surface);border-radius:10px;margin-bottom:14px"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarAsignacionCap()">Asignar a los seleccionados</button>
+    </div>
+  </div>
+</div>
+
+<!-- Asignar capacitación desde la ficha del colaborador -->
+<div class="modal-overlay" id="modal-asignar-cap-emp">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <div class="modal-title">🎓 Asignar Capacitación</div>
+      <button class="modal-close" onclick="closeModal('modal-asignar-cap-emp')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="info-box mb-3" style="font-size:13px">Colaborador: <b id="asigemp-nombre">—</b></div>
+      <div class="form-group"><label class="form-label">Capacitación *</label>
+        <select class="form-select" id="asigemp-cap"></select></div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarAsignacionCapEmp()">Asignar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Documento HSEQ (políticas, formatos, procedimientos) -->
+<div class="modal-overlay" id="modal-hseq-doc">
+  <div class="modal" style="max-width:560px;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-hdoc-title">📜 Nuevo Documento</div>
+      <button class="modal-close" onclick="closeModal('modal-hseq-doc')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Nombre del documento *</label>
+        <input type="text" class="form-input" id="hdoc-titulo" placeholder="Ej: Política de Seguridad y Salud en el Trabajo"></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Tipo *</label>
+          <select class="form-select" id="hdoc-tipo"></select></div>
+        <div class="form-group"><label class="form-label">Código</label>
+          <input type="text" class="form-input" id="hdoc-codigo" placeholder="Ej: PO-HSEQ-001"></div>
+        <div class="form-group"><label class="form-label">Versión</label>
+          <input type="text" class="form-input" id="hdoc-version" placeholder="Ej: 3"></div>
+        <div class="form-group"><label class="form-label">Fecha de vigencia</label>
+          <input type="date" class="form-input" id="hdoc-vigencia"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Descripción</label>
+        <textarea class="form-input" id="hdoc-desc" rows="3" placeholder="Alcance y contenido del documento..."></textarea></div>
+      <div class="form-group" id="hdoc-visible-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="hdoc-visible" checked>
+          <span class="text-sm">Visible para todos los colaboradores en su portal</span>
+        </label>
+      </div>
+      <div class="form-group">
+        <input type="file" id="hdoc-file" style="display:none"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png" onchange="handleHseqDocFile(event)">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('hdoc-file').click()">
+          <span id="hdoc-file-lbl">📎 Adjuntar archivo (PDF, Word, Excel, imagen)</span>
+        </button>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarHseqDoc()">Guardar Documento</button>
+    </div>
+  </div>
+</div>
+
+<!-- Certificación ISO y otras -->
+<div class="modal-overlay" id="modal-hseq-cert">
+  <div class="modal" style="max-width:560px;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-hcert-title">🏅 Nueva Certificación</div>
+      <button class="modal-close" onclick="closeModal('modal-hseq-cert')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Norma o certificación *</label>
+        <input type="text" class="form-input" id="hcert-norma" placeholder="Ej: ISO 45001:2018"></div>
+      <div class="form-group"><label class="form-label">Alcance</label>
+        <textarea class="form-input" id="hcert-alcance" rows="2" placeholder="Alcance certificado..."></textarea></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Ente certificador</label>
+          <input type="text" class="form-input" id="hcert-ente" placeholder="Ej: ICONTEC, SGS, Bureau Veritas"></div>
+        <div class="form-group"><label class="form-label">Número de certificado</label>
+          <input type="text" class="form-input" id="hcert-numero"></div>
+        <div class="form-group"><label class="form-label">Empresa</label>
+          <select class="form-select" id="hcert-empresa"></select></div>
+        <div class="form-group"><label class="form-label">Estado</label>
+          <select class="form-select" id="hcert-estado">
+            <option value="vigente">✅ Vigente</option>
+            <option value="en_proceso">🔄 En proceso</option>
+            <option value="vencida">⛔ Vencida</option>
+            <option value="suspendida">⏸ Suspendida</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">Fecha de emisión</label>
+          <input type="date" class="form-input" id="hcert-emision"></div>
+        <div class="form-group"><label class="form-label">Fecha de vencimiento</label>
+          <input type="date" class="form-input" id="hcert-vence"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Observaciones</label>
+        <textarea class="form-input" id="hcert-obs" rows="2"></textarea></div>
+      <div class="form-group">
+        <input type="file" id="hcert-file" style="display:none" accept=".pdf,.jpg,.jpeg,.png"
+          onchange="handleHseqCertFile(event)">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('hcert-file').click()">
+          <span id="hcert-file-lbl">📎 Adjuntar certificado (PDF o imagen)</span>
+        </button>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarHseqCert()">Guardar Certificación</button>
+    </div>
+  </div>
+</div>
+
+<!-- Integrante de comité -->
+<div class="modal-overlay" id="modal-comite-miembro">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-cmiem-title">👤 Nuevo Integrante</div>
+      <button class="modal-close" onclick="closeModal('modal-comite-miembro')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="info-box mb-3" style="font-size:12px">
+        El integrante designado obtiene acceso de <b>solo lectura</b> al módulo de su comité
+        (integrantes, documentos y actas) desde su portal.
+      </div>
+      <div class="form-group"><label class="form-label">Colaborador *</label>
+        <select class="form-select" id="cmiem-emp"></select></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Rol en el comité</label>
+          <select class="form-select" id="cmiem-rol">
+            <option value="presidente">⭐ Presidente</option>
+            <option value="secretario">✍️ Secretario</option>
+            <option value="principal">👤 Principal</option>
+            <option value="suplente">👥 Suplente</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">Representación</label>
+          <select class="form-select" id="cmiem-repr">
+            <option value="trabajadores">👷 Trabajadores</option>
+            <option value="empleador">🏢 Empleador</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">Inicio del período</label>
+          <input type="date" class="form-input" id="cmiem-inicio"></div>
+        <div class="form-group"><label class="form-label">Fin del período</label>
+          <input type="date" class="form-input" id="cmiem-fin"></div>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="cmiem-activo" checked>
+          <span class="text-sm">Integrante activo (con acceso al módulo)</span>
+        </label>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarComiteMiembro()">Guardar Integrante</button>
+    </div>
+  </div>
+</div>
+
+<!-- Acta de comité -->
+<div class="modal-overlay" id="modal-comite-acta">
+  <div class="modal" style="max-width:560px;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-cacta-title">📋 Nueva Acta</div>
+      <button class="modal-close" onclick="closeModal('modal-comite-acta')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Número de acta</label>
+          <input type="text" class="form-input" id="cacta-numero" placeholder="Ej: 004-2026"></div>
+        <div class="form-group"><label class="form-label">Fecha</label>
+          <input type="date" class="form-input" id="cacta-fecha"></div>
+        <div class="form-group"><label class="form-label">Tipo</label>
+          <select class="form-select" id="cacta-tipo">
+            <option value="reunion">📋 Reunión ordinaria</option>
+            <option value="constitucion">🏛 Acta de constitución</option>
+            <option value="eleccion">🗳 Elección / Votación</option>
+            <option value="investigacion">🔎 Investigación</option>
+            <option value="informe">📊 Informe de gestión</option>
+            <option value="capacitacion">🎓 Capacitación del comité</option>
+          </select></div>
+      </div>
+      <div class="form-group"><label class="form-label">Tema / Asunto *</label>
+        <input type="text" class="form-input" id="cacta-tema" placeholder="Ej: Inspección de puestos de trabajo"></div>
+      <div class="form-group"><label class="form-label">Desarrollo de la reunión</label>
+        <textarea class="form-input" id="cacta-desc" rows="4"></textarea></div>
+      <div class="form-group"><label class="form-label">Compromisos y responsables</label>
+        <textarea class="form-input" id="cacta-comp" rows="3"></textarea></div>
+      <div class="form-group"><label class="form-label">Asistentes</label>
+        <textarea class="form-input" id="cacta-asist" rows="2" placeholder="Nombres de los asistentes..."></textarea></div>
+      <div class="form-group">
+        <input type="file" id="cacta-file" style="display:none" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+          onchange="handleComiteActaFile(event)">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('cacta-file').click()">
+          <span id="cacta-file-lbl">📎 Adjuntar acta firmada (PDF) — opcional</span>
+        </button>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarComiteActa()">Guardar Acta</button>
     </div>
   </div>
 </div>
@@ -2601,5 +2912,6 @@ function handlePermDrop(e) {
 </script>
 
 <script src="app.js?v=38"></script>
+<script src="hseq.js?v=1"></script>
 </body>
 </html>
