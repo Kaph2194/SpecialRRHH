@@ -498,6 +498,10 @@ async function loadFromSupabase() {
       if (typeof cargarHSEQDesdeSupabase === 'function') {
         try { await cargarHSEQDesdeSupabase(); } catch(e) { console.warn('HSEQ:', e.message); }
       }
+      // Buzón de sugerencias y peticiones (buzon.js)
+      if (typeof cargarBuzonDesdeSupabase === 'function') {
+        try { await cargarBuzonDesdeSupabase(); } catch(e) { console.warn('Buzón:', e.message); }
+      }
       hideLoadingBanner();
       console.log('✅ Supabase OK —', SC.empleados.length, 'empleados cargados');
       // Reconstruir usuarios de empleados en memoria
@@ -1141,7 +1145,7 @@ function empVisibleParaUsuario(empId) {
 // Vistas permitidas para líder de área (lista blanca de navegación)
 const VISTAS_LIDER_AREA = ['empleados','empleado-detail','novedades-area','malla-area',
   'permisos-admin','incapacidades-admin','vacaciones-admin','disciplinarios',
-  'portal','portal-retirado','comite-copasst','comite-cocolab'];
+  'portal','portal-retirado','comite-copasst','comite-cocolab','buzon'];
 
 // ─── SIDEBAR ──────────────────────────────────────────────
 function buildSidebar() {
@@ -1156,6 +1160,7 @@ function buildSidebar() {
     } else {
       addNavItem(nav, '🏠', 'Mi Portal', 'portal');
       // Integrantes elegidos de COPASST / COCOLAB: acceso de lectura al comité
+      if (typeof agregarNavBuzon === 'function') agregarNavBuzon(nav);
       if (typeof agregarNavComites === 'function') agregarNavComites(nav);
     }
     return;
@@ -1170,6 +1175,7 @@ function buildSidebar() {
       addNavItem(nav, '🗄', 'Bodega Documental', 'bodega');
       // Módulo propio de HSEQ: políticas, capacitaciones, certificados,
       // COPASST, COCOLAB y certificaciones ISO
+      if (typeof agregarNavBuzon === 'function') agregarNavBuzon(nav);
       if (typeof agregarNavHSEQ === 'function') agregarNavHSEQ(nav);
       return;
     }
@@ -1192,6 +1198,7 @@ function buildSidebar() {
     if (String(u.areaId) === '5') {
       addNavItem(nav, '💰', 'Formatos de Nómina', 'nomina-formatos');
     }
+    if (typeof agregarNavBuzon === 'function') agregarNavBuzon(nav);
     if (typeof agregarNavComites === 'function') agregarNavComites(nav);
     return;
   }
@@ -1213,6 +1220,7 @@ function buildSidebar() {
   addNavItem(nav, '💰', 'Formatos de Nómina', 'nomina-formatos');
   addNavItem(nav, '📄', 'Certificados', 'solicitudes-cert');
   addNavItem(nav, '🔄', 'Cambios de Datos', 'solicitudes-cambio');
+  if (typeof agregarNavBuzon === 'function') agregarNavBuzon(nav);
   // HSEQ & SIG: políticas, capacitaciones, comités y certificaciones
   if (typeof agregarNavHSEQ === 'function') agregarNavHSEQ(nav);
   addNavSep(nav, 'REPORTES');
@@ -1285,6 +1293,7 @@ const VIEW_TITLES = {
   hseq: ['HSEQ & SIG', 'Políticas, capacitaciones, comités y certificaciones'],
   'comite-copasst': ['COPASST', 'Comité Paritario de Seguridad y Salud en el Trabajo'],
   'comite-cocolab': ['COCOLAB', 'Comité de Convivencia Laboral'],
+  buzon: ['Buzón', 'Sugerencias, peticiones y consultas de los colaboradores'],
 };
 
 function showView(viewId) {
@@ -1295,7 +1304,7 @@ function showView(viewId) {
     if (String(SC.user?.areaId) === '5')  permitidas.push('nomina-formatos'); // solo líder Financiera
     // Líder HSEQ: su portal, la bodega y su propio módulo (HSEQ & SIG)
     if (String(SC.user?.areaId) === '14') permitidas = ['portal','portal-retirado','bodega',
-      'hseq','comite-copasst','comite-cocolab'];
+      'hseq','comite-copasst','comite-cocolab','buzon'];
     if (!permitidas.includes(viewId)) viewId = 'empleados';
   }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -1314,7 +1323,13 @@ function showView(viewId) {
   const actions = document.getElementById('topbar-actions');
   actions.innerHTML = '';
 
-  if (viewId === 'hseq') {
+  if (viewId === 'buzon') {
+    if (typeof buzTieneBandeja === 'function' && !buzTieneBandeja()) {
+      showNotif('No tienes bandeja de entrada en el buzón', 'error'); return;
+    }
+    renderBuzon();
+  }
+  else if (viewId === 'hseq') {
     if (typeof puedeVerHSEQ === 'function' && !puedeVerHSEQ()) {
       showNotif('No tienes acceso al módulo HSEQ', 'error'); return;
     }
@@ -4686,6 +4701,10 @@ function renderPortal(tab) {
   }
   else if (tab === 'denuncias') {
     renderPortalDenuncias();
+  }
+  else if (tab === 'buzon') {
+    if (typeof renderPortalBuzon === 'function') renderPortalBuzon();
+    else content.innerHTML = '<div class="text-muted">Buzón no disponible.</div>';
   }
   else if (tab === 'capacitaciones') {
     if (typeof renderPortalCapacitaciones === 'function') renderPortalCapacitaciones();

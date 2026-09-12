@@ -361,6 +361,7 @@
         <div class="tab" onclick="portalTab('capacitaciones',this)">🎓 Mis Capacitaciones</div>
         <div class="tab" onclick="portalTab('certificados',this)">📄 Certificados</div>
         <div class="tab" onclick="portalTab('bodega',this)">🗄 Bodega</div>
+        <div class="tab" onclick="portalTab('buzon',this)">✉️ Buzón</div>
         <div class="tab" onclick="portalTab('denuncias',this)">🔒 Denuncias</div>
       </div>
       <div id="portal-content"></div>
@@ -387,6 +388,13 @@
         <div class="tab" onclick="gerTab('hseq',this)">🦺 HSEQ & Capacitación</div>
       </div>
       <div id="ger-content"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- BUZÓN DE SUGERENCIAS Y PETICIONES               -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="view-buzon" class="view">
+      <div id="buzon-root"></div>
     </div>
 
     <!-- ═══════════════════════════════════════════════ -->
@@ -2913,6 +2921,7 @@ function handlePermDrop(e) {
 
 <script src="app.js?v=38"></script>
 <script src="hseq.js?v=1"></script>
-<script src="pendientes.js?v=1"></script>
+<script src="pendientes.js?v=2"></script>
+<script src="buzon.js?v=1"></script>
 </body>
 </html>

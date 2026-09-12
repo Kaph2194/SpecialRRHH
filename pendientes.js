@@ -475,7 +475,22 @@ function construirPendientes() {
           view:'hseq', items: iso });
   }
 
-  // ── 17 · PERÍODOS DE PRUEBA POR VENCER ───────────────────────
+  // ── 17 · BUZÓN: MENSAJES SIN ATENDER ─────────────────────────
+  if (typeof buzTieneBandeja === 'function' && buzTieneBandeja()) {
+    const cats = (typeof BUZON_CATEGORIAS !== 'undefined') ? BUZON_CATEGORIAS : {};
+    const items = (typeof buzSinAtender === 'function' ? buzSinAtender() : [])
+      .map(m => ({
+        empId: m.empId, titulo: m.anonimo ? '🕵️ Remitente anónimo' : (m.remitente || pendNombre(m.empId)),
+        sub: (cats[m.categoria]?.label || m.categoria) + ' · ' + pendEsc(m.asunto),
+        extra: m.prioridad === 'alta' ? '⚠️ Marcado como urgente' : '',
+        dias: pendDiasEspera(m.fecha),
+        acciones: `<button class="btn btn-ghost btn-sm" onclick="pendIr('buzon')" title="Abrir el buzón">→</button>`,
+      }));
+    add({ key:'buzon', icon:'✉️', label:'Mensajes del buzón por atender', color:'var(--blue)',
+          view:'buzon', nota:'Sugerencias, peticiones y consultas de los colaboradores.', items });
+  }
+
+  // ── 18 · PERÍODOS DE PRUEBA POR VENCER ───────────────────────
   if (verAdmin() || pendEsLider()) {
     const hoy = new Date().setHours(0,0,0,0);
     const items = SC.empleados
