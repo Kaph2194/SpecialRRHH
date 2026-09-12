@@ -1451,62 +1451,68 @@ function updateCandPositions() {
 // ─── DASHBOARD ────────────────────────────────────────────
 function renderDashboard() {
   const stats = document.getElementById('dash-stats');
-  const empActivos = SC.empleados.filter(e => e.status === 'activo').length;
-  const candTotal = SC.candidatos.length;
+  const empActivos   = SC.empleados.filter(e => e.status === 'activo').length;
+  const candTotal    = SC.candidatos.length;
   const permisosPend = SC.permisos.filter(p => p.status === 'pendiente').length;
-  const incapActivas = SC.incapacidades.filter(i => i.status === 'pendiente').length;
+  const totalPend    = (typeof pendTotal === 'function') ? pendTotal() : permisosPend;
 
+  const colorPend = totalPend === 0 ? 'var(--green)' : totalPend > 20 ? 'var(--red)' : 'var(--amber)';
   stats.innerHTML = `
-    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-label">Empleados Activos</div><div class="stat-value">${empActivos}</div><div class="stat-sub">${SC.empresas.length} empresas</div></div>
-    <div class="stat-card"><div class="stat-icon">🔍</div><div class="stat-label">Candidatos</div><div class="stat-value">${candTotal}</div><div class="stat-sub">${SC.candidatos.filter(c=>c.status==='evaluacion').length} en evaluación</div></div>
-    <div class="stat-card"><div class="stat-icon">🗓</div><div class="stat-label">Permisos Pendientes</div><div class="stat-value">${permisosPend}</div><div class="stat-sub">Por aprobar</div></div>
-    <div class="stat-card"><div class="stat-icon">🏥</div><div class="stat-label">Incapacidades</div><div class="stat-value">${incapActivas}</div><div class="stat-sub">Activas</div></div>
+    <div class="stat-card" style="border-left:4px solid ${colorPend};cursor:pointer"
+         onclick="document.getElementById('dash-pendientes')?.scrollIntoView({behavior:'smooth'})">
+      <div class="stat-icon">📌</div><div class="stat-label">Pendientes de gestión</div>
+      <div class="stat-value" style="color:${colorPend}">${totalPend}</div>
+      <div class="stat-sub">${totalPend === 0 ? 'Todo al día' : 'Requieren tu atención'}</div></div>
+    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-label">Empleados Activos</div>
+      <div class="stat-value">${empActivos}</div><div class="stat-sub">${SC.empresas.length} empresas</div></div>
+    <div class="stat-card"><div class="stat-icon">🔍</div><div class="stat-label">Candidatos</div>
+      <div class="stat-value">${candTotal}</div>
+      <div class="stat-sub">${SC.candidatos.filter(c=>c.status==='evaluacion').length} en evaluación</div></div>
+    <div class="stat-card"><div class="stat-icon">🗓</div><div class="stat-label">Permisos Pendientes</div>
+      <div class="stat-value">${permisosPend}</div><div class="stat-sub">Por aprobar</div></div>
   `;
 
-  // Empresas grid
+  // Centro de pendientes (pendientes.js)
+  const cp = document.getElementById('dash-pendientes');
+  if (cp && typeof renderCentroPendientes === 'function') renderCentroPendientes(cp);
+
+  // Empresas
   const eg = document.getElementById('empresas-grid');
-  eg.innerHTML = '';
-  SC.empresas.forEach(emp => {
-    const count = SC.empleados.filter(e => e.empresaId === emp.id).length;
-    eg.insertAdjacentHTML('beforeend', `
-      <div class="empresa-dash-card">
-        <div class="empresa-icon" style="background:${emp.color}">${emp.name.substring(0,2).toUpperCase()}</div>
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:13px;color:var(--navy)">${emp.name}</div>
-          <div class="text-sm text-muted">NIT: ${emp.nit}</div>
-        </div>
-        <div class="badge badge-navy">${count} empleados</div>
-      </div>`);
-  });
+  if (eg) {
+    eg.innerHTML = '';
+    SC.empresas.forEach(emp => {
+      const count = SC.empleados.filter(e => e.empresaId === emp.id).length;
+      eg.insertAdjacentHTML('beforeend', `
+        <div class="empresa-dash-card">
+          <div class="empresa-icon" style="background:${emp.color}">${emp.name.substring(0,2).toUpperCase()}</div>
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:13px;color:var(--navy)">${emp.name}</div>
+            <div class="text-sm text-muted">NIT: ${emp.nit}</div>
+          </div>
+          <div class="badge badge-navy">${count} empleados</div>
+        </div>`);
+    });
+  }
 
-  // Recent candidatos
+  // Candidatos recientes
   const rc = document.getElementById('recent-candidates');
-  rc.innerHTML = '';
-  SC.candidatos.slice(-4).reverse().forEach(c => {
-    rc.insertAdjacentHTML('beforeend', `
-      <div class="glass-card p-4 mb-2 flex items-center gap-3">
-        <div class="avatar" style="width:32px;height:32px;font-size:12px">${c.name[0]}</div>
-        <div style="flex:1"><div style="font-size:13px;font-weight:500">${c.name}</div><div class="text-sm text-muted">${c.cargo}</div></div>
-        ${statusBadge(c.status)}
-      </div>`);
-  });
-
-  // Permisos pendientes
-  const pp = document.getElementById('pending-permisos');
-  pp.innerHTML = '';
-  const pend = SC.permisos.filter(p => p.status === 'pendiente');
-  if (!pend.length) { pp.innerHTML = '<div class="text-sm text-muted p-4">No hay permisos pendientes.</div>'; return; }
-  pend.forEach(p => {
-    const emp = SC.empleados.find(e => e.id === p.empId);
-    pp.insertAdjacentHTML('beforeend', `
-      <div class="glass-card p-4 mb-2 flex items-center justify-between gap-3">
-        <div>
-          <div style="font-size:13px;font-weight:500">${emp?.name||'—'}</div>
-          <div class="text-sm text-muted">${tipoPermisoLabel(p.tipo)} · ${p.inicio}</div>
-        </div>
-        ${puedeAprobarPermiso(p) ? `<div class="flex gap-2"><button class="btn btn-ghost btn-sm" onclick="actualizarPermiso('${p.id}','aprobado')">✅</button><button class="btn btn-danger btn-sm" onclick="actualizarPermiso('${p.id}','rechazado')">❌</button></div>` : ''}
-      </div>`);
-  });
+  if (rc) {
+    rc.innerHTML = '';
+    const recientes = SC.candidatos.slice(-4).reverse();
+    if (!recientes.length) {
+      rc.innerHTML = '<div class="glass-card p-4 text-sm text-muted">No hay candidatos registrados.</div>';
+    } else {
+      recientes.forEach(c => {
+        rc.insertAdjacentHTML('beforeend', `
+          <div class="glass-card p-4 mb-2 flex items-center gap-3">
+            <div class="avatar" style="width:32px;height:32px;font-size:12px">${c.name[0]}</div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:500">${c.name}</div>
+              <div class="text-sm text-muted">${c.cargo||''}</div></div>
+            ${statusBadge(c.status)}
+          </div>`);
+      });
+    }
+  }
 }
 
 // ─── EMPLEADOS ────────────────────────────────────────────

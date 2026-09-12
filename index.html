@@ -154,6 +154,10 @@
     <!-- ═══════════════════════════════════════════════ -->
     <div id="view-dashboard" class="view active">
       <div class="stats-grid" id="dash-stats"></div>
+
+      <!-- Centro de Pendientes: todo lo que espera gestión o visto bueno -->
+      <div id="dash-pendientes" class="mt-6"></div>
+
       <div class="two-col mt-6">
         <div>
           <div class="section-header mb-4">
@@ -166,10 +170,6 @@
             <div class="section-title">Candidatos <span>Recientes</span></div>
           </div>
           <div id="recent-candidates"></div>
-          <div class="section-header mt-6 mb-4">
-            <div class="section-title">Permisos <span>Pendientes</span></div>
-          </div>
-          <div id="pending-permisos"></div>
         </div>
       </div>
     </div>
@@ -2913,5 +2913,6 @@ function handlePermDrop(e) {
 
 <script src="app.js?v=38"></script>
 <script src="hseq.js?v=1"></script>
+<script src="pendientes.js?v=1"></script>
 </body>
 </html>
