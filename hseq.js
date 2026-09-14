@@ -173,6 +173,7 @@ function dbToCapacitacion(r) {
     fecha: r.fecha || '', instructor: r.instructor || '',
     materiales: Array.isArray(mats) ? mats : [],
     creadoPor: r.creado_por || '', activo: r.activo !== false,
+    plataformaNombre: r.plataforma_nombre || '', plataformaUrl: r.plataforma_url || '',
   };
 }
 async function sbSaveCapacitacion(c) {
@@ -183,6 +184,7 @@ async function sbSaveCapacitacion(c) {
     vigencia_meses:c.vigenciaMeses || 0, fecha:c.fecha || '',
     instructor:c.instructor || '', materiales:c.materiales || [],
     creado_por:c.creadoPor || '', activo:c.activo !== false,
+    plataforma_nombre:c.plataformaNombre || '', plataforma_url:c.plataformaUrl || '',
   },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 
@@ -307,6 +309,7 @@ async function cargarHSEQDesdeSupabase() {
     if (certs !== null) SC.hseqCerts       = certs.map(dbToHseqCert);
     if (miem  !== null) SC.comiteMiembros  = miem.map(dbToComiteMiembro);
     if (actas !== null) SC.comiteActas     = actas.map(dbToComiteActa);
+    await cargarCertExternos();
   } catch(e) {
     console.warn('HSEQ: no se pudieron cargar los datos —', e.message);
   }
@@ -543,15 +546,7 @@ function renderHSEQCapacitaciones(container) {
             ${c.instructor ? ` · 👨‍🏫 ${hseqEsc(c.instructor)}` : ''}
           </div>
           ${c.descripcion ? `<div class="text-sm" style="white-space:pre-wrap;margin-bottom:8px">${hseqEsc(c.descripcion)}</div>` : ''}
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            ${(c.materiales || []).length
-              ? c.materiales.map((m, i) => {
-                  const tm = TIPOS_MATERIAL[m.tipo] || { icon:'📎', label:m.tipo };
-                  return `<a href="${m.url}" target="_blank" class="btn btn-ghost btn-sm"
-                            title="${tm.label}">${tm.icon} ${hseqEsc(m.nombre || tm.label)}</a>`;
-                }).join('')
-              : '<span class="text-xs text-muted">Sin material cargado todavía</span>'}
-          </div>
+          ${materialesHTML(c, false)}
         </div>
         <div style="min-width:190px">
           <div class="text-xs text-muted mb-1">Cumplimiento: <b>${hechas}/${asigs.length}</b> (${pctOk}%)</div>
@@ -587,7 +582,8 @@ function renderHSEQCertificados(container) {
   let filas = (SC.capAsignaciones || []).filter(a => idsVis.has(a.empId));
   const total       = filas.length;
   const completadas = filas.filter(a => a.estado === 'completada').length;
-  const porValidar  = filas.filter(a => a.certificadoEstado === 'pendiente').length;
+  const extPend     = (SC.certExternos || []).filter(c => idsVis.has(c.empId) && c.estado === 'pendiente').length;
+  const porValidar  = filas.filter(a => a.certificadoEstado === 'pendiente').length + extPend;
   const vencidos    = filas.filter(a => {
     const cap = SC.capacitaciones.find(c => c.id === a.capId);
     return hseqVigencia(a, cap).estado === 'vencido';
@@ -689,7 +685,7 @@ function renderHSEQCertificados(container) {
              <button class="btn btn-danger btn-sm" onclick="validarCertificadoCap('${a.id}',false)" title="Rechazar certificado">✗</button>` : ''}
         ${!hseqSoloLectura() && !a.certificadoUrl
           ? `<label class="btn btn-ghost btn-sm" style="cursor:pointer" title="Cargar certificado en nombre del colaborador">📤
-               <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none"
+               <input type="file" accept="application/pdf,.pdf" style="display:none"
                  onchange="subirCertificadoCap('${a.id}',event)"></label>` : ''}
         ${!hseqSoloLectura()
           ? `<button class="btn btn-danger btn-sm" onclick="eliminarAsignacionCap('${a.id}')" title="Quitar asignación">🗑</button>` : ''}
@@ -698,8 +694,30 @@ function renderHSEQCertificados(container) {
   });
 
   html += '</tbody></table></div></div>';
+  html += bloqueCertExternosHSEQ();
   container.innerHTML = html;
 }
+
+// Certificados de cursos externos de todos los colaboradores visibles
+function bloqueCertExternosHSEQ() {
+  const idsVis = new Set(hseqEmpleadosVisibles().map(e => e.id));
+  const lista  = (SC.certExternos || []).filter(c => idsVis.has(c.empId))
+    .sort((a,b) => (a.estado === 'pendiente' ? 0 : 1) - (b.estado === 'pendiente' ? 0 : 1));
+  const pend = lista.filter(c => c.estado === 'pendiente').length;
+  return `
+    <div class="section-header mt-6 mb-3">
+      <div class="section-title" style="font-size:15px">📄 Certificados de <span>cursos externos</span></div>
+      ${pend ? `<span class="badge badge-yellow">${pend} por validar</span>` : ''}
+    </div>
+    <div class="info-box mb-3" style="font-size:12px">
+      Cursos, diplomados y certificaciones que los colaboradores realizan por fuera
+      de la plataforma. Siempre en PDF y sujetos a validación de HSEQ.
+    </div>
+    ${lista.length
+      ? `<div style="display:flex;flex-direction:column;gap:10px">${lista.map(c => certExternoCardHTML(c, 'hseq')).join('')}</div>`
+      : '<div class="glass-card p-5 text-center text-muted">Sin certificados externos cargados.</div>'}`;
+}
+window.bloqueCertExternosHSEQ = bloqueCertExternosHSEQ;
 
 // ─── 4 · CERTIFICACIONES ISO Y OTRAS ───────────────────────────
 function renderHSEQISO(container) {
@@ -967,17 +985,10 @@ function capacitacionCardHTML(a, cap, modo) {
     rechazado: '<span class="badge badge-red">❌ Certificado rechazado — cargar de nuevo</span>',
   }[a.certificadoEstado] || '';
 
-  const materiales = (cap.materiales || []).length
-    ? `<div style="margin-top:10px">
-         <div class="text-xs text-muted" style="font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Material de la capacitación</div>
-         <div style="display:flex;gap:6px;flex-wrap:wrap">
-           ${cap.materiales.map(m => {
-             const tm = TIPOS_MATERIAL[m.tipo] || { icon:'📎', label:m.tipo };
-             return `<a href="${m.url}" target="_blank" class="btn btn-ghost btn-sm">${tm.icon} ${hseqEsc(m.nombre || tm.label)}</a>`;
-           }).join('')}
-         </div>
-       </div>`
-    : '<div class="text-xs text-muted" style="margin-top:10px">HSEQ aún no ha cargado material para esta capacitación.</div>';
+  const materiales = `<div style="margin-top:10px">
+      <div class="text-xs text-muted" style="font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Material de la capacitación</div>
+      ${materialesHTML(cap, true)}
+    </div>`;
 
   // Bloque del certificado
   const puedeCargar = (modo === 'portal') || gestor;
@@ -986,15 +997,15 @@ function capacitacionCardHTML(a, cap, modo) {
          <a href="${a.certificadoUrl}" target="_blank" class="btn btn-ghost btn-sm">📄 Ver mi certificado</a>
          ${puedeCargar && a.certificadoEstado !== 'aprobado'
            ? `<label class="btn btn-ghost btn-sm" style="cursor:pointer">🔄 Reemplazar
-                <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none"
+                <input type="file" accept="application/pdf,.pdf" style="display:none"
                   onchange="subirCertificadoCap('${a.id}',event)"></label>` : ''}
          ${gestor && a.certificadoEstado !== 'aprobado'
            ? `<button class="btn btn-primary btn-sm" onclick="validarCertificadoCap('${a.id}',true)">✅ Validar</button>
               <button class="btn btn-danger btn-sm" onclick="validarCertificadoCap('${a.id}',false)">✗ Rechazar</button>` : ''}
        </div>`
     : puedeCargar
-      ? `<label class="btn btn-primary btn-sm" style="cursor:pointer">📤 Cargar certificado
-           <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none"
+      ? `<label class="btn btn-primary btn-sm" style="cursor:pointer">📤 Cargar certificado (PDF)
+           <input type="file" accept="application/pdf,.pdf" style="display:none"
              onchange="subirCertificadoCap('${a.id}',event)"></label>`
       : '<span class="badge badge-grey">Certificado no cargado</span>';
 
@@ -1082,6 +1093,9 @@ function renderPortalCapacitaciones() {
       </div>`;
   }
 
+  // Otros cursos y certificados del colaborador
+  html += bloqueCertExternos(empId, 'portal');
+
   // Si el colaborador es miembro de algún comité, se lo recordamos
   const comites = misComites();
   if (comites.length) {
@@ -1124,6 +1138,7 @@ function renderEmpCapacitaciones(emp, container) {
       lista.map(x => capacitacionCardHTML(x.a, x.cap, 'ficha')).join('') + '</div>'
     : '<div class="glass-card p-6 text-center text-muted">Este colaborador no tiene capacitaciones asignadas.</div>';
 
+  html += bloqueCertExternos(emp.id, 'ficha');
   container.innerHTML = html;
 }
 window.renderEmpCapacitaciones = renderEmpCapacitaciones;
@@ -1293,6 +1308,8 @@ function openCapacitacionModal(id) {
   document.getElementById('cap-duracion').value    = c?.duracionHoras || '';
   document.getElementById('cap-vigencia').value    = c?.vigenciaMeses || '';
   document.getElementById('cap-fecha').value       = c?.fecha || hseqHoy();
+  document.getElementById('cap-plataforma').value = c?.plataformaNombre || '';
+  document.getElementById('cap-plataforma-url').value = c?.plataformaUrl || '';
   document.getElementById('cap-obligatoria').checked = c ? !!c.obligatoria : true;
   document.getElementById('cap-activa').checked      = c ? c.activo !== false : true;
   document.getElementById('cap-mat-nombre').value  = '';
@@ -1382,6 +1399,8 @@ async function guardarCapacitacion() {
     duracionHoras:parseFloat(document.getElementById('cap-duracion').value) || 0,
     vigenciaMeses:parseInt(document.getElementById('cap-vigencia').value) || 0,
     fecha:        document.getElementById('cap-fecha').value || hseqHoy(),
+    plataformaNombre: document.getElementById('cap-plataforma').value.trim(),
+    plataformaUrl:    document.getElementById('cap-plataforma-url').value.trim(),
     obligatoria:  document.getElementById('cap-obligatoria').checked,
     activo:       document.getElementById('cap-activa').checked,
     materiales:   SC._capMats || [],
@@ -1563,6 +1582,11 @@ async function subirCertificadoCap(asigId, e) {
   const esPropio = SC.user?.empId === a.empId;
   if (!esPropio && !puedeGestionarHSEQ() && !esRRHHoAdmin()) {
     showNotif('No puedes cargar certificados de otro colaborador', 'error'); return;
+  }
+  if (!esArchivoPDF(f)) {
+    showNotif('El certificado debe estar en PDF', 'error');
+    e.target.value = '';
+    return;
   }
   const emp = SC.empleados.find(x => x.id === a.empId);
   showNotif('⏳ Subiendo certificado...');
@@ -2017,3 +2041,340 @@ function refrescarVistaHSEQ() {
   }
 }
 window.refrescarVistaHSEQ = refrescarVistaHSEQ;
+
+
+// ═══════════════════════════════════════════════════════════════
+// CAPACITACIONES v2 · YOUTUBE, PLATAFORMA EXTERNA Y
+// CERTIFICADOS EN PDF DE CURSOS EXTERNOS
+// ═══════════════════════════════════════════════════════════════
+
+SC.certExternos = SC.certExternos || [];
+
+const TIPOS_CERT_EXTERNO = {
+  curso:         { label:'Curso',           icon:'🎓' },
+  diplomado:     { label:'Diplomado',       icon:'📜' },
+  certificacion: { label:'Certificación',   icon:'🏅' },
+  licencia:      { label:'Licencia',        icon:'🪪' },
+  taller:        { label:'Taller',          icon:'🛠' },
+  congreso:      { label:'Congreso',        icon:'🎤' },
+  otro:          { label:'Otro',            icon:'📄' },
+};
+
+// ─── PDF OBLIGATORIO ───────────────────────────────────────────
+// Todos los certificados que se cargan al sistema deben ser PDF.
+function esArchivoPDF(file) {
+  if (!file) return false;
+  const nombre = String(file.name || '').toLowerCase();
+  return file.type === 'application/pdf' || nombre.endsWith('.pdf');
+}
+window.esArchivoPDF = esArchivoPDF;
+
+// ─── YOUTUBE ───────────────────────────────────────────────────
+// Acepta youtube.com/watch, youtu.be, /embed/, /shorts/ y /live/
+function ytId(url) {
+  const m = String(url || '').match(
+    /(?:youtube\.com\/(?:watch\?(?:[^&]*&)*v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+function ytThumb(id)  { return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`; }
+function ytEmbed(id)  { return `https://www.youtube-nocookie.com/embed/${id}?rel=0`; }
+window.ytId = ytId;
+
+// Reproductor en modal, para no sacar al colaborador de la plataforma
+function abrirVideoYT(id, titulo) {
+  const cont = document.getElementById('video-yt-cont');
+  const tit  = document.getElementById('modal-video-title');
+  if (!cont) { window.open('https://www.youtube.com/watch?v=' + id, '_blank'); return; }
+  if (tit) tit.textContent = '🎬 ' + (titulo || 'Video de la capacitación');
+  cont.innerHTML = `<iframe src="${ytEmbed(id)}" title="${hseqEsc(titulo || '')}"
+    style="width:100%;aspect-ratio:16/9;border:0;border-radius:10px"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+    allowfullscreen></iframe>`;
+  openModal('modal-video-cap');
+}
+function cerrarVideoYT() {
+  const cont = document.getElementById('video-yt-cont');
+  if (cont) cont.innerHTML = '';   // detiene la reproducción
+  closeModal('modal-video-cap');
+}
+window.abrirVideoYT  = abrirVideoYT;
+window.cerrarVideoYT = cerrarVideoYT;
+
+// Material de una capacitación: los videos de YouTube se muestran
+// con miniatura y se reproducen dentro de la plataforma.
+function materialesHTML(cap, conMiniaturas) {
+  const mats = cap.materiales || [];
+  const plataforma = cap.plataformaUrl
+    ? `<a href="${cap.plataformaUrl}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+         🌐 Abrir en ${hseqEsc(cap.plataformaNombre || 'la plataforma de formación')}</a>`
+    : '';
+
+  if (!mats.length && !plataforma) {
+    return '<div class="text-xs text-muted" style="margin-top:8px">Aún no hay material cargado.</div>';
+  }
+
+  const videos = conMiniaturas
+    ? mats.filter(m => ytId(m.url)).map(m => {
+        const id = ytId(m.url);
+        return `<div style="width:180px;cursor:pointer" onclick="abrirVideoYT('${id}','${hseqEsc(m.nombre || '').replace(/'/g,"\\'")}')">
+          <div style="position:relative;border-radius:10px;overflow:hidden;background:var(--surface)">
+            <img src="${ytThumb(id)}" alt="${hseqEsc(m.nombre || 'Video')}"
+              style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block">
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                        background:rgba(0,0,0,.28);font-size:30px">▶️</div>
+          </div>
+          <div class="text-xs" style="margin-top:5px;font-weight:600;color:var(--navy)">
+            ${hseqEsc(m.nombre || 'Video')}</div>
+          <div class="text-xs text-muted">YouTube</div>
+        </div>`;
+      }).join('')
+    : '';
+
+  const otros = mats.filter(m => !(conMiniaturas && ytId(m.url))).map(m => {
+    const tm = TIPOS_MATERIAL[m.tipo] || { icon:'📎', label:m.tipo };
+    const esYt = ytId(m.url);
+    return esYt
+      ? `<button class="btn btn-ghost btn-sm" onclick="abrirVideoYT('${esYt}','${hseqEsc(m.nombre || '').replace(/'/g,"\\'")}')">
+           🎬 ${hseqEsc(m.nombre || 'Video')}</button>`
+      : `<a href="${m.url}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
+           ${tm.icon} ${hseqEsc(m.nombre || tm.label)}</a>`;
+  }).join('');
+
+  return `
+    ${videos ? `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">${videos}</div>` : ''}
+    ${(otros || plataforma) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${plataforma}${otros}</div>` : ''}`;
+}
+window.materialesHTML = materialesHTML;
+
+// ─── BD ↔ APP · CERTIFICADOS EXTERNOS ──────────────────────────
+function dbToCertExterno(r) {
+  return {
+    id:r.id, empId:r.emp_id, nombre:r.nombre || '', entidad:r.entidad || '',
+    tipo:r.tipo || 'curso', fechaEmision:r.fecha_emision || '',
+    fechaVencimiento:r.fecha_vencimiento || '', horas:r.horas || 0,
+    codigo:r.codigo || '', archivoUrl:r.archivo_url || null,
+    archivoNombre:r.archivo_nombre || '', estado:r.estado || 'pendiente',
+    validadoPor:r.validado_por || '', fechaValidacion:r.fecha_validacion || '',
+    observaciones:r.observaciones || '', registradoPor:r.registrado_por || '',
+  };
+}
+async function sbSaveCertExterno(c) {
+  await sbFetch('certificados_externos','POST',{
+    id:c.id, emp_id:c.empId, nombre:c.nombre, entidad:c.entidad || '',
+    tipo:c.tipo || 'curso', fecha_emision:c.fechaEmision || '',
+    fecha_vencimiento:c.fechaVencimiento || '', horas:c.horas || 0,
+    codigo:c.codigo || '', archivo_url:c.archivoUrl || null,
+    archivo_nombre:c.archivoNombre || '', estado:c.estado || 'pendiente',
+    validado_por:c.validadoPor || '', fecha_validacion:c.fechaValidacion || '',
+    observaciones:c.observaciones || '', registrado_por:c.registradoPor || '',
+  },'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
+}
+async function cargarCertExternos() {
+  try {
+    const r = await sbFetch('certificados_externos','GET',null,'?select=*&order=created_at.desc');
+    if (r !== null) SC.certExternos = r.map(dbToCertExterno);
+  } catch(e) { console.warn('Certificados externos:', e.message); }
+}
+window.cargarCertExternos = cargarCertExternos;
+
+// ─── ALTA DE UN CERTIFICADO EXTERNO ────────────────────────────
+function openCertExternoModal(empId, id) {
+  const c = id ? (SC.certExternos || []).find(x => x.id === id) : null;
+  const destino = c?.empId || empId || SC.user?.empId;
+  if (!destino) { showNotif('No se identificó el colaborador', 'error'); return; }
+  // El colaborador solo carga los suyos
+  if (destino !== SC.user?.empId && !puedeGestionarHSEQ() && !esRRHHoAdmin()) {
+    showNotif('No puedes cargar certificados de otro colaborador', 'error'); return;
+  }
+  SC._certExtEmpId = destino;
+  SC._certExtEditId = id || null;
+  SC._certExtFile = null;
+
+  const sel = document.getElementById('cext-tipo');
+  sel.innerHTML = Object.entries(TIPOS_CERT_EXTERNO)
+    .map(([k,v]) => `<option value="${k}">${v.icon} ${v.label}</option>`).join('');
+
+  document.getElementById('modal-cext-title').textContent =
+    c ? '✏️ Editar certificado' : '📄 Cargar certificado de curso';
+  document.getElementById('cext-nombre').value  = c?.nombre || '';
+  document.getElementById('cext-tipo').value    = c?.tipo || 'curso';
+  document.getElementById('cext-entidad').value = c?.entidad || '';
+  document.getElementById('cext-emision').value = c?.fechaEmision || '';
+  document.getElementById('cext-vence').value   = c?.fechaVencimiento || '';
+  document.getElementById('cext-horas').value   = c?.horas || '';
+  document.getElementById('cext-codigo').value  = c?.codigo || '';
+  document.getElementById('cext-file').value    = '';
+  document.getElementById('cext-file-lbl').textContent = c?.archivoNombre
+    ? '📎 Archivo actual: ' + c.archivoNombre + ' (elige otro para reemplazarlo)'
+    : '📎 Adjuntar el certificado en PDF';
+  openModal('modal-cert-externo');
+}
+window.openCertExternoModal = openCertExternoModal;
+
+function handleCertExternoFile(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (!esArchivoPDF(f)) {
+    showNotif('El certificado debe estar en PDF', 'error');
+    e.target.value = '';
+    document.getElementById('cext-file-lbl').textContent = '📎 Adjuntar el certificado en PDF';
+    return;
+  }
+  SC._certExtFile = f;
+  document.getElementById('cext-file-lbl').textContent = '✅ ' + f.name;
+}
+window.handleCertExternoFile = handleCertExternoFile;
+
+async function guardarCertExterno() {
+  const nombre = document.getElementById('cext-nombre').value.trim();
+  if (!nombre) { showNotif('Escribe el nombre del curso o certificación', 'error'); return; }
+
+  const editId = SC._certExtEditId;
+  const base   = editId ? SC.certExternos.find(x => x.id === editId) : null;
+  if (!base && !SC._certExtFile) { showNotif('Adjunta el certificado en PDF', 'error'); return; }
+
+  const c = {
+    id: editId || 'cx' + Date.now(),
+    empId: SC._certExtEmpId,
+    nombre,
+    tipo:    document.getElementById('cext-tipo').value,
+    entidad: document.getElementById('cext-entidad').value.trim(),
+    fechaEmision:     document.getElementById('cext-emision').value || '',
+    fechaVencimiento: document.getElementById('cext-vence').value || '',
+    horas:  parseFloat(document.getElementById('cext-horas').value) || 0,
+    codigo: document.getElementById('cext-codigo').value.trim(),
+    archivoUrl:    base?.archivoUrl || null,
+    archivoNombre: base?.archivoNombre || '',
+    estado: 'pendiente', validadoPor:'', fechaValidacion:'',
+    observaciones: '',
+    registradoPor: base?.registradoPor || SC.user?.name || '',
+  };
+
+  closeModal('modal-cert-externo');
+  if (SC._certExtFile) {
+    showNotif('⏳ Subiendo certificado...');
+    const emp = SC.empleados.find(e => e.id === c.empId);
+    const res = await hseqSubirArchivo(SC._certExtFile, 'capacitaciones', (emp?.name || 'certificados') + '/externos');
+    if (res) { c.archivoUrl = res.url; c.archivoNombre = res.nombre; }
+    else if (!base) { showNotif('No se pudo subir el archivo. Intenta de nuevo.', 'error'); return; }
+  }
+
+  if (base) Object.assign(base, c);
+  else SC.certExternos.unshift(c);
+  await sbSaveCertExterno(c);
+  registrarAuditoria(editId ? 'editar' : 'subir', 'certificado_externo', c.id, c.nombre);
+  SC._certExtFile = null; SC._certExtEditId = null;
+  showNotif('📄 Certificado cargado ✅ — queda pendiente de validación por HSEQ');
+  refrescarVistasCapacitacion(c.empId);
+}
+window.guardarCertExterno = guardarCertExterno;
+
+async function validarCertExterno(id, aprobar) {
+  if (!puedeGestionarHSEQ() && !esRRHHoAdmin()) { showNotif('Solo HSEQ valida certificados', 'error'); return; }
+  const c = (SC.certExternos || []).find(x => x.id === id);
+  if (!c) return;
+  if (!aprobar) {
+    const motivo = prompt('Motivo del rechazo (lo verá el colaborador):', '');
+    if (motivo === null) return;
+    c.estado = 'rechazado';
+    c.observaciones = motivo || 'Certificado rechazado por HSEQ';
+  } else {
+    c.estado = 'aprobado';
+    c.observaciones = '';
+  }
+  c.validadoPor = SC.user?.name || '';
+  c.fechaValidacion = hseqHoy();
+  await sbSaveCertExterno(c);
+  registrarAuditoria(aprobar ? 'aprobar' : 'rechazar', 'certificado_externo', c.id, hseqNombreEmp(c.empId));
+  showNotif(aprobar ? '✅ Certificado validado' : 'Certificado rechazado');
+  refrescarVistasCapacitacion(c.empId);
+}
+window.validarCertExterno = validarCertExterno;
+
+async function eliminarCertExterno(id) {
+  const c = (SC.certExternos || []).find(x => x.id === id);
+  if (!c) return;
+  const propio = c.empId === SC.user?.empId;
+  if (!propio && !puedeGestionarHSEQ() && !esRRHHoAdmin()) return;
+  if (propio && c.estado === 'aprobado' && !puedeGestionarHSEQ()) {
+    showNotif('Un certificado ya validado solo lo puede eliminar HSEQ', 'error'); return;
+  }
+  if (!confirm(`¿Eliminar el certificado "${c.nombre}"?`)) return;
+  SC.certExternos = SC.certExternos.filter(x => x.id !== id);
+  await sbFetch('certificados_externos','DELETE',null,`?id=eq.${encodeURIComponent(id)}`);
+  registrarAuditoria('eliminar','certificado_externo', id, c.nombre);
+  showNotif('Certificado eliminado');
+  refrescarVistasCapacitacion(c.empId);
+}
+window.eliminarCertExterno = eliminarCertExterno;
+
+// ─── TARJETA DE UN CERTIFICADO EXTERNO ─────────────────────────
+function certExternoCardHTML(c, modo) {
+  const t = TIPOS_CERT_EXTERNO[c.tipo] || { label:c.tipo, icon:'📄' };
+  const gestor = (modo !== 'portal') && (puedeGestionarHSEQ() || esRRHHoAdmin());
+  const propio = c.empId === SC.user?.empId;
+  const badge = {
+    aprobado:  '<span class="badge badge-green">✅ Validado</span>',
+    pendiente: '<span class="badge badge-yellow">⏳ En revisión</span>',
+    rechazado: '<span class="badge badge-red">❌ Rechazado</span>',
+  }[c.estado] || '';
+
+  let vig = '';
+  if (c.fechaVencimiento) {
+    const d = Math.floor((new Date(c.fechaVencimiento) - new Date(hseqHoy())) / 86400000);
+    vig = d < 0 ? '<span class="badge badge-red">⛔ Vencido</span>'
+        : d <= 30 ? `<span class="badge badge-yellow">⏳ Vence en ${d}d</span>`
+        : '<span class="badge badge-green">✅ Vigente</span>';
+  }
+
+  return `<div class="glass-card p-4" style="border-left:4px solid var(--navy)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        <div style="font-weight:700;color:var(--navy);font-size:14px">
+          ${t.icon} ${hseqEsc(c.nombre)}</div>
+        <div class="text-xs text-muted" style="margin-top:3px">
+          ${t.label}${c.entidad ? ' · ' + hseqEsc(c.entidad) : ''}
+          ${c.horas ? ' · ⏱ ' + c.horas + 'h' : ''}
+          ${c.fechaEmision ? ' · 📅 ' + hseqEsc(c.fechaEmision) : ''}
+          ${c.codigo ? ' · #' + hseqEsc(c.codigo) : ''}
+        </div>
+        ${modo === 'hseq' ? `<div class="text-xs text-muted">👤 ${hseqEsc(hseqNombreEmp(c.empId))}</div>` : ''}
+        ${c.observaciones ? `<div class="text-xs" style="color:var(--red);margin-top:4px">${hseqEsc(c.observaciones)}</div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+        <div style="display:flex;gap:5px">${badge}${vig}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          ${c.archivoUrl ? `<a href="${c.archivoUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Ver PDF</a>` : ''}
+          ${gestor && c.estado !== 'aprobado'
+            ? `<button class="btn btn-primary btn-sm" onclick="validarCertExterno('${c.id}',true)">✅ Validar</button>
+               <button class="btn btn-danger btn-sm" onclick="validarCertExterno('${c.id}',false)">✗</button>` : ''}
+          ${(propio && c.estado !== 'aprobado') || gestor
+            ? `<button class="btn btn-ghost btn-sm" onclick="openCertExternoModal('${c.empId}','${c.id}')">✏️</button>
+               <button class="btn btn-danger btn-sm" onclick="eliminarCertExterno('${c.id}')">🗑</button>` : ''}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+window.certExternoCardHTML = certExternoCardHTML;
+
+// Bloque reutilizable: "Otros cursos y certificados" del colaborador
+function bloqueCertExternos(empId, modo) {
+  const lista = (SC.certExternos || []).filter(c => c.empId === empId)
+    .sort((a,b) => (b.fechaEmision || '').localeCompare(a.fechaEmision || ''));
+  const puedeCargar = (empId === SC.user?.empId) || puedeGestionarHSEQ() || esRRHHoAdmin();
+  return `
+    <div class="section-header mt-6 mb-3">
+      <div class="section-title" style="font-size:15px">📄 Otros cursos y <span>certificados</span></div>
+      ${puedeCargar
+        ? `<button class="btn btn-primary btn-sm" onclick="openCertExternoModal('${empId}')">+ Cargar certificado</button>` : ''}
+    </div>
+    <div class="info-box mb-3" style="font-size:12px">
+      Cursos externos, diplomados, certificaciones y licencias. El archivo debe ser
+      un <b>PDF</b> y HSEQ lo valida antes de que cuente en la hoja de vida.
+    </div>
+    ${lista.length
+      ? `<div style="display:flex;flex-direction:column;gap:10px">${lista.map(c => certExternoCardHTML(c, modo)).join('')}</div>`
+      : '<div class="glass-card p-5 text-center text-muted">Sin certificados externos cargados.</div>'}`;
+}
+window.bloqueCertExternos = bloqueCertExternos;

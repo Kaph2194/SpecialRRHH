@@ -54,11 +54,15 @@ function buzDestinoLabel(m) {
 }
 
 // ─── PERMISOS ──────────────────────────────────────────────────
-// ¿El usuario conectado es destinatario de este mensaje?
-function buzEsDestinatario(m) {
+// El superadmin recibe TODO el buzón en copia oculta, sin importar a
+// quién vaya dirigido el mensaje.
+function buzEsSuper() { return SC.user?.role === 'superadmin'; }
+
+// ¿El usuario conectado es el destinatario REAL del mensaje?
+// (sin contar la copia oculta del superadmin)
+function buzDestinatarioReal(m) {
   const u = SC.user;
   if (!u) return false;
-  if (u.role === 'superadmin') return true;
   if (m.destino === 'rrhh')     return ['analista_rrhh','lider_rrhh'].includes(u.role);
   if (m.destino === 'gerencia') return ['gerencia','ceo','juridico'].includes(u.role);
   if (m.destino === 'area')     return u.role === 'lider_area' && String(u.areaId) === String(m.destinoAreaId);
@@ -66,6 +70,15 @@ function buzEsDestinatario(m) {
     return typeof esMiembroComite === 'function' ? esMiembroComite(m.destino) : false;
   }
   return false;
+}
+
+// ¿Puede ver este mensaje? El destinatario real o el superadmin.
+function buzEsDestinatario(m) {
+  return buzEsSuper() || buzDestinatarioReal(m);
+}
+// ¿Lo está viendo en copia oculta, sin ser el destinatario?
+function buzEsCopiaOculta(m) {
+  return buzEsSuper() && !buzDestinatarioReal(m);
 }
 // ¿Tiene bandeja de entrada? (le puede llegar algo)
 function buzTieneBandeja() {
@@ -81,7 +94,10 @@ function buzBandeja() {
 function buzSinAtender() {
   return buzBandeja().filter(m => m.estado === 'nuevo' || m.estado === 'leido' || m.estado === 'en_gestion');
 }
-window.buzEsDestinatario = buzEsDestinatario;
+window.buzEsSuper          = buzEsSuper;
+window.buzDestinatarioReal = buzDestinatarioReal;
+window.buzEsCopiaOculta    = buzEsCopiaOculta;
+window.buzEsDestinatario   = buzEsDestinatario;
 window.buzTieneBandeja   = buzTieneBandeja;
 window.buzBandeja        = buzBandeja;
 window.buzSinAtender     = buzSinAtender;
@@ -321,6 +337,7 @@ function renderBuzon() {
 
   const fEstado = document.getElementById('buz-f-estado')?.value || '';
   const fCat    = document.getElementById('buz-f-cat')?.value || '';
+  const fDest   = document.getElementById('buz-f-destino')?.value || '';
   const q       = (document.getElementById('buz-f-q')?.value || '').toLowerCase();
 
   const todos = buzBandeja();
@@ -334,6 +351,11 @@ function renderBuzon() {
   const lista = todos.filter(m => {
     if (fEstado && m.estado !== fEstado) return false;
     if (fCat && m.categoria !== fCat) return false;
+    if (fDest) {
+      if (fDest === 'propios' && buzEsCopiaOculta(m)) return false;
+      else if (fDest.startsWith('area:') && (m.destino !== 'area' || String(m.destinoAreaId) !== fDest.slice(5))) return false;
+      else if (!fDest.startsWith('area:') && fDest !== 'propios' && m.destino !== fDest) return false;
+    }
     if (q && !(`${m.asunto} ${m.mensaje} ${m.remitente}`.toLowerCase().includes(q))) return false;
     return true;
   }).sort((a,b) => {
@@ -342,7 +364,15 @@ function renderBuzon() {
     return peso(a) - peso(b) || (a.fecha || '').localeCompare(b.fecha || '');
   });
 
+  const avisoSuper = buzEsSuper() ? `
+    <div class="info-box mb-4" style="font-size:12px">
+      <b>👁 Copia oculta.</b> Como superadministrador recibes todos los mensajes del
+      buzón, vayan dirigidos a quien vayan. Abrir uno que no es tuyo no lo marca como
+      leído para su destinatario real.
+    </div>` : '';
+
   root.innerHTML = `
+    ${avisoSuper}
     <div class="stats-grid mb-4">
       <div class="stat-card"><div class="stat-icon">🆕</div><div class="stat-label">Nuevos</div>
         <div class="stat-value" style="color:var(--red)">${stats.nuevos}</div></div>
@@ -367,6 +397,18 @@ function renderBuzon() {
         ${Object.entries(BUZON_CATEGORIAS).map(([k,v]) =>
           `<option value="${k}" ${fCat === k ? 'selected' : ''}>${v.icon} ${v.label}</option>`).join('')}
       </select>
+      ${buzEsSuper() ? `
+        <select id="buz-f-destino" class="form-select" style="width:210px" onchange="renderBuzon()">
+          <option value="">Todos los destinatarios</option>
+          <option value="propios"  ${fDest === 'propios' ? 'selected' : ''}>📥 Solo los dirigidos a mí</option>
+          <option value="rrhh"     ${fDest === 'rrhh' ? 'selected' : ''}>👥 Recursos Humanos</option>
+          <option value="gerencia" ${fDest === 'gerencia' ? 'selected' : ''}>📊 Gerencia</option>
+          <option value="copasst"  ${fDest === 'copasst' ? 'selected' : ''}>🦺 COPASST</option>
+          <option value="cocolab"  ${fDest === 'cocolab' ? 'selected' : ''}>🤝 Convivencia Laboral</option>
+          <optgroup label="Áreas">
+            ${SC.areas.map(a => `<option value="area:${a.id}" ${fDest === 'area:' + a.id ? 'selected' : ''}>${a.icon} ${buzEsc(a.name)}</option>`).join('')}
+          </optgroup>
+        </select>` : ''}
     </div>
 
     ${lista.length
@@ -402,6 +444,7 @@ function buzCardBandeja(m) {
         </div>
       </div>
       <div style="display:flex;gap:6px;align-items:center">
+        ${buzEsCopiaOculta(m) ? '<span class="badge badge-grey" title="Lo ves por ser superadministrador">👁 Copia oculta</span>' : ''}
         <span class="badge ${e.badge}">${e.icon} ${e.label}</span>
         <span class="text-xs text-muted">${abierto ? '▲' : '▼'}</span>
       </div>
@@ -431,6 +474,8 @@ function buzCardBandeja(m) {
                 ? 'El remitente es anónimo y no verá esta respuesta. Úsala como registro de la gestión.'
                 : 'Escribe tu respuesta al colaborador...'}"></textarea>
           </div>
+          ${buzEsCopiaOculta(m) ? `<div class="text-xs text-muted" style="margin-bottom:8px">
+            Este mensaje va dirigido a ${buzDestinoLabel(m)}. Si respondes, quedará a tu nombre.</div>` : ''}
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="responderBuzon('${m.id}',false)">💬 Responder</button>
             <button class="btn btn-ghost btn-sm" onclick="responderBuzon('${m.id}',true)"
@@ -453,7 +498,9 @@ async function buzAbrir(id) {
   const m = (SC.buzon || []).find(x => x.id === id);
   if (!m || !buzEsDestinatario(m)) return;
   SC._buzAbierto = (SC._buzAbierto === id) ? null : id;
-  if (SC._buzAbierto === id && m.estado === 'nuevo') {
+  // Si lo abre el superadmin en copia oculta, el mensaje sigue "nuevo"
+  // para su destinatario real: un observador no consume el acuse de lectura.
+  if (SC._buzAbierto === id && m.estado === 'nuevo' && !buzEsCopiaOculta(m)) {
     m.estado       = 'leido';
     m.fechaLectura = buzHoy();
     m.leidoPor     = SC.user?.name || '';

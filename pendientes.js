@@ -214,7 +214,9 @@ function construirPendientes() {
           view:'descuentos', items: val });
   }
   // Líder financiera: visto bueno y comprobante
-  if (typeof esLiderFinanciera === 'function' && esLiderFinanciera()) {
+  // El superadmin también ve el paso de Financiera (acceso total)
+  if ((typeof esLiderFinanciera === 'function' && esLiderFinanciera())
+      || SC.user?.role === 'superadmin' || pendEsGerencia()) {
     const items = descs.filter(d => d.estado === 'vb_financiera').map(d => ({
       empId: d.empId, titulo: pendNombre(d.empId),
       sub: 'Aprobado por RRHH · espera tu visto bueno y el comprobante',
@@ -440,6 +442,18 @@ function construirPendientes() {
       });
     add({ key:'cap_validar', icon:'📑', label:'Certificados de capacitación por validar', color:'var(--amber)',
           view:'hseq', items });
+
+    // Certificados de cursos externos cargados por los colaboradores
+    const ext = (SC.certExternos || [])
+      .filter(c => c.estado === 'pendiente')
+      .map(c => ({
+        empId: c.empId, titulo: pendNombre(c.empId),
+        sub: pendEsc(c.nombre), extra: c.entidad ? pendEsc(c.entidad) : '',
+        dias: pendDiasEspera(c.fechaEmision),
+        acciones: `<button class="btn btn-ghost btn-sm" onclick="pendIr('hseq')">→</button>`,
+      }));
+    add({ key:'cert_externos', icon:'📄', label:'Certificados de cursos externos por validar',
+          color:'var(--blue)', view:'hseq', items: ext });
 
     // Capacitaciones vencidas o por vencer
     const vencidas = (SC.capAsignaciones || [])

@@ -1272,6 +1272,60 @@
 
 <!-- ═══════════ MODALES · HSEQ, INDUCCIONES Y CAPACITACIONES ═══════════ -->
 
+<!-- Reproductor de video de la capacitación -->
+<div class="modal-overlay" id="modal-video-cap">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-video-title">🎬 Video de la capacitación</div>
+      <button class="modal-close" onclick="cerrarVideoYT()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="video-yt-cont"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Certificado de un curso externo (siempre PDF) -->
+<div class="modal-overlay" id="modal-cert-externo">
+  <div class="modal" style="max-width:560px;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-cext-title">📄 Cargar certificado de curso</div>
+      <button class="modal-close" onclick="closeModal('modal-cert-externo')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="info-box mb-3" style="font-size:12px">
+        Para cursos, diplomados o certificaciones hechos fuera de la plataforma.
+        El archivo debe ser un <b>PDF</b>. HSEQ lo valida antes de que cuente en tu hoja de vida.
+      </div>
+      <div class="form-group"><label class="form-label">Nombre del curso o certificación *</label>
+        <input type="text" class="form-input" id="cext-nombre"
+          placeholder="Ej: Trabajo Seguro en Alturas — Reentrenamiento"></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Tipo</label>
+          <select class="form-select" id="cext-tipo"></select></div>
+        <div class="form-group"><label class="form-label">Entidad que lo expide</label>
+          <input type="text" class="form-input" id="cext-entidad" placeholder="Ej: SENA, ARL, universidad"></div>
+        <div class="form-group"><label class="form-label">Fecha de emisión</label>
+          <input type="date" class="form-input" id="cext-emision"></div>
+        <div class="form-group"><label class="form-label">Fecha de vencimiento</label>
+          <input type="date" class="form-input" id="cext-vence"></div>
+        <div class="form-group"><label class="form-label">Intensidad (horas)</label>
+          <input type="number" step="1" min="0" class="form-input" id="cext-horas"></div>
+        <div class="form-group"><label class="form-label">Código o número</label>
+          <input type="text" class="form-input" id="cext-codigo"></div>
+      </div>
+      <div class="form-group">
+        <input type="file" id="cext-file" style="display:none" accept="application/pdf,.pdf"
+          onchange="handleCertExternoFile(event)">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('cext-file').click()">
+          <span id="cext-file-lbl">📎 Adjuntar el certificado en PDF</span>
+        </button>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="guardarCertExterno()">Guardar certificado</button>
+    </div>
+  </div>
+</div>
+
 <!-- Crear / editar capacitación -->
 <div class="modal-overlay" id="modal-capacitacion">
   <div class="modal" style="max-width:660px;max-height:92vh;overflow-y:auto">
@@ -1303,6 +1357,11 @@
           <input type="number" min="0" class="form-input" id="cap-vigencia" placeholder="0 = no vence"></div>
         <div class="form-group"><label class="form-label">Fecha</label>
           <input type="date" class="form-input" id="cap-fecha"></div>
+        <div class="form-group"><label class="form-label">Plataforma de formación</label>
+          <input type="text" class="form-input" id="cap-plataforma"
+            placeholder="Nombre de la plataforma externa"></div>
+        <div class="form-group"><label class="form-label">Enlace del curso en la plataforma</label>
+          <input type="url" class="form-input" id="cap-plataforma-url" placeholder="https://..."></div>
       </div>
       <div class="form-group"><label class="form-label">Descripción / Objetivos</label>
         <textarea class="form-input" id="cap-desc" rows="3" placeholder="Contenido y objetivos de la capacitación..."></textarea></div>
@@ -1316,8 +1375,9 @@
       <hr class="divider">
       <div class="form-label" style="margin-bottom:8px">📚 Material de la capacitación</div>
       <div class="info-box mb-3" style="font-size:12px">
-        Sube presentaciones y documentos, o pega el enlace de un video (YouTube, Drive, Vimeo).
-        El colaborador verá todo el material en su portal.
+        Sube presentaciones y documentos, o pega el enlace de un video. Los enlaces de
+        <b>YouTube</b> se reconocen solos: el colaborador ve la miniatura y reproduce el
+        video dentro de la plataforma, sin salir a YouTube.
       </div>
       <div id="cap-mats-list" style="margin-bottom:10px"></div>
       <div class="form-grid">

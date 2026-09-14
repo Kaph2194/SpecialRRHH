@@ -69,6 +69,23 @@ Cada quien ve solo lo dirigido a él. Un líder de Taller no ve lo que va a
 Financiera, y nadie puede responder ni cambiar el estado de un mensaje que no
 le corresponde: el módulo lo valida en cada acción, no solo al pintar.
 
+### El superadministrador va siempre en copia oculta
+
+El superadmin recibe **todos** los mensajes del buzón, vayan dirigidos a quien
+vayan: RRHH, cualquier área, Gerencia o los comités. Su bandeja lo indica con un
+aviso y marca cada mensaje ajeno con el distintivo *👁 Copia oculta*, y cuenta
+con un filtro extra por destinatario para moverse entre bandejas o quedarse solo
+con lo dirigido a él.
+
+Dos detalles de ese acceso:
+
+- **Abrir un mensaje ajeno no lo marca como leído.** El acuse de lectura es del
+  destinatario real; un observador no se lo consume. Si el superadmin lo abre,
+  para RRHH o para el líder el mensaje sigue apareciendo como nuevo.
+- **Si responde, la respuesta queda a su nombre**, y el sistema se lo advierte
+  antes. El colaborador ve quién le respondió, así que no hay respuestas sin
+  autor identificable.
+
 ---
 
 ## Integración con el dashboard
