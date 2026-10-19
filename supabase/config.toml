@@ -1,0 +1,11 @@
+# Configuración del CLI de Supabase para este proyecto.
+# Solo se usa al desplegar con `supabase functions deploy`.
+
+project_id = "qivcmhjlmbgeeajfuxyv"
+
+[functions.password-admin]
+# La acción "solicitar" se llama SIN sesión: quien olvidó su contraseña
+# no puede estar autenticado. Por eso no se exige JWT en la puerta.
+# La autorización se valida dentro de la función, acción por acción:
+# "restablecer" y "estado" sí verifican el token y el rol en `perfiles`.
+verify_jwt = false
