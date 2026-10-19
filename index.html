@@ -71,6 +71,10 @@
           onclick="doLoginEmpleado()">
           Ingresar a mi Portal →
         </button>
+        <div style="text-align:center;margin-top:14px">
+          <a href="javascript:void(0)" onclick="openOlvidePassword()"
+             style="font-size:13px;color:var(--blue);text-decoration:none">¿Olvidaste tu contraseña?</a>
+        </div>
       </div>
 
       <!-- ── MODO ADMIN: usuario + contraseña ── -->
@@ -95,6 +99,10 @@
           onclick="doLogin()">
           Ingresar al Sistema →
         </button>
+        <div style="text-align:center;margin-top:14px">
+          <a href="javascript:void(0)" onclick="openOlvidePassword()"
+             style="font-size:13px;color:var(--blue);text-decoration:none">¿Olvidaste tu contraseña?</a>
+        </div>
       </div>
 
       <div class="login-demo"></div>
@@ -2484,6 +2492,99 @@
 </div>
 
 <!-- Modal Cambiar Contraseña (empleado) -->
+<!-- ═══════════ RESTABLECER CONTRASEÑA ═══════════ -->
+
+<!-- El colaborador olvidó su contraseña -->
+<div class="modal-overlay" id="modal-olvide-password">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <div class="modal-title">🔑 Recuperar acceso</div>
+      <button class="modal-close" onclick="closeModal('modal-olvide-password')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="olv-form">
+        <div class="info-box mb-4" style="font-size:12px">
+          Escribe tu número de documento o tu correo. Si tienes un correo
+          registrado te llegará un enlace; si no, Recursos Humanos recibirá
+          tu solicitud y te entregará una contraseña temporal.
+        </div>
+        <div class="form-group">
+          <label class="form-label">Documento o correo *</label>
+          <input class="form-input" id="olv-usuario" placeholder="Ej: 1012345678 o tu@correo.com"
+            onkeydown="if(event.key==='Enter')solicitarRestablecer()">
+        </div>
+        <button class="btn btn-primary full-w" id="olv-btn" onclick="solicitarRestablecer()">
+          ✉️ Enviar solicitud
+        </button>
+      </div>
+      <div id="olv-resultado" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Cambio obligatorio: contraseña temporal o enlace de recuperación -->
+<div class="modal-overlay" id="modal-password-obligatorio">
+  <div class="modal" style="max-width:430px">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-pwob-title">🔑 Cambia tu contraseña</div>
+    </div>
+    <div class="modal-body">
+      <div class="info-box mb-4" style="font-size:12px" id="pwob-mensaje">
+        Recursos Humanos te asignó una contraseña temporal. Define una propia para continuar.
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nueva contraseña *</label>
+        <input class="form-input" id="pwob-new1" type="password" placeholder="Mínimo 8 caracteres"
+          autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirmar contraseña *</label>
+        <input class="form-input" id="pwob-new2" type="password" placeholder="Repite la contraseña"
+          autocomplete="new-password"
+          onkeydown="if(event.key==='Enter')guardarPasswordObligatorio()">
+      </div>
+      <div class="text-xs text-muted mb-3">
+        Usa al menos 8 caracteres y combina letras con números. No uses solo tu documento.
+      </div>
+      <button class="btn btn-primary full-w" id="pwob-btn" onclick="guardarPasswordObligatorio()">
+        💾 Guardar y continuar
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Restablecer desde el lado administrativo -->
+<div class="modal-overlay" id="modal-restablecer">
+  <div class="modal" style="max-width:480px;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title">🔑 Restablecer contraseña</div>
+      <button class="modal-close" onclick="closeModal('modal-restablecer')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="rst-form">
+        <div class="glass-card p-4 mb-3">
+          <div style="font-weight:700;color:var(--navy);font-size:15px" id="rst-nombre">—</div>
+          <div class="text-xs text-muted">Documento: <span id="rst-cedula">—</span></div>
+          <div class="text-xs text-muted" style="word-break:break-all">Usuario: <span id="rst-correo">—</span></div>
+        </div>
+        <div id="rst-estado" class="mb-3"></div>
+        <div class="form-group">
+          <label class="form-label">Contraseña (opcional)</label>
+          <input class="form-input" id="rst-manual" type="text"
+            placeholder="Vacío = se genera una temporal segura">
+          <div class="text-xs text-muted mt-2">
+            Si la dejas vacía, el sistema genera una contraseña temporal y te la muestra.
+          </div>
+        </div>
+        <button class="btn btn-primary full-w" id="rst-btn" onclick="ejecutarRestablecer()">
+          🔑 Restablecer contraseña
+        </button>
+      </div>
+      <div id="rst-resultado" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-change-pass">
   <div class="modal" style="max-width:420px">
     <div class="modal-header">
@@ -2983,5 +3084,6 @@ function handlePermDrop(e) {
 <script src="hseq.js?v=1"></script>
 <script src="pendientes.js?v=2"></script>
 <script src="buzon.js?v=1"></script>
+<script src="password.js?v=1"></script>
 </body>
 </html>

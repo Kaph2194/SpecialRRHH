@@ -502,6 +502,10 @@ async function loadFromSupabase() {
       if (typeof cargarBuzonDesdeSupabase === 'function') {
         try { await cargarBuzonDesdeSupabase(); } catch(e) { console.warn('Buzón:', e.message); }
       }
+      // Solicitudes de restablecimiento de contraseña (password.js)
+      if (typeof cargarSolicitudesPassword === 'function') {
+        try { await cargarSolicitudesPassword(); } catch(e) { console.warn('Contraseñas:', e.message); }
+      }
       hideLoadingBanner();
       console.log('✅ Supabase OK —', SC.empleados.length, 'empleados cargados');
       // Reconstruir usuarios de empleados en memoria
@@ -859,6 +863,12 @@ function loadPersistedUsers() {
 
 // ─── INIT ─────────────────────────────────────────────────
 async function init() {
+  // Si llega desde el enlace de recuperación del correo, se atiende
+  // antes que nada: trae el token en el hash de la URL.
+  if (typeof detectarRecuperacion === 'function' && detectarRecuperacion()) {
+    loadSavedGapiConfig();
+    return;
+  }
   loadSavedGapiConfig();
   loadSavedPasswords();
   loadSavedAdminUsers();
@@ -2021,7 +2031,12 @@ function openEmpleadoDetail(empId) {
           <span class="badge badge-green">Activo</span>
         </div>
       </div>
-      ${can('write') ? `<button class="btn btn-ghost btn-sm" onclick="openEditEmpModal('${emp.id}')">✏️ Editar</button>` : ''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${(typeof pwPuedeRestablecer === 'function' && pwPuedeRestablecer())
+          ? `<button class="btn btn-ghost btn-sm" onclick="openRestablecerModal('${emp.id}')"
+               title="Asignar una contraseña temporal">🔑 Restablecer contraseña</button>` : ''}
+        ${can('write') ? `<button class="btn btn-ghost btn-sm" onclick="openEditEmpModal('${emp.id}')">✏️ Editar</button>` : ''}
+      </div>
     </div>`;
 
   // Ajustar pestañas visibles según rol
@@ -11022,6 +11037,7 @@ async function cargarPerfil() {
     areaId:   p.area_id || null,
     empId:    empId || null,
     cedula:   p.cedula || '',
+    debeCambiarPassword: p.debe_cambiar_password === true,
   };
 }
 
@@ -11062,6 +11078,8 @@ async function loginConAuth(usuarioTxt, password, errorElId) {
   if (errEl) errEl.style.display = 'none';
   registrarAuditoria('login', 'sesion', perfil.id, perfil.roleName);
   startApp();
+  // Contraseña temporal asignada por RRHH: hay que cambiarla ya
+  if (typeof revisarPasswordTemporal === 'function') revisarPasswordTemporal();
   return true;
 }
 
@@ -11079,6 +11097,7 @@ async function restaurarSesionAuth() {
     if (!perfil) { guardarSesion(null); return false; }
     SC.user = perfil;
     startApp();
+    if (typeof revisarPasswordTemporal === 'function') revisarPasswordTemporal();
     return true;
   } catch(e) { guardarSesion(null); return false; }
 }

@@ -489,7 +489,29 @@ function construirPendientes() {
           view:'hseq', items: iso });
   }
 
-  // ── 17 · BUZÓN: MENSAJES SIN ATENDER ─────────────────────────
+  // ── 17 · SOLICITUDES DE RESTABLECER CONTRASEÑA ───────────────
+  if (typeof pwPuedeRestablecer === 'function' && pwPuedeRestablecer()) {
+    const items = (SC.solicitudesPassword || [])
+      .filter(x => x.estado === 'pendiente_rrhh')
+      .map(x => ({
+        empId: x.empId, titulo: pendEsc(x.nombre || pendNombre(x.empId)),
+        sub: x.observaciones
+          ? pendEsc(x.observaciones)
+          : 'Olvidó su contraseña y no tiene correo para el enlace',
+        extra: x.cedula ? 'CC ' + pendEsc(x.cedula) : '',
+        dias: pendDiasEspera(x.fecha),
+        acciones: (pendPuedeActuar() && x.empId)
+          ? `<button class="btn btn-primary btn-sm" title="Restablecer contraseña"
+               onclick="openRestablecerModal('${x.empId}')">🔑</button>
+             <button class="btn btn-danger btn-sm" title="Descartar"
+               onclick="descartarSolicitudPassword('${x.id}')">✕</button>`
+          : '',
+      }));
+    add({ key:'passwords', icon:'🔑', label:'Restablecer contraseña', color:'var(--red)',
+          view:'empleados', nota:'Colaboradores que no pueden entrar a la plataforma.', items });
+  }
+
+  // ── 18 · BUZÓN: MENSAJES SIN ATENDER ─────────────────────────
   if (typeof buzTieneBandeja === 'function' && buzTieneBandeja()) {
     const cats = (typeof BUZON_CATEGORIAS !== 'undefined') ? BUZON_CATEGORIAS : {};
     const items = (typeof buzSinAtender === 'function' ? buzSinAtender() : [])
@@ -504,7 +526,7 @@ function construirPendientes() {
           view:'buzon', nota:'Sugerencias, peticiones y consultas de los colaboradores.', items });
   }
 
-  // ── 18 · PERÍODOS DE PRUEBA POR VENCER ───────────────────────
+  // ── 19 · PERÍODOS DE PRUEBA POR VENCER ───────────────────────
   if (verAdmin() || pendEsLider()) {
     const hoy = new Date().setHours(0,0,0,0);
     const items = SC.empleados
