@@ -9,6 +9,8 @@
 //   solicitar    → público. El empleado dice que olvidó su clave.
 //   restablecer  → requiere sesión de superadmin / RRHH.
 //   estado       → requiere sesión de superadmin / RRHH.
+//   cambiar_password_cuenta → solo superadmin. Clave de cuentas
+//                  administrativas (analista, líder, gerencia...).
 //
 // Desplegar:
 //   supabase functions deploy password-admin --no-verify-jwt
@@ -293,6 +295,65 @@ Deno.serve(async (req) => {
         ? 'Cuenta creada con contraseña temporal'
         : 'Contraseña restablecida',
     }, 200, origen);
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // CAMBIAR_PASSWORD_CUENTA · solo superadmin. Fija la clave de
+  // una cuenta administrativa (analista, líder, gerencia, etc.),
+  // que no tiene ficha en `empleados`. La cuenta se identifica,
+  // en este orden, por: correo → cédula del perfil → rol (si solo
+  // hay una cuenta con ese rol). No modifica el rol del perfil.
+  // ───────────────────────────────────────────────────────────
+  if (accion === 'cambiar_password_cuenta') {
+    if (perfil.rol !== 'superadmin') {
+      return json({ error: 'Solo el Super Admin puede cambiar contraseñas de cuentas administrativas' }, 403, origen);
+    }
+    const nueva = String(body.password ?? '');
+    if (nueva.length < 8) {
+      return json({ error: 'La contraseña debe tener al menos 8 caracteres' }, 400, origen);
+    }
+
+    const correo = String(body.correo ?? '').trim().toLowerCase();
+    const ced    = normCedula(String(body.cedula ?? ''));
+    const rol    = String(body.rol ?? '').trim();
+
+    let userId: string | null = null;
+    let etiqueta = '';
+
+    if (correo.includes('@')) {
+      const cuenta = await buscarCuenta([correo]);
+      if (cuenta) { userId = cuenta.id; etiqueta = cuenta.email ?? correo; }
+    }
+    if (!userId && ced) {
+      const { data } = await admin.from('perfiles').select('user_id,nombre').eq('cedula', ced).limit(2);
+      if (data?.length === 1) { userId = data[0].user_id; etiqueta = data[0].nombre ?? ced; }
+    }
+    if (!userId && rol) {
+      const { data } = await admin.from('perfiles').select('user_id,nombre').eq('rol', rol).limit(2);
+      if ((data?.length ?? 0) > 1) {
+        return json({ error: `Hay varias cuentas con el rol "${rol}". Indica el correo de la cuenta en el campo Usuario.` }, 409, origen);
+      }
+      if (data?.length === 1) { userId = data[0].user_id; etiqueta = data[0].nombre ?? rol; }
+    }
+    if (!userId) {
+      return json({ error: 'No se encontró la cuenta en Supabase. Escribe su correo completo en el campo Usuario.' }, 404, origen);
+    }
+
+    const { data: upd, error } = await admin.auth.admin.updateUserById(userId, { password: nueva });
+    if (error) return json({ error: error.message }, 400, origen);
+
+    await admin.from('perfiles')
+      .update({ debe_cambiar_password: false })
+      .eq('user_id', userId)
+      .then(() => {}, () => {});
+
+    await admin.from('auditoria').insert({
+      id: 'au' + Date.now(), fecha: new Date().toISOString(),
+      usuario: perfil.nombre ?? perfil.user_id, accion: 'cambiar_password_cuenta',
+      entidad: 'cuenta_acceso', entidad_id: userId, detalle: etiqueta,
+    }).then(() => {}, () => {});
+
+    return json({ ok: true, usuario: upd?.user?.email ?? etiqueta, mensaje: 'Contraseña actualizada' }, 200, origen);
   }
 
   return json({ error: 'Acción no reconocida' }, 400, origen);
