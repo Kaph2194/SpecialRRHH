@@ -10308,7 +10308,33 @@ async function actualizarPerfilSupabase(cedula, rol, areaId, nombre, empId) {
 }
 window.actualizarPerfilSupabase = actualizarPerfilSupabase;
 
-function saveUserAdmin(userId, esLider = false) {
+// Correo de la cuenta en Supabase Auth para un usuario del panel.
+// Si el campo "Usuario" ya es un correo se usa tal cual; si no, se
+// prueba <usuario>@specialcar.com.co (así se crearon las cuentas
+// administrativas, ver MIGRACION_AUTH.md). El servidor además busca
+// por cédula y por rol si el correo no coincide.
+function correoCuentaAdmin(u, usuarioTxt) {
+  const t = String(usuarioTxt || u.user || '').trim().toLowerCase();
+  if (!t) return '';
+  if (t.includes('@')) return t;
+  if (/^\d+$/.test(t)) return '';   // es una cédula: la resuelve el servidor
+  return `${t}@specialcar.com.co`;
+}
+
+async function cambiarPasswordCuentaSupabase(u, usuarioTxt, password) {
+  if (typeof llamarFnPassword !== 'function') {
+    throw new Error('El módulo de contraseñas (password.js) no está cargado.');
+  }
+  return llamarFnPassword({
+    accion:   'cambiar_password_cuenta',
+    correo:   correoCuentaAdmin(u, usuarioTxt),
+    cedula:   u.cedula || (/^\d+$/.test(String(usuarioTxt||'')) ? usuarioTxt : ''),
+    rol:      u.role,
+    password,
+  }, true);
+}
+
+async function saveUserAdmin(userId, esLider = false) {
   const u = USERS.find(x => x.id === userId);
   if (!u) return;
   const newName  = document.getElementById(`um-name-${userId}`)?.value.trim();
@@ -10317,22 +10343,38 @@ function saveUserAdmin(userId, esLider = false) {
   const newPass2 = document.getElementById(`um-pass2-${userId}`)?.value;
   const newArea  = document.getElementById(`um-area-${userId}`)?.value;
   if (!newName || !newUser) { showNotif('Nombre y usuario son obligatorios', 'error'); return; }
-  if (newPass) {
-    showNotif('Las contraseñas se gestionan desde Supabase → Authentication → Users, o el propio usuario la cambia en su perfil.', 'error');
-    return;
-  }
   const dup = USERS.find(x => x.user === newUser && x.id !== userId);
   if (dup) { showNotif('Ese nombre de usuario ya existe', 'error'); return; }
+
+  // Contraseña: se cambia en Supabase Auth a través de la Edge Function.
+  // Nunca se guarda en el navegador.
+  if (newPass) {
+    if (SC.user?.role !== 'superadmin') {
+      showNotif('Solo el Super Admin puede cambiar contraseñas de otras cuentas.', 'error'); return;
+    }
+    if (newPass.length < 8) {
+      showNotif('La contraseña debe tener al menos 8 caracteres.', 'error'); return;
+    }
+    if (newPass2 !== undefined && newPass !== newPass2) {
+      showNotif('Las contraseñas no coinciden.', 'error'); return;
+    }
+    try {
+      const r = await cambiarPasswordCuentaSupabase(u, newUser, newPass);
+      showNotif(`🔐 Contraseña actualizada en Supabase para ${r.usuario || newUser}`);
+    } catch (e) {
+      showNotif('No se pudo cambiar la contraseña: ' + e.message, 'error');
+      return;
+    }
+  }
+
   u.name = newName;
   u.user = newUser;
-  if (newPass)  u.pass   = newPass;
   if (newArea)  u.areaId = parseInt(newArea)||newArea;
   try {
     const saved = JSON.parse(localStorage.getItem('sc_users')||'[]');
     const idx = saved.findIndex(x => x.id === userId);
     const entry = {
       id: userId, name: newName, user: newUser,
-      ...(newPass ? {pass: newPass} : {}),
       ...(newArea ? {areaId: parseInt(newArea)||newArea} : {}),
     };
     if (idx >= 0) saved[idx] = {...saved[idx], ...entry};
