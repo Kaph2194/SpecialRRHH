@@ -3805,6 +3805,8 @@ function renderPermisosAdmin() {
             ${p.status==='pendiente' && puedeAprobarPermiso(p) ? `
               <button class="btn btn-primary btn-sm" onclick="aprobarPermisoRapido('${p.id}')" title="Aprobar">✅</button>
               <button class="btn btn-danger btn-sm" onclick="actualizarPermiso('${p.id}','rechazado')" title="Rechazar">❌</button>` : ''}
+            ${p.status!=='pendiente' && puedeRevertirPermiso() ? `
+              <button class="btn btn-ghost btn-sm" onclick="revertirPermisoPendiente('${p.id}')" title="Volver a pendiente de respuesta">↩️</button>` : ''}
           </div>
         </td>
       </tr>`);
@@ -3923,7 +3925,8 @@ function openPermisoDetail(id) {
       ${p.status==='pendiente' ? `
         <button class="btn btn-primary" style="flex:1" onclick="guardarYAprobarPermiso('${p.id}')">✅ Guardar y Aprobar</button>
         <button class="btn btn-danger" style="flex:1" onclick="actualizarPermisoModal('${p.id}','rechazado')">❌ Rechazar</button>` :
-        `<button class="btn btn-ghost" style="flex:1" onclick="guardarClasificacionPermiso('${p.id}')">💾 Guardar Clasificación</button>`}
+        `<button class="btn btn-ghost" style="flex:1" onclick="guardarClasificacionPermiso('${p.id}')">💾 Guardar Clasificación</button>
+         ${puedeRevertirPermiso() ? `<button class="btn btn-ghost" style="flex:1" onclick="revertirPermisoPendiente('${p.id}', true)">↩️ Volver a pendiente</button>` : ''}`}
     </div>` : ''}
   `;
   if (p.fileData) SC._permDetailPDF = { id: p.id+'_perm', data: p.fileData };
@@ -4014,6 +4017,48 @@ function actualizarPermiso(id, status) {
   if (SC.currentView === 'permisos-admin') renderPermisosAdmin();
   else renderDashboard();
 }
+
+// ─── REVERTIR DECISIÓN DE UN PERMISO ─────────────────────────
+// Recursos Humanos y el Super Admin pueden devolver un permiso
+// aprobado o rechazado al estado "pendiente" para responderlo de
+// nuevo. La clasificación de nómina se conserva; la decisión y
+// quién la tomó se borran, y queda el rastro en la auditoría.
+function puedeRevertirPermiso() {
+  return ['superadmin','analista_rrhh','lider_rrhh'].includes(SC.user?.role);
+}
+window.puedeRevertirPermiso = puedeRevertirPermiso;
+
+function revertirPermisoPendiente(id, desdeModal = false) {
+  const p = SC.permisos.find(x => x.id === id);
+  if (!p) return;
+  if (!puedeRevertirPermiso()) {
+    showNotif('Solo Recursos Humanos o el Super Admin pueden revertir un permiso', 'error'); return;
+  }
+  if (p.status === 'pendiente') { showNotif('Este permiso ya está pendiente', 'error'); return; }
+  const emp = SC.empleados.find(e => e.id === p.empId);
+  const anterior = p.status;
+  if (!confirm(`¿Volver a "pendiente" el permiso de ${emp?.name || 'este colaborador'}?\n\n` +
+               `Estado actual: ${anterior}${p.aprobadoPor ? ' (por ' + p.aprobadoPor + ')' : ''}\n` +
+               `Quedará otra vez pendiente de respuesta.`)) return;
+  const motivo = (prompt('Motivo de la reversión (opcional):') || '').trim();
+
+  p.status          = 'pendiente';
+  p.aprobadoPor     = null;
+  p.aprobadoPorRol  = null;
+  p.fechaDecision   = null;
+  p.aprobadoPorJefe = false;
+  p.notificadoRRHH  = false;
+
+  sbSavePermiso(p);
+  registrarAuditoria('revertir_estado', 'permiso', id,
+    `${anterior} → pendiente por ${SC.user?.name || ''}${motivo ? ' · ' + motivo : ''}`);
+  syncToSheets('permisos');
+  showNotif('↩️ Permiso devuelto a pendiente de respuesta');
+  if (desdeModal) closeModal('modal-permiso-detail');
+  if (SC.currentView === 'permisos-admin') renderPermisosAdmin();
+  else renderDashboard();
+}
+window.revertirPermisoPendiente = revertirPermisoPendiente;
 
 function openAdminPermisoModal() {
   aplicarVisibilidadCamposRH();
