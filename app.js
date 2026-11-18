@@ -6052,11 +6052,14 @@ function openDiscDetail(id) {
     ${detalleEtapas}
     ${respPanel}
     ${impugnPanel}
+    ${esRH ? `<div id="disc-adjuntos-${d.id}"></div>` : ''}
     ${panelEditarTipo}
   ${panelVistoBuenoPendiente(d)}
   ${panelAvance}
   `;
   openModal('modal-disc-detail');
+  // Expediente con adjuntos por etapa (solo RH y Super Admin)
+  if (esRH && typeof renderAdjuntosDisc === 'function') renderAdjuntosDisc(d.id);
 }
 
 function notificarDisc(id) {
