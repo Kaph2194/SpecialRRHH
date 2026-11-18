@@ -592,6 +592,7 @@ function dbToPerm(r) {
     motivo: r.motivo||'', status: r.status||'pendiente',
     fileName: r.file_name||null, fileData: null, fileUrl: r.file_url||null,
     fecha: r.fecha||'', fechaHora: r.fecha_hora||'',
+    aclaraciones: (() => { try { const a = typeof r.aclaraciones === 'string' ? JSON.parse(r.aclaraciones) : r.aclaraciones; return Array.isArray(a) ? a : []; } catch(e) { return []; } })(),
   };
 }
 function dbToIncap(r) {
@@ -725,6 +726,9 @@ async function sbSavePermiso(p) {
     file_url:p.fileUrl||null,
     fecha:p.fecha||'', fecha_hora:p.fechaHora||'',
   };
+  // Historial de aclaraciones (supabase_permisos_aclaraciones.sql). Solo se
+  // envía si existe, para no romper el guardado si la columna aún no se creó.
+  if (Array.isArray(p.aclaraciones) && p.aclaraciones.length) row.aclaraciones = p.aclaraciones;
   await sbFetch('permisos','POST',row,'',{'Prefer':'resolution=merge-duplicates,return=minimal'});
 }
 async function sbSaveIncap(i) {
@@ -970,6 +974,7 @@ function normalizeCedula(s) {
 }
 
 function doLogout() {
+  if (typeof detenerNotificaciones === 'function') detenerNotificaciones();
   authCerrarSesion();
   SC.user = null;
   SB_SESSION = null;
@@ -1017,6 +1022,7 @@ function startApp() {
 
   buildSidebar();
   populateSelects();
+  if (typeof iniciarNotificaciones === 'function') iniciarNotificaciones();
 
   // Drive buttons solo visibles para superadmin
   const driveBar = document.getElementById('drive-topbar');
@@ -3759,14 +3765,16 @@ function renderPermisosAdmin() {
   const cont = document.getElementById('permisos-admin-filtros');
   const visibles = SC.permisos.filter(p => empVisibleParaUsuario(p.empId));
   const nPend = visibles.filter(p => p.status === 'pendiente').length;
+  const nAcl  = visibles.filter(p => p.status === 'aclaracion').length;
   if (cont) {
     cont.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
         ${nPend ? `<span style="background:rgba(245,158,11,.15);color:var(--amber);padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600">⏳ ${nPend} pendiente(s) por aprobar</span>` : '<span style="color:var(--green);font-size:13px">✅ No hay permisos pendientes</span>'}
+        ${nAcl ? `<span style="background:rgba(217,119,6,.12);color:#b45309;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600">💬 ${nAcl} esperando aclaración del colaborador</span>` : ''}
         <div style="flex:1"></div>
-        ${['pendiente','aprobado','rechazado','todos'].map(f => `
+        ${['pendiente','aclaracion','aprobado','rechazado','todos'].map(f => `
           <button class="btn btn-sm filtro-perm-btn ${_filtroPermisos===f?'btn-primary active':'btn-ghost'}" data-f="${f}" onclick="filtrarPermisos('${f}')">
-            ${f==='pendiente'?'Pendientes':f==='aprobado'?'Aprobados':f==='rechazado'?'Rechazados':'Todos'}</button>`).join('')}
+            ${f==='pendiente'?'Pendientes':f==='aclaracion'?'En aclaración':f==='aprobado'?'Aprobados':f==='rechazado'?'Rechazados':'Todos'}</button>`).join('')}
       </div>`;
   }
   if (!tb) return;
@@ -3798,13 +3806,15 @@ function renderPermisosAdmin() {
         <td class="text-center">${p.dias}</td>
         <td class="text-sm" style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.motivo||'—'}</td>
         <td>${descLabel}</td>
-        <td>${statusBadge(p.status)} ${semaforoPlazo(p.inicio, p.status)}${p.aprobadoPorJefe?'<div style="font-size:10px;color:var(--blue)">👤 Aprobado por jefe directo</div>':''}${esPermisoMenor(p)&&p.status==='pendiente'?`<div style="font-size:10px;color:var(--text-muted)">⏱ &lt;${LIMITE_HORAS_JEFE}h · puede aprobar el jefe</div>`:''}</td>
+        <td>${statusBadge(p.status)} ${semaforoPlazo(p.inicio, p.status)}${p.aprobadoPorJefe?'<div style="font-size:10px;color:var(--blue)">👤 Aprobado por jefe directo</div>':''}${esPermisoMenor(p)&&p.status==='pendiente'?`<div style="font-size:10px;color:var(--text-muted)">⏱ &lt;${LIMITE_HORAS_JEFE}h · puede aprobar el jefe</div>`:''}${p.status==='pendiente'&&p.aclaraciones?.length&&p.aclaraciones[p.aclaraciones.length-1].tipo==='respuesta'?'<div style="font-size:10px;color:var(--blue);font-weight:600">↩️ El colaborador respondió la aclaración</div>':''}${p.status==='aclaracion'?'<div style="font-size:10px;color:#b45309">⏳ Esperando respuesta del colaborador</div>':''}</td>
         <td>
           <div class="flex gap-2">
             <button class="btn btn-ghost btn-sm" onclick="openPermisoDetail('${p.id}')">👁️ Ver / Clasificar</button>
             ${p.status==='pendiente' && puedeAprobarPermiso(p) ? `
               <button class="btn btn-primary btn-sm" onclick="aprobarPermisoRapido('${p.id}')" title="Aprobar">✅</button>
               <button class="btn btn-danger btn-sm" onclick="actualizarPermiso('${p.id}','rechazado')" title="Rechazar">❌</button>` : ''}
+            ${typeof puedeSolicitarAclaracion === 'function' && puedeSolicitarAclaracion(p) ? `
+              <button class="btn btn-ghost btn-sm" onclick="openSolicitarAclaracion('${p.id}')" title="Solicitar aclaración o documentos al colaborador">💬</button>` : ''}
             ${p.status!=='pendiente' && puedeRevertirPermiso() ? `
               <button class="btn btn-ghost btn-sm" onclick="revertirPermisoPendiente('${p.id}')" title="Volver a pendiente de respuesta">↩️</button>` : ''}
           </div>
@@ -3918,13 +3928,17 @@ function openPermisoDetail(id) {
         : `<div class="doc-item missing"><div class="doc-icon">❌</div><div class="doc-info"><div class="doc-name">Sin documento adjunto</div></div></div>`}
     </div>
 
+    ${typeof renderHistorialAclaraciones === 'function' ? renderHistorialAclaraciones(p) : ''}
+    ${p.status==='aclaracion' ? `<div style="margin-top:10px;padding:8px 12px;background:rgba(217,119,6,.08);border-left:3px solid #d97706;border-radius:4px;font-size:12px">
+      ⏳ Esperando la aclaración del colaborador. Cuando responda, el permiso volverá a <b>Pendiente</b> y te llegará una notificación 🔔.</div>` : ''}
     ${puedeAprobarPermiso(p) ? `
     ${!esRRHH() ? `<div style="margin-top:12px;padding:8px 12px;background:rgba(59,130,246,.08);border-left:3px solid var(--blue);border-radius:4px;font-size:12px">
       ⏱ Permiso menor a ${LIMITE_HORAS_JEFE} horas — puedes aprobarlo como jefe directo. RRHH quedará notificado automáticamente.</div>` : ''}
     <div class="mt-4 flex gap-3 flex-wrap">
       ${p.status==='pendiente' ? `
         <button class="btn btn-primary" style="flex:1" onclick="guardarYAprobarPermiso('${p.id}')">✅ Guardar y Aprobar</button>
-        <button class="btn btn-danger" style="flex:1" onclick="actualizarPermisoModal('${p.id}','rechazado')">❌ Rechazar</button>` :
+        <button class="btn btn-danger" style="flex:1" onclick="actualizarPermisoModal('${p.id}','rechazado')">❌ Rechazar</button>
+        <button class="btn btn-ghost" style="flex:1;min-width:100%" onclick="openSolicitarAclaracion('${p.id}')">💬 Solicitar aclaración / documentos</button>` :
         `<button class="btn btn-ghost" style="flex:1" onclick="guardarClasificacionPermiso('${p.id}')">💾 Guardar Clasificación</button>
          ${puedeRevertirPermiso() ? `<button class="btn btn-ghost" style="flex:1" onclick="revertirPermisoPendiente('${p.id}', true)">↩️ Volver a pendiente</button>` : ''}`}
     </div>` : ''}
@@ -4615,8 +4629,20 @@ function renderPortal(tab) {
     const perms = SC.permisos.filter(p => p.empId === empId);
     let html = `<div class="section-header mb-4"><div class="section-title" style="font-size:16px">🗓 Mis <span>Permisos</span></div><button class="btn btn-primary btn-sm" onclick="openPortalPermisoModal()">+ Solicitar Permiso</button></div>`;
     if (!perms.length) html += '<div class="text-muted text-sm p-4">No tienes permisos registrados.</div>';
-    perms.forEach(p => {
-      html += `<div class="perm-card flex justify-between items-center flex-wrap gap-3"><div><div style="font-weight:600">${tipoPermisoLabel(p.tipo)}</div><div class="text-sm text-muted">${p.inicio} → ${p.fin} · ${p.dias} día(s)</div><div class="text-sm">${p.motivo}</div></div>${statusBadge(p.status)}</div>`;
+    // Primero los que esperan aclaración del colaborador
+    const nAcl = perms.filter(p => p.status === 'aclaracion').length;
+    if (nAcl) html += `<div class="info-box mb-3" style="border-left:3px solid #d97706">💬 Tienes <b>${nAcl}</b> permiso(s) con aclaraciones pendientes. Revisa las observaciones y responde.</div>`;
+    perms.slice().sort((a,b) => (a.status==='aclaracion'?-1:0) - (b.status==='aclaracion'?-1:0)).forEach(p => {
+      const fechas = p.esPorHoras ? `${p.inicio} · ${p.horaInicio||''}–${p.horaFin||''} · ${p.dias} h` : `${p.inicio} → ${p.fin} · ${p.dias} día(s)`;
+      const acl = (typeof renderHistorialAclaraciones === 'function') ? renderHistorialAclaraciones(p) : '';
+      html += `<div class="perm-card" ${p.status==='aclaracion'?'style="border-left:3px solid #d97706"':''}>
+        <div class="flex justify-between items-center flex-wrap gap-3">
+          <div><div style="font-weight:600">${tipoPermisoLabel(p.tipo)}</div><div class="text-sm text-muted">${fechas}</div><div class="text-sm">${p.motivo}</div></div>
+          <div class="flex gap-2 items-center">${statusBadge(p.status)}
+            ${p.status==='aclaracion' ? `<button class="btn btn-primary btn-sm" onclick="openResponderAclaracion('${p.id}')">↩️ Responder</button>` : ''}</div>
+        </div>
+        ${acl}
+      </div>`;
     });
     content.innerHTML = html;
   }
@@ -8853,8 +8879,8 @@ function scoreBarHtml(score) {
 }
 
 function statusBadge(s) {
-  const map = { pendiente:'badge-grey', evaluacion:'badge-amber', aprobado:'badge-green', rechazado:'badge-red', activo:'badge-green', inactivo:'badge-red', retirado:'badge-red', sancionado:'badge-amber', cerrado:'badge-grey', en_proceso:'badge-amber', archivado:'badge-grey', apto:'badge-green', no_apto:'badge-red', en_vacaciones:'badge-blue', incapacitado:'badge-amber', at:'badge-red' };
-  const labels = { pendiente:'Pendiente', evaluacion:'Evaluación', aprobado:'Aprobado', rechazado:'Rechazado', activo:'Activo', inactivo:'Inactivo', retirado:'Retirado', sancionado:'Sancionado', cerrado:'Cerrado', en_proceso:'En Proceso', archivado:'Archivado', disfrutado:'Disfrutado', apto:'Apto', no_apto:'No Apto', en_vacaciones:'🏖 Vacaciones', incapacitado:'🏥 Incapacitado', at:'🚨 Accidente Trabajo' };
+  const map = { pendiente:'badge-grey', aclaracion:'badge-amber', evaluacion:'badge-amber', aprobado:'badge-green', rechazado:'badge-red', activo:'badge-green', inactivo:'badge-red', retirado:'badge-red', sancionado:'badge-amber', cerrado:'badge-grey', en_proceso:'badge-amber', archivado:'badge-grey', apto:'badge-green', no_apto:'badge-red', en_vacaciones:'badge-blue', incapacitado:'badge-amber', at:'badge-red' };
+  const labels = { pendiente:'Pendiente', aclaracion:'💬 Aclaración solicitada', evaluacion:'Evaluación', aprobado:'Aprobado', rechazado:'Rechazado', activo:'Activo', inactivo:'Inactivo', retirado:'Retirado', sancionado:'Sancionado', cerrado:'Cerrado', en_proceso:'En Proceso', archivado:'Archivado', disfrutado:'Disfrutado', apto:'Apto', no_apto:'No Apto', en_vacaciones:'🏖 Vacaciones', incapacitado:'🏥 Incapacitado', at:'🚨 Accidente Trabajo' };
   return `<span class="badge ${map[s]||'badge-grey'}">${labels[s]||s}</span>`;
 }
 
