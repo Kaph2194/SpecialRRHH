@@ -1161,7 +1161,7 @@ function empVisibleParaUsuario(empId) {
 // Vistas permitidas para líder de área (lista blanca de navegación)
 const VISTAS_LIDER_AREA = ['empleados','empleado-detail','novedades-area','malla-area',
   'permisos-admin','incapacidades-admin','vacaciones-admin','disciplinarios',
-  'portal','portal-retirado','comite-copasst','comite-cocolab','buzon'];
+  'portal','portal-retirado','comite-copasst','comite-cocolab','buzon','biblioteca'];
 
 // ─── SIDEBAR ──────────────────────────────────────────────
 function buildSidebar() {
@@ -1193,6 +1193,7 @@ function buildSidebar() {
       // COPASST, COCOLAB y certificaciones ISO
       if (typeof agregarNavBuzon === 'function') agregarNavBuzon(nav);
       if (typeof agregarNavHSEQ === 'function') agregarNavHSEQ(nav);
+      if (typeof agregarNavSIG === 'function') agregarNavSIG(nav);
       return;
     }
     // Si el líder también tiene ficha de empleado, ve SU propio portal
@@ -1216,6 +1217,7 @@ function buildSidebar() {
     }
     if (typeof agregarNavBuzon === 'function') agregarNavBuzon(nav);
     if (typeof agregarNavComites === 'function') agregarNavComites(nav);
+    if (typeof agregarNavSIG === 'function') agregarNavSIG(nav);
     return;
   }
   addNavItem(nav, '🏠', 'Dashboard', 'dashboard');
@@ -1239,6 +1241,7 @@ function buildSidebar() {
   if (typeof agregarNavBuzon === 'function') agregarNavBuzon(nav);
   // HSEQ & SIG: políticas, capacitaciones, comités y certificaciones
   if (typeof agregarNavHSEQ === 'function') agregarNavHSEQ(nav);
+  if (typeof agregarNavSIG === 'function') agregarNavSIG(nav);
   addNavSep(nav, 'REPORTES');
   addNavItem(nav, '📈', 'Reportería RRHH', 'reporteria');
   addNavSep(nav, 'ADMINISTRACIÓN');
@@ -1285,6 +1288,8 @@ function setActiveNav(view) {
 // ─── VIEW MANAGEMENT ──────────────────────────────────────
 const VIEW_TITLES = {
   dashboard: ['Dashboard Principal', 'Resumen General · Special Car'],
+  pesv: ['PESV · Seguridad Vial', 'Plan Estratégico de Seguridad Vial · Resolución 40595 de 2022'],
+  biblioteca: ['Procesos y KPI por área', 'Sistema de gestión: documentos e indicadores de cada área'],
   empleados: ['Empleados Actuales', 'Gestión del Personal'],
   'empleado-detail': ['Detalle de Empleado', 'Carpeta de vida y documentación'],
   candidatos: ['Gestión de Candidatos', 'Proceso de Selección'],
@@ -1320,7 +1325,7 @@ function showView(viewId) {
     if (String(SC.user?.areaId) === '5')  permitidas.push('nomina-formatos'); // solo líder Financiera
     // Líder HSEQ: su portal, la bodega y su propio módulo (HSEQ & SIG)
     if (String(SC.user?.areaId) === '14') permitidas = ['portal','portal-retirado','bodega',
-      'hseq','comite-copasst','comite-cocolab','buzon'];
+      'hseq','comite-copasst','comite-cocolab','buzon','pesv','biblioteca'];
     if (!permitidas.includes(viewId)) viewId = 'empleados';
   }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -1359,6 +1364,14 @@ function showView(viewId) {
     renderComiteView(comite);
   }
   else if (viewId === 'dashboard') { renderDashboard(); }
+  else if (viewId === 'pesv') {
+    if (typeof pesvPuedeVer === 'function' && !pesvPuedeVer()) { showNotif('No tienes acceso al módulo PESV', 'error'); return; }
+    if (typeof renderPESV === 'function') renderPESV();
+  }
+  else if (viewId === 'biblioteca') {
+    if (typeof sigPuedeVer === 'function' && !sigPuedeVer()) { showNotif('No tienes acceso a esta sección', 'error'); return; }
+    if (typeof renderBiblioteca === 'function') renderBiblioteca();
+  }
   else if (viewId === 'empleados') { renderEmpleados(); setupEmpActions(actions); }
   else if (viewId === 'candidatos') { renderCandidatos(); setupCandActions(actions); }
   else if (viewId === 'vacantes') { openVacantesPanel(); showView('candidatos'); }
@@ -1481,6 +1494,16 @@ function updateCandPositions() {
 
 // ─── DASHBOARD ────────────────────────────────────────────
 function renderDashboard() {
+  // Tablero analítico (tablero.js): KPI, tendencias y kanban. Reemplaza las 4 tarjetas básicas.
+  const tablero = document.getElementById('dash-tablero');
+  if (tablero && typeof renderTableroAnalitico === 'function') {
+    renderTableroAnalitico(tablero);
+    const st = document.getElementById('dash-stats'); if (st) st.style.display = 'none';
+    const cp = document.getElementById('dash-pendientes');
+    if (cp && typeof renderCentroPendientes === 'function') renderCentroPendientes(cp);
+    renderDashboardListas();
+    return;
+  }
   const stats = document.getElementById('dash-stats');
   const empActivos   = SC.empleados.filter(e => e.status === 'activo').length;
   const candTotal    = SC.candidatos.length;
@@ -1506,7 +1529,11 @@ function renderDashboard() {
   // Centro de pendientes (pendientes.js)
   const cp = document.getElementById('dash-pendientes');
   if (cp && typeof renderCentroPendientes === 'function') renderCentroPendientes(cp);
+  renderDashboardListas();
+}
 
+// Empresas contratantes y candidatos recientes (parte inferior del dashboard)
+function renderDashboardListas() {
   // Empresas
   const eg = document.getElementById('empresas-grid');
   if (eg) {
@@ -3777,6 +3804,8 @@ function renderPermisosAdmin() {
             ${f==='pendiente'?'Pendientes':f==='aclaracion'?'En aclaración':f==='aprobado'?'Aprobados':f==='rechazado'?'Rechazados':'Todos'}</button>`).join('')}
       </div>`;
   }
+  // Selector Tabla / Kanban (tablero.js)
+  if (typeof tbRenderKanbanPermisos === 'function') tbRenderKanbanPermisos();
   if (!tb) return;
   if (!SC.permisos.length) { tb.innerHTML = '<tr><td colspan="8" class="text-muted text-sm" style="text-align:center;padding:24px">No hay permisos registrados.</td></tr>'; return; }
   tb.innerHTML = '';
@@ -5458,6 +5487,8 @@ function renderDisciplinarios() {
   const tb = document.getElementById('disc-tbody');
   if (!tb) return;
   tb.innerHTML = '';
+  // Selector Tabla / Kanban (tablero.js)
+  if (typeof tbRenderKanbanDisciplinarios === 'function') tbRenderKanbanDisciplinarios();
   const discFiltrados = SC.disciplinarios.filter(d => {
     if (SC.user?.role !== 'lider_area') return true;
     const a = SC.user?.areaId != null && SC.user.areaId !== '' ? String(SC.user.areaId) : null;
