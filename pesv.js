@@ -183,7 +183,8 @@ const PESV_NIVEL_TXT = { T: 'Todos los niveles', EA: 'Estándar y avanzado', A: 
 const PESV_MAX_BYTES = 10 * 1024 * 1024;
 
 // Estado del módulo
-const PV = { evals: [], actual: null, tab: 'tablero', cargado: false, error: null, guardarT: null, filtroFase: 'todas' };
+const PV = { evals: [], actual: null, tab: 'pasos', cargado: false, error: null, guardarT: null, filtroFase: 'todas',
+             v2: null, autos: [], autoCheckHecho: false, creandoAuto: false };
 
 // ─── Permisos ────────────────────────────────────────────────
 function pesvPuedeEditar() {
@@ -278,6 +279,8 @@ function pesvFila(ev) {
     responsable: ev.responsable || '', estado: ev.estado || 'en_curso',
     respuestas: ev.respuestas || {}, acciones: ev.acciones || [], indicadores: ev.indicadores || {},
     actualizado_por: SC.user?.name || '', updated_at: new Date().toISOString(),
+    // Columnas de supabase_pesv_autoevaluacion.sql: solo se envían si existen
+    ...(PV.v2 ? { resumen: pesvResumen(ev), gestion: ev.gestion || {} } : {}),
   };
 }
 function pesvDesdeFila(r) {
@@ -285,7 +288,8 @@ function pesvDesdeFila(r) {
   return { id: r.id, anio: r.anio, nivel: r.nivel || 'avanzado', misionalidad: r.misionalidad || '2',
            vehiculos: r.vehiculos || 0, conductores: r.conductores || 0, responsable: r.responsable || '',
            estado: r.estado || 'en_curso', respuestas: js(r.respuestas) || {}, acciones: js(r.acciones) || [],
-           indicadores: js(r.indicadores) || {}, actualizadoPor: r.actualizado_por || '', updatedAt: r.updated_at || '' };
+           indicadores: js(r.indicadores) || {}, gestion: js(r.gestion) || {},
+           actualizadoPor: r.actualizado_por || '', updatedAt: r.updated_at || '' };
 }
 
 async function pesvCargar() {
@@ -295,6 +299,10 @@ async function pesvCargar() {
   PV.error = null;
   PV.evals = rows.map(pesvDesdeFila);
   if (!PV.actual || !PV.evals.some(e => e.id === PV.actual)) PV.actual = PV.evals[0]?.id || null;
+  // Autoevaluaciones mensuales: si la tabla no existe, el script nuevo no se ha ejecutado
+  const autos = await sbFetch('pesv_autoevaluaciones', 'GET', null, '?select=*&order=periodo.desc');
+  PV.v2 = autos !== null;
+  PV.autos = (autos || []).map(a => ({ ...a, resumen: typeof a.resumen === 'string' ? JSON.parse(a.resumen || '{}') : (a.resumen || {}) }));
 }
 const pesvEval = () => PV.evals.find(e => e.id === PV.actual) || null;
 
@@ -333,8 +341,17 @@ async function renderPESV(tab) {
   const editar = pesvPuedeEditar();
   const selector = PV.evals.length > 1 ? `<select class="form-select" style="width:auto;min-width:190px" onchange="PV.actual=this.value;renderPESV()">
       ${PV.evals.map(e => `<option value="${VZ.esc(e.id)}" ${e.id === PV.actual ? 'selected' : ''}>Evaluación ${e.anio} · ${PESV_NIVELES[e.nivel] || e.nivel}</option>`).join('')}</select>` : '';
-  const tabs = [['tablero', '📊 Tablero'], ['evaluacion', '✅ Evaluación 24 pasos'], ['kanban', '▦ Kanban de pasos'],
-                ['acciones', '🛠 Plan de acción'], ['indicadores', '📈 Indicadores'], ['config', '⚙️ Nivel y datos']];
+  // Sin evaluación todavía: quien gestiona el PESV arranca con la del año en nivel avanzado
+  if (!ev && editar && !PV.creandoAuto) {
+    PV.creandoAuto = true;
+    const ok = await pesvCrearSilenciosa();
+    PV.creandoAuto = false;
+    if (ok) return renderPESV(tab);
+  }
+  const alertasN = ev ? pesvAlertas(ev).filter(a => a.nivel !== 'info').length : 0;
+  const tabs = [['pasos', '🧩 Los 24 pasos'], ['tablero', '📊 Tablero' + (alertasN ? ` · 🚨 ${alertasN}` : '')], ['evaluacion', '✅ Por criterio'],
+                ['kanban', '▦ Kanban'], ['acciones', '🛠 Plan de acción'], ['indicadores', '📈 Indicadores'],
+                ['autoeval', '📅 Autoevaluación mensual'], ['config', '⚙️ Nivel y datos']];
   root.innerHTML = `
     <div class="vz-head">
       <h2>Plan Estratégico de Seguridad Vial${ev ? ` · ${ev.anio}` : ''}<small>Resolución 40595 de 2022 · Ministerio de Transporte · ciclo PHVA${ev ? ` · nivel ${PESV_NIVELES[ev.nivel]}` : ''}</small></h2>
@@ -346,6 +363,7 @@ async function renderPESV(tab) {
       </div>
     </div>
     ${!editar ? '<div class="readonly-banner mb-3"><span>🔒</span><span>Consulta de solo lectura</span></div>' : ''}
+    ${editar && PV.v2 === false ? `<div class="info-box mb-3" style="border-left:3px solid var(--amber);font-size:12px">⚙️ Para activar la <b>autoevaluación mensual del día 5</b>, las alertas y la gestión por paso (responsable, fecha y evidencias del paso), ejecuta <code>supabase_pesv_autoevaluacion.sql</code> en Supabase → SQL Editor.</div>` : ''}
     ${ev ? `<div class="tabs mb-4">${tabs.map(([k, t]) => `<div class="tab ${PV.tab === k ? 'active' : ''}" onclick="renderPESV('${k}')">${t}</div>`).join('')}</div>
     <div id="pesv-body"></div>` : `
     <div class="glass-card p-4" style="text-align:center">
@@ -356,14 +374,15 @@ async function renderPESV(tab) {
     </div>`}`;
   if (!ev) return;
   pesvPintarTab();
+  pesvAutoCheck();
 }
 window.renderPESV = renderPESV;
 
 function pesvPintarTab() {
   const body = document.getElementById('pesv-body'), ev = pesvEval();
   if (!body || !ev) return;
-  ({ tablero: pesvTablero, evaluacion: pesvEvaluacion, kanban: pesvKanban, acciones: pesvAcciones,
-     indicadores: pesvIndicadores, config: pesvConfig })[PV.tab]?.(body, ev);
+  ({ pasos: pesvPasos, tablero: pesvTablero, evaluacion: pesvEvaluacion, kanban: pesvKanban, acciones: pesvAcciones,
+     indicadores: pesvIndicadores, autoeval: pesvAutoeval, config: pesvConfig })[PV.tab]?.(body, ev);
 }
 
 // ─── Tablero ────────────────────────────────────────────────
@@ -404,6 +423,10 @@ function pesvTablero(el, ev) {
     <div class="vz-grid">
       ${VZ.panel('Cumplimiento por paso', VZ.columns(aplican.map(p => 'P' + p.n), [{ name: '% cumplimiento', values: aplican.map(p => Math.round(g.porPaso[p.n].pct || 0)), color: 'blue' }], { unit: '%', h: 200 }), { sub: 'Porcentaje de criterios que cumplen en cada paso', span: 7 })}
       ${VZ.panel('Brechas prioritarias', top, { sub: 'Pasos con más criterios en "No cumple"', span: 5 })}
+    </div>
+    <div class="vz-grid">
+      ${VZ.panel('Evolución mensual del cumplimiento', pesvGraficoAutos(ev), { sub: 'Autoevaluación registrada el día 5 de cada mes', span: 7 })}
+      ${VZ.panel('🚨 Alertas', pesvListaAlertas(ev), { sub: 'Lo que requiere atención antes del próximo corte', span: 5 })}
     </div>`;
 }
 
@@ -526,6 +549,8 @@ function pesvAbrirPaso(n) {
       <span class="vz-chip" style="background:${pesvColorPct(c.pct)};color:#fff">${c.pct == null ? 'Sin calificar' : VZ.num(c.pct, 0) + '% cumplimiento'}</span>
       ${editar ? `<span style="flex:1"></span><button class="btn btn-ghost btn-sm" onclick="pesvMarcarTodo(${n})">Marcar todo "Cumple"</button>` : ''}
     </div>
+    ${pesvPanelGestion(n, editar)}
+    <div style="font-weight:700;font-size:12px;color:var(--navy);margin:14px 0 8px">Criterios de verificación</div>
     ${crits}${nav}`);
 }
 window.pesvAbrirPaso = pesvAbrirPaso;
@@ -540,7 +565,7 @@ function pesvRefrescarPaso(n) {
   const top = document.getElementById('pesv-modal-body')?.scrollTop || 0;
   pesvAbrirPaso(n);
   const b2 = document.getElementById('pesv-modal-body'); if (b2) b2.scrollTop = top;
-  if (['tablero', 'evaluacion', 'kanban'].includes(PV.tab)) pesvPintarTab();
+  if (['pasos', 'tablero', 'evaluacion', 'kanban', 'autoeval'].includes(PV.tab)) pesvPintarTab();
 }
 
 function pesvResp(ev, id) { ev.respuestas[id] = ev.respuestas[id] || {}; return ev.respuestas[id]; }
@@ -576,12 +601,14 @@ function sigNombreSeguro(s) {
   return String(s || 'archivo').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_').slice(0, 110);
 }
 async function sigSubir(ruta, file) {
+  if (typeof asegurarSesion === 'function') await asegurarSesion();
   const res = await fetch(`${SB_URL}/storage/v1/object/sig/${ruta}`, { method: 'POST', headers: sigHeaders({ 'Content-Type': file.type || 'application/octet-stream' }), body: file });
   if (!res.ok) throw new Error(res.status === 413 ? 'supera 10 MB' : `error ${res.status}`);
 }
 async function sigAbrir(ruta) {
   const w = window.open('', '_blank');   // abrir en el clic para que no la bloqueen
   try {
+    if (typeof asegurarSesion === 'function') await asegurarSesion();
     const res = await fetch(`${SB_URL}/storage/v1/object/sign/sig/${ruta}`, { method: 'POST', headers: sigHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ expiresIn: 120 }) });
     const d = await res.json().catch(() => ({}));
     const u = d.signedURL || d.signedUrl;
@@ -591,6 +618,7 @@ async function sigAbrir(ruta) {
   } catch (e) { if (w) w.close(); showNotif('No se pudo abrir el archivo: ' + e.message, 'error'); }
 }
 async function sigBorrar(ruta) {
+  if (typeof asegurarSesion === 'function') await asegurarSesion();
   const res = await fetch(`${SB_URL}/storage/v1/object/sig/${ruta}`, { method: 'DELETE', headers: sigHeaders() });
   if (!res.ok && res.status !== 404) throw new Error(`error ${res.status}`);
 }
@@ -838,7 +866,7 @@ async function pesvCrearEvaluacion() {
     id: 'pv' + Date.now(), anio: Number(document.getElementById('pn-anio').value) || new Date().getFullYear(),
     nivel: document.getElementById('pn-nivel').value, responsable: document.getElementById('pn-resp').value.trim(),
     misionalidad: previa?.misionalidad || '2', vehiculos: previa?.vehiculos || 0, conductores: previa?.conductores || 0,
-    estado: 'en_curso', respuestas: {}, acciones: [], indicadores: {},
+    estado: 'en_curso', respuestas: {}, acciones: [], indicadores: {}, gestion: {},
   };
   if (copiar) {
     Object.entries(previa.respuestas || {}).forEach(([k, r]) => {
@@ -878,4 +906,276 @@ function pesvExportarCSV() {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 window.pesvExportarCSV = pesvExportarCSV;
+
+// ═══════════════════════════════════════════════════════════════
+// GESTIÓN PASO A PASO · AUTOEVALUACIÓN MENSUAL · ALERTAS
+// (requiere supabase_pesv_autoevaluacion.sql para guardar la gestión
+//  por paso y registrar la autoevaluación del día 5)
+// ═══════════════════════════════════════════════════════════════
+const PESV_GESTION = [
+  { k: 'pendiente',    t: 'Pendiente',    c: 'slate' },
+  { k: 'en_curso',     t: 'En curso',     c: 'blue' },
+  { k: 'implementado', t: 'Implementado', c: 'amber' },
+  { k: 'verificado',   t: 'Verificado',   c: 'green' },
+];
+const pesvHoyIso = () => new Date().toISOString().slice(0, 10);
+function pesvPeriodoActual(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+function pesvMesNombre(per) {
+  const [y, m] = String(per || '').split('-');
+  return m ? `${['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][Number(m) - 1]} ${y}` : per;
+}
+function pesvProximoCorte(d = new Date()) {
+  const c = new Date(d.getFullYear(), d.getMonth() + (d.getDate() >= 5 ? 1 : 0), 5);
+  return c;
+}
+const pesvGest = (ev, n) => (ev.gestion = ev.gestion || {}, ev.gestion[n] = ev.gestion[n] || {}, ev.gestion[n]);
+
+// Resumen que se guarda con la evaluación; la tarea del día 5 lo toma como foto del mes
+function pesvResumen(ev) {
+  const g = pesvCalcGlobal(ev);
+  const porPaso = {};
+  PESV_PASOS.forEach(p => { const c = g.porPaso[p.n]; if (c.aplica) porPaso[p.n] = c.pct == null ? null : Math.round(c.pct); });
+  const porFase = {}; g.porFase.forEach(f => { porFase[f.key] = Math.round(f.pct); });
+  const evidPasos = Object.values(ev.gestion || {}).reduce((s, x) => s + (x.evidencias?.length || 0), 0);
+  return { pct: Math.round(g.pct * 10) / 10, avance: Math.round(g.avance), pasosCumplen: g.pasosCumplen, pasosAplican: g.pasosAplican,
+           noCumple: g.no_cumple, noVerificado: g.no_verificado, evidencias: g.evidencias + evidPasos,
+           accAbiertas: g.accAbiertas, accVencidas: g.accVencidas, nivel: ev.nivel, porFase, porPaso, fecha: new Date().toISOString() };
+}
+
+// Crea la evaluación del año (nivel avanzado) cuando no hay ninguna
+async function pesvCrearSilenciosa() {
+  const ev = { id: 'pv' + Date.now(), anio: new Date().getFullYear(), nivel: 'avanzado', responsable: '', misionalidad: '2',
+               vehiculos: 0, conductores: 0, estado: 'en_curso', respuestas: {}, acciones: [], indicadores: {}, gestion: {} };
+  const r = await pesvGuardar(ev, true);
+  if (r === null) return false;
+  PV.evals.unshift(ev); PV.actual = ev.id; PV.tab = 'pasos';
+  if (typeof registrarAuditoria === 'function') registrarAuditoria('crear', 'pesv', ev.id, `${ev.anio} · avanzado (automática)`);
+  return true;
+}
+
+// ─── Los 24 pasos en tarjetas ───────────────────────────────
+function pesvSiguientePendiente(ev) {
+  const g = pesvCalcGlobal(ev);
+  return PESV_PASOS.find(p => g.porPaso[p.n].aplica && ['sin_evaluar', 'en_evaluacion', 'brechas'].includes(g.porPaso[p.n].estado)
+                              && (pesvGest(ev, p.n).estado || 'pendiente') !== 'verificado')?.n || null;
+}
+function pesvPasos(el, ev) {
+  const g = pesvCalcGlobal(ev), hoy = pesvHoyIso(), editar = pesvPuedeEditar();
+  const sig = pesvSiguientePendiente(ev);
+  const verif = PESV_PASOS.filter(p => g.porPaso[p.n].aplica && (pesvGest(ev, p.n).estado === 'verificado')).length;
+  const corte = pesvProximoCorte();
+  const head = `<div class="glass-card mb-4" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:14px 18px">
+      <div style="min-width:180px"><div class="text-xs text-muted">Cumplimiento actual</div>
+        <div style="font-size:26px;font-weight:800;color:${pesvColorPct(g.pct)}">${VZ.num(g.pct, 1)}%</div></div>
+      <div style="flex:1;min-width:220px"><div class="text-xs text-muted" style="margin-bottom:4px">${g.pasosCumplen} de ${g.pasosAplican} pasos cumplen · ${verif} verificados · ${VZ.num(g.avance, 0)}% de criterios calificados</div>${VZ.progress(g.pct)}</div>
+      <div class="text-xs text-muted" style="min-width:170px">📅 Próxima autoevaluación<br><b style="color:var(--navy);font-size:13px">${corte.toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })}</b></div>
+      ${sig ? `<button class="btn btn-primary" onclick="pesvAbrirPaso(${sig})">▶ Continuar con el paso ${sig}</button>` : '<span class="vz-chip c-green">✓ Todos los pasos gestionados</span>'}
+    </div>`;
+  const tarjeta = p => {
+    const c = g.porPaso[p.n], fase = pesvFaseDe(p.n), gs = pesvGest(ev, p.n);
+    if (!c.aplica) return `<div class="pesv-card is-off" title="No aplica en nivel ${PESV_NIVELES[ev.nivel]}">
+        <div class="pesv-card-top"><div class="pesv-num" style="background:#94a3b8">${p.n}</div><div class="pesv-card-tit">${VZ.esc(p.titulo)}</div></div>
+        <div class="text-xs text-muted" style="margin-top:8px">No aplica en nivel ${PESV_NIVELES[ev.nivel]} · ${PESV_NIVEL_TXT[p.nivel]}</div></div>`;
+    const est = PESV_GESTION.find(x => x.k === (gs.estado || 'pendiente'));
+    const evid = c.evidencias + (gs.evidencias?.length || 0);
+    const venc = gs.fecha && gs.fecha < hoy && !['implementado', 'verificado'].includes(gs.estado);
+    return `<div class="pesv-card" style="--fase-c:${fase.color}" onclick="pesvAbrirPaso(${p.n})" role="button" tabindex="0">
+      <div class="pesv-card-top"><div class="pesv-num" style="background:${fase.color}">${p.n}</div>
+        <div class="pesv-card-tit">${VZ.esc(p.titulo)}</div>
+        <div class="pesv-card-pct" style="color:${pesvColorPct(c.pct)}">${c.pct == null ? '—' : VZ.num(c.pct, 0) + '%'}</div></div>
+      ${VZ.progress(c.pct || 0)}
+      <div class="vz-card-meta">
+        <span class="vz-chip ${est.c === 'slate' ? '' : 'c-' + est.c}">${est.t}</span>
+        <span class="vz-chip ${evid ? 'c-blue' : 'c-amber'}">📎 ${evid || 'Sin'} evidencia${evid === 1 ? '' : 's'}</span>
+        ${c.no_cumple ? `<span class="vz-chip c-red">✗ ${c.no_cumple}</span>` : ''}
+        ${venc ? `<span class="vz-chip c-red">⏰ ${VZ.esc(gs.fecha)}</span>` : gs.fecha ? `<span class="vz-chip">📅 ${VZ.esc(gs.fecha)}</span>` : ''}
+      </div>
+      <div class="text-xs text-muted" style="margin-top:6px">${gs.responsable ? '👤 ' + VZ.esc(gs.responsable) : (editar ? 'Sin responsable asignado' : '')} · ${c.total - c.pendiente}/${c.total} criterios</div>
+    </div>`;
+  };
+  el.innerHTML = head + PESV_FASES.map(f => `
+    <div style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="width:10px;height:10px;border-radius:3px;background:${f.color}"></span>
+        <b style="color:var(--navy);font-size:13px">${f.key} · ${f.nombre}</b>
+        <span class="text-xs text-muted">${f.desc} · pasos ${f.pasos[0]} a ${f.pasos[1]} · ${VZ.num(g.porFase.find(x => x.key === f.key).pct, 0)}%</span></div>
+      <div class="pesv-grid">${PESV_PASOS.filter(p => p.n >= f.pasos[0] && p.n <= f.pasos[1]).map(tarjeta).join('')}</div>
+    </div>`).join('');
+}
+
+// ─── Panel de gestión dentro de cada paso ───────────────────
+function pesvPanelGestion(n, editar) {
+  const ev = pesvEval(); if (!ev) return '';
+  if (!PV.v2) return `<div class="info-box" style="font-size:12px">La gestión del paso (responsable, fecha y evidencias generales) se activa al ejecutar <code>supabase_pesv_autoevaluacion.sql</code>. Mientras tanto puedes calificar los criterios y cargar evidencias en cada uno.</div>`;
+  const gs = pesvGest(ev, n), dis = editar ? '' : 'disabled';
+  const evid = (gs.evidencias || []).map(f => `<span class="vz-chip c-blue" style="cursor:pointer" onclick="pesvVerEvidPaso(${n},'${VZ.esc(f.id)}')">📄 ${VZ.esc(f.nombre)}
+      ${editar ? `<b style="margin-left:4px" title="Quitar" onclick="event.stopPropagation();pesvQuitarEvidPaso(${n},'${VZ.esc(f.id)}')">✕</b>` : ''}</span>`).join('');
+  return `<div class="glass-card p-3" style="border-left:3px solid ${pesvFaseDe(n).color}">
+    <div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:8px">Gestión del paso ${n}</div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Responsable</label><input class="form-input" value="${VZ.esc(gs.responsable || '')}" ${dis} placeholder="Nombre o cargo" onchange="pesvSetGestion(${n},'responsable',this.value)"></div>
+      <div class="form-group"><label class="form-label">Fecha compromiso</label><input type="date" class="form-input" value="${VZ.esc(gs.fecha || '')}" ${dis} onchange="pesvSetGestion(${n},'fecha',this.value)"></div>
+      <div class="form-group"><label class="form-label">Estado de implementación</label><select class="form-select" ${dis} onchange="pesvSetGestion(${n},'estado',this.value)">
+        ${PESV_GESTION.map(x => `<option value="${x.k}" ${(gs.estado || 'pendiente') === x.k ? 'selected' : ''}>${x.t}</option>`).join('')}</select></div></div>
+    <div class="form-group"><label class="form-label">Notas / plan del paso</label><textarea class="form-textarea" rows="2" ${dis} onchange="pesvSetGestion(${n},'notas',this.value)">${VZ.esc(gs.notas || '')}</textarea></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="text-xs text-muted">Evidencias del paso (actas, políticas, registros…) · máx. 10 MB c/u</span>
+      ${editar ? `<input type="file" multiple id="pesv-fp-${n}" style="display:none" onchange="pesvSubirEvidPaso(${n},this)">
+        <button class="btn btn-ghost btn-sm" id="pesv-fpb-${n}" onclick="document.getElementById('pesv-fp-${n}').click()">📎 Cargar evidencias</button>` : ''}
+    </div>
+    ${evid ? `<div class="vz-card-meta">${evid}</div>` : '<div class="text-xs text-muted" style="margin-top:6px">Aún no hay evidencias generales del paso.</div>'}
+    ${gs.actualizado ? `<div class="text-xs text-muted" style="margin-top:6px">Actualizado por ${VZ.esc(gs.por || '')} · ${new Date(gs.actualizado).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</div>` : ''}
+  </div>`;
+}
+function pesvSetGestion(n, campo, valor) {
+  const ev = pesvEval(); if (!ev || !pesvPuedeEditar() || !PV.v2) return;
+  const gs = pesvGest(ev, n);
+  gs[campo] = String(valor || '').trim();
+  gs.actualizado = new Date().toISOString(); gs.por = SC.user?.name || '';
+  pesvGuardar(ev);
+  if (campo === 'estado' || campo === 'fecha') pesvRefrescarPaso(n);
+}
+async function pesvSubirEvidPaso(n, input) {
+  const ev = pesvEval(); if (!ev || !pesvPuedeEditar() || !PV.v2) return;
+  const files = Array.from(input?.files || []); if (input) input.value = '';
+  const grandes = files.filter(f => f.size > PESV_MAX_BYTES);
+  if (grandes.length) showNotif(`⛔ Superan 10 MB y no se subirán: ${grandes.map(f => f.name).join(', ')}`, 'error');
+  const validos = files.filter(f => f.size > 0 && f.size <= PESV_MAX_BYTES);
+  if (!validos.length) return;
+  const btn = document.getElementById('pesv-fpb-' + n);
+  const gs = pesvGest(ev, n); gs.evidencias = gs.evidencias || [];
+  let ok = 0;
+  for (let i = 0; i < validos.length; i++) {
+    const f = validos[i];
+    if (btn) { btn.disabled = true; btn.textContent = `⏳ ${i + 1}/${validos.length}`; }
+    try {
+      const ruta = `pesv/${sigNombreSeguro(ev.id)}/paso-${n}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${sigNombreSeguro(f.name)}`;
+      await sigSubir(ruta, f);
+      gs.evidencias.push({ id: 'ep' + Date.now() + i, nombre: f.name, ruta, tamano: f.size, por: SC.user?.name || '', fecha: new Date().toISOString() });
+      ok++;
+    } catch (e) { showNotif(`⚠️ ${f.name}: ${e.message}`, 'error'); }
+  }
+  if (ok) { gs.actualizado = new Date().toISOString(); gs.por = SC.user?.name || ''; await pesvGuardar(ev, true); showNotif(`📎 ${ok} evidencia(s) cargada(s) al paso ${n}`); }
+  pesvRefrescarPaso(n);
+}
+function pesvVerEvidPaso(n, id) { const f = pesvEval()?.gestion?.[n]?.evidencias?.find(x => x.id === id); if (f) sigAbrir(f.ruta); }
+async function pesvQuitarEvidPaso(n, id) {
+  const ev = pesvEval(); const gs = ev?.gestion?.[n]; const f = gs?.evidencias?.find(x => x.id === id);
+  if (!f || !pesvPuedeEditar() || !confirm(`¿Quitar la evidencia "${f.nombre}"?`)) return;
+  try { await sigBorrar(f.ruta); } catch (e) { showNotif('No se pudo borrar el archivo: ' + e.message, 'error'); return; }
+  gs.evidencias = gs.evidencias.filter(x => x.id !== id);
+  await pesvGuardar(ev, true); pesvRefrescarPaso(n);
+}
+window.pesvSetGestion = pesvSetGestion; window.pesvSubirEvidPaso = pesvSubirEvidPaso;
+window.pesvVerEvidPaso = pesvVerEvidPaso; window.pesvQuitarEvidPaso = pesvQuitarEvidPaso;
+
+// ─── Alertas ────────────────────────────────────────────────
+function pesvAlertas(ev) {
+  const g = pesvCalcGlobal(ev), hoy = pesvHoyIso(), out = [];
+  (ev.acciones || []).filter(a => a.estado !== 'cerrada' && a.fechaLimite && a.fechaLimite < hoy).forEach(a =>
+    out.push({ nivel: 'alta', icon: '⏰', txt: `Acción vencida (paso ${a.paso}): ${a.descripcion}`, sub: `Venció el ${a.fechaLimite}${a.responsable ? ' · ' + a.responsable : ''}`, onclick: "renderPESV('acciones')" }));
+  PESV_PASOS.forEach(p => {
+    const c = g.porPaso[p.n]; if (!c.aplica) return;
+    const gs = ev.gestion?.[p.n] || {};
+    if (gs.fecha && gs.fecha < hoy && !['implementado', 'verificado'].includes(gs.estado))
+      out.push({ nivel: 'alta', icon: '📅', txt: `Paso ${p.n} con fecha compromiso vencida`, sub: `${p.titulo} · ${gs.fecha}`, onclick: `pesvAbrirPaso(${p.n})` });
+    if (c.no_cumple) out.push({ nivel: 'media', icon: '⛔', txt: `Paso ${p.n}: ${c.no_cumple} criterio(s) en "No cumple"`, sub: p.titulo, onclick: `pesvAbrirPaso(${p.n})` });
+    const evid = c.evidencias + (gs.evidencias?.length || 0);
+    if (!evid && c.cumple) out.push({ nivel: 'media', icon: '📎', txt: `Paso ${p.n} marcado "Cumple" sin evidencias`, sub: p.titulo, onclick: `pesvAbrirPaso(${p.n})` });
+  });
+  const sinCal = PESV_PASOS.filter(p => g.porPaso[p.n].aplica && g.porPaso[p.n].estado === 'sin_evaluar').length;
+  if (sinCal) out.push({ nivel: 'media', icon: '📝', txt: `${sinCal} paso(s) sin calificar`, sub: 'No suman al cumplimiento hasta calificarlos', onclick: "renderPESV('pasos')" });
+  const d = new Date();
+  if (d.getDate() < 5) out.push({ nivel: 'info', icon: '🗓', txt: `Faltan ${5 - d.getDate()} día(s) para la autoevaluación del 5`, sub: 'Actualiza calificaciones y evidencias antes del corte', onclick: "renderPESV('pasos')" });
+  const orden = { alta: 0, media: 1, info: 2 };
+  return out.sort((a, b) => orden[a.nivel] - orden[b.nivel]);
+}
+function pesvListaAlertas(ev) {
+  const al = pesvAlertas(ev);
+  if (!al.length) return VZ.empty('Sin alertas: el PESV está al día');
+  const col = { alta: '#dc2626', media: '#f59e0b', info: '#2563eb' };
+  return `<div style="max-height:260px;overflow:auto">${al.slice(0, 25).map(a => `
+    <div onclick="${VZ.esc(a.onclick)}" style="display:flex;gap:10px;padding:8px 10px;border-left:3px solid ${col[a.nivel]};background:#f8fafd;border-radius:0 8px 8px 0;margin-bottom:6px;cursor:pointer">
+      <span>${a.icon}</span><div style="min-width:0"><div style="font-size:12px;font-weight:600;color:var(--navy)">${VZ.esc(a.txt)}</div>
+      <div class="text-xs text-muted">${VZ.esc(a.sub || '')}</div></div></div>`).join('')}
+    ${al.length > 25 ? `<div class="text-xs text-muted">+ ${al.length - 25} más</div>` : ''}</div>`;
+}
+
+// ─── Autoevaluación mensual ─────────────────────────────────
+function pesvAutosDe(ev) { return PV.autos.filter(a => a.eval_id === ev.id).sort((a, b) => String(a.periodo).localeCompare(String(b.periodo))); }
+function pesvGraficoAutos(ev) {
+  if (!PV.v2) return VZ.empty('Se activa al ejecutar supabase_pesv_autoevaluacion.sql');
+  const a = pesvAutosDe(ev);
+  if (!a.length) return VZ.empty('Aún no hay autoevaluaciones registradas. La primera se toma el día 5.');
+  return VZ.line(a.map(x => pesvMesNombre(x.periodo).slice(0, 3) + ' ' + String(x.periodo).slice(2, 4)),
+    [{ name: '% cumplimiento', values: a.map(x => Number(x.pct)), color: 'blue' }, { name: '% avance', values: a.map(x => Number(x.avance)), color: 'teal' }],
+    { unit: '%', meta: 85 });
+}
+function pesvAutoeval(el, ev) {
+  if (!PV.v2) { el.innerHTML = `<div class="glass-card p-4" style="border-left:4px solid var(--amber)"><b>La autoevaluación mensual aún no está activada.</b>
+    <div class="text-sm text-muted mt-2">Ejecuta <code>supabase_pesv_autoevaluacion.sql</code> en Supabase → SQL Editor. Programa la foto del cumplimiento el día 5 de cada mes a las 8:00 a. m. y el recordatorio del día 1.</div></div>`; return; }
+  const a = pesvAutosDe(ev), ult = a[a.length - 1], prev = a[a.length - 2];
+  const g = pesvCalcGlobal(ev), editar = pesvPuedeEditar(), esActual = PV.evals[0]?.id === ev.id;
+  const corte = pesvProximoCorte(), per = pesvPeriodoActual();
+  const kpis = [
+    VZ.kpi({ label: 'Cumplimiento hoy', value: VZ.num(g.pct, 1), unit: '%', icon: '🎯', tone: g.pct >= 85 ? 'green' : g.pct >= 60 ? 'amber' : 'red', sub: 'en vivo, con lo calificado' }),
+    VZ.kpi({ label: 'Última autoevaluación', value: ult ? VZ.num(ult.pct, 1) : '—', unit: ult ? '%' : '', icon: '📸', tone: 'blue',
+             delta: ult && prev ? VZ.pctVar(Number(ult.pct), Number(prev.pct)) : null, sub: ult ? `${pesvMesNombre(ult.periodo)}${prev ? ' · antes ' + VZ.num(prev.pct, 1) + '%' : ''}` : 'sin registros', trend: a.map(x => Number(x.pct)) }),
+    VZ.kpi({ label: 'Próximo corte', value: corte.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }), icon: '🗓', tone: 'purple', sub: '8:00 a. m. · automático' }),
+    VZ.kpi({ label: 'Meses registrados', value: VZ.num(a.length), icon: '🗂', tone: 'navy', sub: `evaluación ${ev.anio}` }),
+  ].join('');
+  const filas = a.slice().reverse().map(x => {
+    const r = x.resumen || {}, pf = r.porFase || {};
+    return `<tr><td><b>${VZ.esc(pesvMesNombre(x.periodo))}</b></td>
+      <td><b style="color:${pesvColorPct(Number(x.pct))}">${VZ.num(x.pct, 1)}%</b><div style="width:90px">${VZ.progress(Number(x.pct))}</div></td>
+      <td>${VZ.num(x.avance, 0)}%</td><td>${r.pasosCumplen ?? '—'}/${r.pasosAplican ?? '—'}</td>
+      <td>${['P', 'H', 'V', 'A'].map(k => `<span class="vz-chip" style="margin:1px">${k} ${pf[k] ?? '—'}%</span>`).join('')}</td>
+      <td>${r.noCumple ?? '—'}</td><td>${r.accVencidas ?? '—'}</td>
+      <td><span class="vz-chip ${x.origen === 'automatica' ? 'c-blue' : ''}">${x.origen === 'automatica' ? 'Automática' : x.origen === 'app' ? 'Al ingresar' : 'Manual'}</span></td>
+      <td class="text-xs text-muted">${x.created_at ? new Date(x.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : ''}</td></tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="info-box mb-3" style="font-size:12px">🤖 <b>Autogestión:</b> el <b>día 5 de cada mes a las 8:00 a. m.</b> el sistema guarda el % de cumplimiento del PESV y avisa por la campana 🔔 a RRHH, HSEQ, Gerencia y Super Admin. El <b>día 1</b> llega un recordatorio para actualizar calificaciones y evidencias. Si la tarea automática no corriera, la foto se registra la primera vez que alguien del PESV entra a partir del día 5.</div>
+    <div class="vz-kpis">${kpis}</div>
+    <div class="vz-grid">${VZ.panel('Evolución mensual', pesvGraficoAutos(ev), { sub: 'Línea roja: meta interna de 85%', span: 12 })}</div>
+    <div class="vz-grid">${VZ.panel('Historial de autoevaluaciones', a.length ? `<div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
+      <thead><tr><th>Mes</th><th>Cumplimiento</th><th>Avance</th><th>Pasos</th><th>Por fase</th><th>No cumple</th><th>Acc. vencidas</th><th>Origen</th><th>Registrada</th></tr></thead>
+      <tbody>${filas}</tbody></table></div>` : VZ.empty('Todavía no hay meses registrados.'),
+      { span: 12, actions: `<div style="display:flex;gap:6px">${a.length ? '<button class="btn btn-ghost btn-sm" onclick="pesvExportarAutos()">⬇️ Exportar</button>' : ''}
+        ${editar && esActual ? `<button class="btn btn-primary btn-sm" onclick="pesvRegistrarAutoeval(true)">📸 Registrar ${VZ.esc(pesvMesNombre(per))} ahora</button>` : ''}</div>` })}</div>`;
+}
+async function pesvRegistrarAutoeval(forzar = false, silencioso = false) {
+  const ev = PV.evals[0];
+  if (!ev || !pesvPuedeEditar() || !PV.v2) return null;
+  if (forzar && !confirm(`¿Registrar ahora la autoevaluación de ${pesvMesNombre(pesvPeriodoActual())}? Reemplaza la foto de este mes si ya existía.`)) return null;
+  const g = await pesvGuardar(ev, true);   // guarda el resumen más reciente
+  if (g === null) return null;
+  const r = await sbFetch('rpc/pesv_autoevaluacion_mensual', 'POST', { p_origen: forzar ? 'manual' : 'app', p_forzar: !!forzar });
+  if (r === null) { if (!silencioso) showNotif('No se pudo registrar la autoevaluación', 'error'); return null; }
+  const autos = await sbFetch('pesv_autoevaluaciones', 'GET', null, '?select=*&order=periodo.desc');
+  if (autos) PV.autos = autos.map(a => ({ ...a, resumen: typeof a.resumen === 'string' ? JSON.parse(a.resumen || '{}') : (a.resumen || {}) }));
+  if (r.nueva || forzar) showNotif(`📊 Autoevaluación PESV de ${pesvMesNombre(r.periodo || pesvPeriodoActual())}: ${VZ.num(r.pct, 1)}% de cumplimiento`);
+  if (typeof cargarNotificaciones === 'function') cargarNotificaciones();
+  if (['autoeval', 'tablero'].includes(PV.tab)) pesvPintarTab();
+  return r;
+}
+// Respaldo de la tarea del día 5: si no hay foto de este mes, se toma al entrar
+async function pesvAutoCheck() {
+  if (PV.autoCheckHecho || !PV.v2 || !pesvPuedeEditar() || new Date().getDate() < 5) return;
+  const ev = PV.evals[0]; if (!ev) return;
+  PV.autoCheckHecho = true;
+  if (PV.autos.some(a => a.eval_id === ev.id && a.periodo === pesvPeriodoActual())) return;
+  await pesvRegistrarAutoeval(false, true);
+}
+function pesvExportarAutos() {
+  const ev = pesvEval(); if (!ev) return;
+  const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const filas = [['Mes', '% cumplimiento', '% avance', 'Pasos que cumplen', 'Pasos que aplican', 'Planear %', 'Hacer %', 'Verificar %', 'Actuar %', 'No cumple', 'Acciones vencidas', 'Origen', 'Registrada'].map(q).join(';')];
+  pesvAutosDe(ev).forEach(x => { const r = x.resumen || {}, pf = r.porFase || {};
+    filas.push([x.periodo, x.pct, x.avance, r.pasosCumplen, r.pasosAplican, pf.P, pf.H, pf.V, pf.A, r.noCumple, r.accVencidas, x.origen, x.created_at].map(q).join(';')); });
+  const blob = new Blob(['﻿' + filas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = `PESV_autoevaluaciones_${ev.anio}.csv`;
+  document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(el.href), 2000);
+}
+window.pesvRegistrarAutoeval = pesvRegistrarAutoeval; window.pesvExportarAutos = pesvExportarAutos;
 window.PV = PV;

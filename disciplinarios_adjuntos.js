@@ -111,6 +111,7 @@ function pintarAdjuntosDisc(discId) {
 
 // ─── Subir ───────────────────────────────────────────────────
 async function subirAdjuntosDisc(discId, etapa, input) {
+  if (typeof asegurarSesion === 'function') await asegurarSesion();
   if (!puedeGestionarExpedienteDisc()) {
     showNotif('Solo Recursos Humanos o el Super Admin pueden adjuntar al expediente', 'error'); return;
   }
@@ -180,6 +181,7 @@ async function verAdjuntoDisc(discId, adjId) {
   // el navegador la bloquea como ventana emergente.
   const w = window.open('', '_blank');
   try {
+    if (typeof asegurarSesion === 'function') await asegurarSesion();
     const res = await fetch(`${SB_URL}/storage/v1/object/sign/${ADJ_DISC_BUCKET}/${a.ruta}`, {
       method: 'POST',
       headers: adjHeaders({ 'Content-Type': 'application/json' }),
@@ -199,6 +201,7 @@ window.verAdjuntoDisc = verAdjuntoDisc;
 
 // ─── Eliminar ────────────────────────────────────────────────
 async function eliminarAdjuntoDisc(discId, adjId) {
+  if (typeof asegurarSesion === 'function') await asegurarSesion();
   if (!puedeGestionarExpedienteDisc()) return;
   const a = (ADJ_DISC_CACHE[discId] || []).find(x => x.id === adjId);
   if (!a) return;
