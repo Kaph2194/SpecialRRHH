@@ -39,6 +39,7 @@ window.pwPuedeRestablecer = pwPuedeRestablecer;
 async function llamarFnPassword(cuerpo, conSesion) {
   const headers = { 'Content-Type': 'application/json', 'apikey': SB_KEY };
   if (conSesion) {
+    if (typeof asegurarSesion === 'function') await asegurarSesion();
     const token = (typeof tokenActual === 'function') ? tokenActual() : null;
     if (!token || token === SB_KEY) throw new Error('Tu sesión expiró. Vuelve a ingresar.');
     headers['Authorization'] = 'Bearer ' + token;

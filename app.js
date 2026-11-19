@@ -408,8 +408,9 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 let SB_OK = false;
 
 // Helper: llamada a Supabase REST API
-async function sbFetch(table, method='GET', body=null, filters='', extraHeaders={}) {
+async function sbFetch(table, method='GET', body=null, filters='', extraHeaders={}, _reintento=false) {
   if (!SB_URL) return null;
+  if (typeof SB_SESSION !== 'undefined' && SB_SESSION && typeof asegurarSesion === 'function') await asegurarSesion();
   try {
     const res = await fetch(`${SB_URL}/rest/v1/${table}${filters}`, {
       method,
@@ -424,6 +425,10 @@ async function sbFetch(table, method='GET', body=null, filters='', extraHeaders=
     });
     if (!res.ok) {
       const err = await res.text();
+      // Token vencido: renovar la sesión y reintentar una sola vez
+      if (res.status === 401 && !_reintento && /JWT expired|PGRST303|PGRST301/i.test(err) && typeof asegurarSesion === 'function') {
+        if (await asegurarSesion(true)) return sbFetch(table, method, body, filters, extraHeaders, true);
+      }
       console.warn('Supabase error:', res.status, err);
       // Los errores de escritura se muestran al usuario — nada debe fallar en silencio
       if (method !== 'GET' && typeof showNotif === 'function') {
@@ -9693,6 +9698,7 @@ async function uploadToDrive(base64Data, fileName, folderKey, subfolder) {
                    subfolder ? safe(subfolder) : null,
                    Date.now() + '_' + token + '_' + safe(fileName || 'archivo') ].filter(Boolean).join('/');
 
+    if (typeof asegurarSesion === 'function') await asegurarSesion();
     const res = await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`, {
       method: 'POST',
       headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${tokenActual()}`, 'Content-Type': mime, 'x-upsert': 'true' },
@@ -11090,7 +11096,11 @@ async function authRequest(ruta, body, extra = {}) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error_description || data.msg || data.message || 'Error de autenticación');
+  if (!res.ok) {
+    const err = new Error(data.error_description || data.msg || data.message || 'Error de autenticación');
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
@@ -11121,8 +11131,37 @@ async function authRefrescar() {
       user:          data.user,
     });
     return true;
-  } catch(e) { guardarSesion(null); return false; }
+  } catch(e) {
+    // Solo se descarta la sesión si Supabase rechazó el refresh_token (vencido o revocado).
+    // Un corte de internet no debe cerrar la sesión.
+    if (e && e.status >= 400 && e.status < 500) guardarSesion(null);
+    return false;
+  }
 }
+
+// ─── Mantener la sesión viva ─────────────────────────────────
+// El access_token de Supabase dura 1 hora. Se renueva solo antes de vencer
+// (cada 4 min y al volver a la pestaña) y, si una petición llega con el token
+// vencido, sbFetch lo renueva y reintenta una vez.
+let _sesionRefrescando = null;
+let _sesionAvisada = false;
+async function asegurarSesion(forzar = false) {
+  if (!SB_SESSION?.refresh_token) return false;
+  if (!forzar && SB_SESSION.expires_at && Date.now() < SB_SESSION.expires_at - 5 * 60 * 1000) return true;
+  if (!_sesionRefrescando) _sesionRefrescando = authRefrescar().finally(() => { _sesionRefrescando = null; });
+  const ok = await _sesionRefrescando;
+  if (!ok && !SB_SESSION) avisarSesionExpirada();
+  return ok;
+}
+function avisarSesionExpirada() {
+  if (_sesionAvisada || !SC.user) return;
+  _sesionAvisada = true;
+  if (typeof showNotif === 'function') showNotif('🔒 Tu sesión expiró. Vuelve a ingresar para seguir trabajando.', 'error');
+  setTimeout(() => { _sesionAvisada = false; if (typeof doLogout === 'function') doLogout(); }, 2500);
+}
+window.asegurarSesion = asegurarSesion;
+setInterval(() => { if (SB_SESSION && !document.hidden) asegurarSesion(); }, 4 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && SB_SESSION) asegurarSesion(); });
 
 async function authCerrarSesion() {
   try {

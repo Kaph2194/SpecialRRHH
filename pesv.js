@@ -576,12 +576,14 @@ function sigNombreSeguro(s) {
   return String(s || 'archivo').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_').slice(0, 110);
 }
 async function sigSubir(ruta, file) {
+  if (typeof asegurarSesion === 'function') await asegurarSesion();
   const res = await fetch(`${SB_URL}/storage/v1/object/sig/${ruta}`, { method: 'POST', headers: sigHeaders({ 'Content-Type': file.type || 'application/octet-stream' }), body: file });
   if (!res.ok) throw new Error(res.status === 413 ? 'supera 10 MB' : `error ${res.status}`);
 }
 async function sigAbrir(ruta) {
   const w = window.open('', '_blank');   // abrir en el clic para que no la bloqueen
   try {
+    if (typeof asegurarSesion === 'function') await asegurarSesion();
     const res = await fetch(`${SB_URL}/storage/v1/object/sign/sig/${ruta}`, { method: 'POST', headers: sigHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ expiresIn: 120 }) });
     const d = await res.json().catch(() => ({}));
     const u = d.signedURL || d.signedUrl;
@@ -591,6 +593,7 @@ async function sigAbrir(ruta) {
   } catch (e) { if (w) w.close(); showNotif('No se pudo abrir el archivo: ' + e.message, 'error'); }
 }
 async function sigBorrar(ruta) {
+  if (typeof asegurarSesion === 'function') await asegurarSesion();
   const res = await fetch(`${SB_URL}/storage/v1/object/sig/${ruta}`, { method: 'DELETE', headers: sigHeaders() });
   if (!res.ok && res.status !== 404) throw new Error(`error ${res.status}`);
 }
