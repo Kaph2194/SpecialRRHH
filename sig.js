@@ -114,7 +114,9 @@ async function renderBiblioteca(tab) {
     ${sigVeTodo() ? `<button class="vz-pill ${SG.area === 'todas' ? 'on' : ''}" onclick="SG.area='todas';renderBiblioteca()">🌐 Todas las áreas</button>` : ''}
     ${areas.map(a => `<button class="vz-pill ${SG.area === a.key ? 'on' : ''}" onclick="SG.area='${a.key}';renderBiblioteca()">${a.icon} ${VZ.esc(a.nombre)}${cuenta(a.key) ? `<span class="n">${cuenta(a.key)}</span>` : ''}</button>`).join('')}</div>`;
   const gestiona = SG.area !== 'todas' && sigPuedeGestionar(SG.area);
-  const tabs = [['resumen', '📊 Tablero'], ['documentos', '📚 Documentos'], ['kpi', '🎯 KPI']];
+  const nAl = sigAlertas().filter(a => a.nivel === 'alta').length;
+  const tabs = [['resumen', '📊 Tablero'], ['documentos', '📚 Documentos'], ['kpi', '🎯 KPI'], ['reportes', '📑 Reportes'],
+                ['alertas', '🚨 Alertas' + (nAl ? ` (${nAl})` : '')]];
   root.innerHTML = `
     <div class="vz-head">
       <h2>Procesos, documentos y KPI${SG.area !== 'todas' ? ' · ' + VZ.esc(sigAreaNombre(SG.area)) : ''}<small>Manuales, procesos, procedimientos, instructivos, formatos e indicadores de cada área</small></h2>
@@ -128,7 +130,7 @@ async function renderBiblioteca(tab) {
     <div class="tabs mb-4">${tabs.map(([k, t]) => `<div class="tab ${SG.tab === k ? 'active' : ''}" onclick="renderBiblioteca('${k}')">${t}</div>`).join('')}</div>
     <div id="sig-body"></div>`;
   const body = document.getElementById('sig-body');
-  ({ resumen: sigResumen, documentos: sigDocumentos, kpi: sigKPIs })[SG.tab]?.(body);
+  ({ resumen: sigResumen, documentos: sigDocumentos, kpi: sigKPIs, reportes: sigReportes, alertas: sigAlertasVista })[SG.tab]?.(body);
 }
 window.renderBiblioteca = renderBiblioteca;
 
@@ -488,6 +490,7 @@ async function sigGuardarMedicion(id) {
   k.mediciones.push({ periodo, valor: Number(val), nota: document.getElementById('km-nota').value.trim(), por: SC.user?.name || '', fecha: new Date().toISOString() });
   if (!(await sigGuardarKPIMediciones(k))) { k.mediciones = antes; return; }
   showNotif(`📈 Medición ${periodo} registrada`);
+  sigAvisarSiFueraDeMeta(k, periodo, Number(val));
   renderBiblioteca();
   sigDetalleKPI(id);
 }
@@ -509,3 +512,179 @@ async function sigEliminarKPI(id) {
 }
 window.sigGuardarMedicion = sigGuardarMedicion; window.sigBorrarMedicion = sigBorrarMedicion; window.sigEliminarKPI = sigEliminarKPI;
 window.SG = SG;
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTAS Y REPORTERÍA DE KPI Y DOCUMENTOS
+// La tarea del día 5 (supabase_pesv_autoevaluacion.sql) envía estas
+// mismas alertas por la campana 🔔 al área responsable.
+// ═══════════════════════════════════════════════════════════════
+const sigDestino = key => ({ rol: key });   // 'rrhh' · 'gerencia' · 'area-<id>'
+
+// Último periodo que ya debería estar medido según la frecuencia
+function sigPeriodoEsperado(frec, hoy = new Date()) {
+  const y = hoy.getFullYear(), m = hoy.getMonth() + 1, pad = n => String(n).padStart(2, '0');
+  if (frec === 'trimestral') { const q = Math.floor((m - 1) / 3); return q === 0 ? `${y - 1}-12` : `${y}-${pad(q * 3)}`; }
+  if (frec === 'semestral') return m <= 6 ? `${y - 1}-12` : `${y}-06`;
+  if (frec === 'anual') return `${y - 1}-12`;
+  return m === 1 ? `${y - 1}-12` : `${y}-${pad(m - 1)}`;
+}
+const sigMesTxt = per => { const [y, m] = String(per || '').split('-'); return m ? `${VZ.MESES[Number(m) - 1]} ${y}` : per; };
+
+function sigAlertas() {
+  const hoy = sigHoy(), en30 = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10), out = [];
+  const visibles = a => SG.area === 'todas' ? sigAreas().some(x => x.key === a) : a === SG.area;
+  SG.kpis.filter(k => visibles(k.area_key) && k.activo !== false).forEach(k => {
+    const s = sigSemaforoKPI(k), u = sigUltimaMedicion(k), esp = sigPeriodoEsperado(k.frecuencia);
+    const area = sigAreaNombre(k.area_key);
+    if (s.k === 'rojo') out.push({ nivel: 'alta', tipo: 'KPI fuera de meta', icon: '🔴', txt: k.nombre, sub: `${area} · ${sigFmtKPI(u.valor, k)} vs meta ${sigFmtKPI(k.meta, k)} (${sigMesTxt(u.periodo)})`, onclick: `sigDetalleKPI('${k.id}')` });
+    else if (s.k === 'amarillo') out.push({ nivel: 'media', tipo: 'KPI en riesgo', icon: '🟡', txt: k.nombre, sub: `${area} · ${sigFmtKPI(u.valor, k)} vs meta ${sigFmtKPI(k.meta, k)}`, onclick: `sigDetalleKPI('${k.id}')` });
+    if (!u || String(u.periodo) < esp) out.push({ nivel: 'media', tipo: 'KPI sin medir', icon: '⏰', txt: k.nombre, sub: `${area} · falta la medición de ${sigMesTxt(esp)} (${SIG_FRECUENCIAS[k.frecuencia] || 'Mensual'})`, onclick: `sigDetalleKPI('${k.id}')` });
+  });
+  SG.docs.filter(d => visibles(d.area_key) && d.estado !== 'obsoleto' && d.fecha_revision && d.fecha_revision <= en30).forEach(d => {
+    const venc = d.fecha_revision < hoy;
+    out.push({ nivel: venc ? 'alta' : 'media', tipo: venc ? 'Revisión vencida' : 'Revisión próxima', icon: venc ? '⏰' : '📅',
+               txt: `${d.codigo ? d.codigo + ' · ' : ''}${d.nombre}`, sub: `${sigAreaNombre(d.area_key)} · revisión ${d.fecha_revision}`,
+               onclick: d.archivo_ruta ? `sigAbrir('${VZ.esc(d.archivo_ruta)}')` : '' });
+  });
+  const orden = { alta: 0, media: 1 };
+  return out.sort((a, b) => orden[a.nivel] - orden[b.nivel]);
+}
+window.sigAlertas = sigAlertas;
+
+function sigAlertasVista(el) {
+  const al = sigAlertas();
+  const cuenta = t => al.filter(a => a.tipo === t).length;
+  const kpis = [
+    VZ.kpi({ label: 'KPI fuera de meta', value: VZ.num(cuenta('KPI fuera de meta')), icon: '🔴', tone: cuenta('KPI fuera de meta') ? 'red' : 'green' }),
+    VZ.kpi({ label: 'KPI en riesgo', value: VZ.num(cuenta('KPI en riesgo')), icon: '🟡', tone: 'amber' }),
+    VZ.kpi({ label: 'KPI sin medir', value: VZ.num(cuenta('KPI sin medir')), icon: '⏰', tone: cuenta('KPI sin medir') ? 'orange' : 'green' }),
+    VZ.kpi({ label: 'Documentos por revisar', value: VZ.num(cuenta('Revisión vencida') + cuenta('Revisión próxima')), icon: '📅', tone: cuenta('Revisión vencida') ? 'red' : 'blue', sub: `${cuenta('Revisión vencida')} vencidos · ${cuenta('Revisión próxima')} en 30 días` }),
+  ].join('');
+  const col = { alta: '#dc2626', media: '#f59e0b' };
+  const lista = al.length ? al.map(a => `
+    <div ${a.onclick ? `onclick="${VZ.esc(a.onclick)}"` : ''} style="display:flex;gap:12px;align-items:center;padding:10px 12px;background:#fff;border:1px solid var(--vz-line);border-left:4px solid ${col[a.nivel]};border-radius:10px;margin-bottom:8px;${a.onclick ? 'cursor:pointer' : ''}">
+      <span style="font-size:18px">${a.icon}</span>
+      <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--navy)">${VZ.esc(a.txt)}</div><div class="text-xs text-muted">${VZ.esc(a.sub)}</div></div>
+      <span class="vz-chip ${a.nivel === 'alta' ? 'c-red' : 'c-amber'}">${VZ.esc(a.tipo)}</span></div>`).join('') : VZ.empty('Sin alertas: KPI medidos y en meta, documentos al día');
+  el.innerHTML = `<div class="info-box mb-3" style="font-size:12px">🔔 Además de esta lista, el <b>día 5 de cada mes</b> el sistema envía estas alertas por la campana al área responsable (y a Gerencia cuando un KPI queda fuera de meta). Al registrar una medición fuera de meta, el aviso sale de inmediato.</div>
+    <div class="vz-kpis">${kpis}</div>
+    ${SC.user?.role === 'superadmin' ? `<div style="text-align:right;margin-bottom:10px"><button class="btn btn-ghost btn-sm" onclick="sigEnviarAlertasAhora()">📣 Enviar alertas ahora</button></div>` : ''}
+    ${lista}`;
+}
+async function sigEnviarAlertasAhora() {
+  if (SC.user?.role !== 'superadmin' || !confirm('¿Enviar ahora las alertas de KPI, documentos y acciones PESV a cada área por la campana?')) return;
+  const r = await sbFetch('rpc/sig_alertas_mensuales', 'POST', {});
+  if (r === null) { showNotif('No se pudieron enviar. Verifica que se haya ejecutado supabase_pesv_autoevaluacion.sql', 'error'); return; }
+  showNotif(`📣 ${Number(r) || 0} alerta(s) nueva(s) enviada(s)`);
+  if (typeof cargarNotificaciones === 'function') cargarNotificaciones();
+}
+window.sigEnviarAlertasAhora = sigEnviarAlertasAhora;
+
+function sigAvisarSiFueraDeMeta(k, periodo, valor) {
+  if (typeof crearNotificacion !== 'function') return;
+  const s = VZ.semaforo(valor, sigMeta(k), k.sentido || 'mayor');
+  if (s.k !== 'rojo') return;
+  const msg = `${sigAreaNombre(k.area_key)} · ${sigFmtKPI(valor, k)} frente a meta ${sigFmtKPI(k.meta, k)} (${sigMesTxt(periodo)})`;
+  const destinos = [k.area_key, 'gerencia'].filter((v, i, a) => a.indexOf(v) === i);
+  destinos.forEach(d => crearNotificacion(sigDestino(d), { titulo: `🔴 KPI fuera de meta: ${k.nombre}`, mensaje: msg, tipo: 'alerta', refTabla: 'sig_kpis', refId: k.id, vista: 'biblioteca' }));
+}
+
+// ─── Reportes ───────────────────────────────────────────────
+function sigPeriodosDisponibles() {
+  const set = new Set(); SG.kpis.forEach(k => (k.mediciones || []).forEach(m => m.periodo && set.add(m.periodo)));
+  set.add(new Date().toISOString().slice(0, 7));
+  return [...set].sort().reverse();
+}
+function sigDatosReporte(periodo) {
+  const kpis = sigKpisArea();
+  return kpis.map(k => {
+    const med = (k.mediciones || []).slice().sort((a, b) => String(a.periodo).localeCompare(String(b.periodo)));
+    const act = med.filter(m => m.periodo <= periodo).pop() || null;
+    const ant = act ? med.filter(m => m.periodo < act.periodo).pop() || null : null;
+    const meta = sigMeta(k), v = act ? Number(act.valor) : null;
+    const s = VZ.semaforo(v, meta, k.sentido || 'mayor');
+    let cumpl = null;
+    if (v != null && meta != null) cumpl = k.sentido === 'menor' ? (v === 0 ? 100 : Math.min(150, meta / v * 100)) : (meta === 0 ? 100 : Math.min(150, v / meta * 100));
+    return { k, act, ant, v, meta, s, cumpl, serie: med.filter(m => m.periodo <= periodo).slice(-6).map(m => Number(m.valor)),
+             delta: act && ant && Number(ant.valor) ? (Number(act.valor) - Number(ant.valor)) / Math.abs(Number(ant.valor)) * 100 : null, alDia: act && act.periodo === periodo };
+  });
+}
+function sigReportes(el) {
+  SG.repPer = SG.repPer || new Date().toISOString().slice(0, 7);
+  const filas = sigDatosReporte(SG.repPer), docs = sigDocsArea();
+  const conCumpl = filas.filter(f => f.cumpl != null);
+  const prom = conCumpl.length ? conCumpl.reduce((s, f) => s + Math.min(100, f.cumpl), 0) / conCumpl.length : null;
+  const kpis = [
+    VZ.kpi({ label: 'Cumplimiento promedio de KPI', value: prom == null ? '—' : VZ.num(prom, 0), unit: prom == null ? '' : '%', icon: '🎯', tone: prom >= 90 ? 'green' : prom >= 70 ? 'amber' : 'red', sub: `${conCumpl.length} KPI con meta y medición` }),
+    VZ.kpi({ label: 'En meta', value: VZ.num(filas.filter(f => f.s.k === 'verde').length), icon: '🟢', tone: 'green', sub: `de ${filas.length} KPI` }),
+    VZ.kpi({ label: 'Fuera de meta', value: VZ.num(filas.filter(f => f.s.k === 'rojo').length), icon: '🔴', tone: 'red' }),
+    VZ.kpi({ label: 'Medidos en el periodo', value: VZ.num(filas.filter(f => f.alDia).length), icon: '📏', tone: 'blue', sub: sigMesTxt(SG.repPer) }),
+    VZ.kpi({ label: 'Documentos vigentes', value: VZ.num(docs.filter(d => d.estado === 'vigente').length), icon: '📚', tone: 'navy', sub: `de ${docs.length}` }),
+  ].join('');
+  const tabla = filas.length ? `<div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
+    <thead><tr>${SG.area === 'todas' ? '<th>Área</th>' : ''}<th>KPI</th><th>Meta</th><th>Valor</th><th>Periodo</th><th>Var. vs anterior</th><th>Cumplimiento</th><th>Semáforo</th><th>Tendencia</th></tr></thead>
+    <tbody>${filas.map(f => `<tr style="cursor:pointer" onclick="sigDetalleKPI('${f.k.id}')">
+      ${SG.area === 'todas' ? `<td>${VZ.esc(sigAreaNombre(f.k.area_key))}</td>` : ''}
+      <td><b>${VZ.esc(f.k.nombre)}</b><div class="text-xs text-muted">${f.k.sentido === 'menor' ? 'menor es mejor' : 'mayor es mejor'}</div></td>
+      <td>${sigFmtKPI(f.meta, f.k)}</td><td><b>${f.act ? sigFmtKPI(f.v, f.k) : '—'}</b></td>
+      <td>${f.act ? VZ.esc(sigMesTxt(f.act.periodo)) + (f.alDia ? '' : ' <span class="vz-chip c-amber">desactualizado</span>') : '<span class="vz-chip c-amber">sin medir</span>'}</td>
+      <td>${f.delta == null ? '—' : `<span class="vz-delta ${f.delta === 0 ? 'flat' : ((f.k.sentido === 'menor') === (f.delta < 0) ? 'up' : 'down')}">${f.delta > 0 ? '▲' : f.delta < 0 ? '▼' : '■'} ${VZ.num(Math.abs(f.delta), 1)}%</span>`}</td>
+      <td style="min-width:110px">${f.cumpl == null ? '—' : VZ.progress(Math.min(100, f.cumpl), f.s.c) + `<span class="text-xs">${VZ.num(f.cumpl, 0)}%</span>`}</td>
+      <td><span class="vz-chip" style="background:${f.s.c};color:#fff">${f.s.txt}</span></td>
+      <td>${VZ.spark(f.serie, { w: 80, h: 24, c: f.s.c })}</td></tr>`).join('')}</tbody></table></div>` : VZ.empty('No hay KPI en esta selección.');
+  const porArea = sigAreas().map(a => {
+    const fs = filas.filter(f => f.k.area_key === a.key && f.cumpl != null);
+    return fs.length ? { label: a.nombre, value: Math.round(fs.reduce((s, f) => s + Math.min(100, f.cumpl), 0) / fs.length), color: 'blue' } : null;
+  }).filter(Boolean);
+  el.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+      <label class="text-sm" style="font-weight:600;color:var(--navy)">Periodo</label>
+      <select class="form-select" style="width:auto" onchange="SG.repPer=this.value;renderBiblioteca('reportes')">${sigPeriodosDisponibles().map(p => `<option value="${p}" ${p === SG.repPer ? 'selected' : ''}>${sigMesTxt(p)}</option>`).join('')}</select>
+      <span class="text-xs text-muted">${SG.area === 'todas' ? 'Todas las áreas' : VZ.esc(sigAreaNombre(SG.area))}</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost btn-sm" onclick="sigExportarReporte()">⬇️ Excel (CSV)</button>
+      <button class="btn btn-primary btn-sm" onclick="sigImprimirReporte()">🖨️ Imprimir / PDF</button>
+    </div>
+    <div class="vz-kpis">${kpis}</div>
+    ${SG.area === 'todas' && porArea.length ? `<div class="vz-grid">${VZ.panel('Cumplimiento promedio de KPI por área', VZ.bars(porArea, { max: 100, unit: '%' }), { span: 12 })}</div>` : ''}
+    <div class="vz-grid">${VZ.panel(`Informe de indicadores · ${sigMesTxt(SG.repPer)}`, tabla, { sub: 'Último valor registrado hasta el periodo elegido', span: 12 })}</div>`;
+}
+function sigExportarReporte() {
+  const filas = sigDatosReporte(SG.repPer || new Date().toISOString().slice(0, 7));
+  const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const out = [['Área', 'KPI', 'Fórmula', 'Unidad', 'Sentido', 'Meta', 'Valor', 'Periodo del valor', 'Valor anterior', 'Variación %', 'Cumplimiento %', 'Semáforo', 'Responsable', 'Frecuencia'].map(q).join(';')];
+  filas.forEach(f => out.push([sigAreaNombre(f.k.area_key), f.k.nombre, f.k.formula, f.k.unidad, f.k.sentido === 'menor' ? 'Menor es mejor' : 'Mayor es mejor', f.meta,
+    f.v, f.act?.periodo, f.ant?.valor, f.delta == null ? '' : f.delta.toFixed(1), f.cumpl == null ? '' : f.cumpl.toFixed(0), f.s.txt, f.k.responsable, SIG_FRECUENCIAS[f.k.frecuencia] || ''].map(q).join(';')));
+  const blob = new Blob(['﻿' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `Reporte_KPI_${SG.area === 'todas' ? 'todas' : sigAreaNombre(SG.area).replace(/\W+/g, '_')}_${SG.repPer}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function sigImprimirReporte() {
+  const per = SG.repPer || new Date().toISOString().slice(0, 7);
+  const filas = sigDatosReporte(per), al = sigAlertas();
+  const w = window.open('', '_blank');
+  if (!w) { showNotif('Permite las ventanas emergentes para imprimir el reporte', 'error'); return; }
+  const fila = f => `<tr><td>${VZ.esc(sigAreaNombre(f.k.area_key))}</td><td><b>${VZ.esc(f.k.nombre)}</b></td><td>${sigFmtKPI(f.meta, f.k)}</td>
+    <td><b>${f.act ? sigFmtKPI(f.v, f.k) : '—'}</b></td><td>${f.act ? VZ.esc(sigMesTxt(f.act.periodo)) : 'sin medir'}</td>
+    <td>${f.cumpl == null ? '—' : VZ.num(f.cumpl, 0) + '%'}</td><td><span style="background:${f.s.c};color:#fff;padding:2px 8px;border-radius:10px">${f.s.txt}</span></td>
+    <td>${VZ.spark(f.serie, { w: 80, h: 22, c: f.s.c })}</td></tr>`;
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Reporte de KPI · ${sigMesTxt(per)}</title>
+    <style>body{font-family:Arial,sans-serif;color:#0d1a3a;margin:28px;font-size:12px}h1{font-size:20px;margin:0}h2{font-size:14px;margin:22px 0 8px;color:#111f4d}
+    .sub{color:#64748b;margin:4px 0 16px}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-align:middle}
+    th{background:#f1f5f9;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#475569}.tiles{display:flex;gap:10px}.tile{flex:1;border:1px solid #e5e7eb;border-left:4px solid #111f4d;border-radius:8px;padding:8px 12px}
+    .tile b{display:block;font-size:20px}@media print{button{display:none}}</style></head><body>
+    <button onclick="window.print()" style="float:right;padding:8px 14px">🖨️ Imprimir / Guardar PDF</button>
+    <h1>Reporte de indicadores · ${VZ.esc(sigMesTxt(per))}</h1>
+    <div class="sub">${SG.area === 'todas' ? 'Todas las áreas' : VZ.esc(sigAreaNombre(SG.area))} · Generado ${new Date().toLocaleString('es-CO')} · ${VZ.esc(SC.user?.name || '')}</div>
+    <div class="tiles"><div class="tile">KPI<b>${filas.length}</b></div><div class="tile" style="border-left-color:#16a34a">En meta<b>${filas.filter(f => f.s.k === 'verde').length}</b></div>
+      <div class="tile" style="border-left-color:#f59e0b">En riesgo<b>${filas.filter(f => f.s.k === 'amarillo').length}</b></div><div class="tile" style="border-left-color:#dc2626">Fuera de meta<b>${filas.filter(f => f.s.k === 'rojo').length}</b></div>
+      <div class="tile" style="border-left-color:#94a3b8">Sin medir<b>${filas.filter(f => !f.act).length}</b></div></div>
+    <h2>Indicadores</h2><table><thead><tr><th>Área</th><th>KPI</th><th>Meta</th><th>Valor</th><th>Periodo</th><th>Cumplimiento</th><th>Semáforo</th><th>Tendencia</th></tr></thead>
+    <tbody>${filas.map(fila).join('') || '<tr><td colspan="8">Sin KPI</td></tr>'}</tbody></table>
+    <h2>Alertas (${al.length})</h2><table><thead><tr><th>Tipo</th><th>Detalle</th><th>Área / dato</th></tr></thead>
+    <tbody>${al.map(a => `<tr><td>${a.icon} ${VZ.esc(a.tipo)}</td><td>${VZ.esc(a.txt)}</td><td>${VZ.esc(a.sub)}</td></tr>`).join('') || '<tr><td colspan="3">Sin alertas</td></tr>'}</tbody></table>
+    </body></html>`);
+  w.document.close();
+}
+window.sigExportarReporte = sigExportarReporte; window.sigImprimirReporte = sigImprimirReporte;

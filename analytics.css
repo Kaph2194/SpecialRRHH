@@ -172,3 +172,15 @@
 .pesv-num { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; color: #fff; flex-shrink: 0; }
 .pesv-crit { padding: 11px 12px; border: 1px solid var(--vz-line); border-radius: 10px; margin-bottom: 8px; background: #fff; }
 .pesv-crit-top { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+
+/* PESV · tarjetas de los 24 pasos */
+.pesv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.pesv-card { background: #fff; border: 1px solid var(--vz-line); border-top: 4px solid var(--fase-c, var(--vz-navy)); border-radius: 12px; padding: 12px 14px; cursor: pointer;
+             box-shadow: 0 1px 2px rgba(17,31,77,.04); transition: box-shadow .12s, transform .12s; display: flex; flex-direction: column; gap: 8px; }
+.pesv-card:hover { box-shadow: 0 8px 22px rgba(17,31,77,.12); transform: translateY(-1px); }
+.pesv-card.is-off { opacity: .55; cursor: default; border-top-color: #94a3b8; }
+.pesv-card.is-off:hover { transform: none; box-shadow: none; }
+.pesv-card-top { display: flex; gap: 10px; align-items: flex-start; }
+.pesv-card-tit { flex: 1; font-size: 12.5px; font-weight: 700; color: var(--vz-navy); line-height: 1.3; }
+.pesv-card-pct { font-family: var(--font-display); font-size: 18px; font-weight: 800; }
+.pesv-card .vz-card-meta { margin-top: 0; }

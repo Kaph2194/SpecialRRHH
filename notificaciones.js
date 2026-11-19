@@ -54,6 +54,13 @@ async function cargarNotificaciones() {
   if (SC.user.empId) filtros.push(`para_emp_id.eq.${SC.user.empId}`);
   if (SC.user.id)    filtros.push(`para_user_id.eq.${SC.user.id}`);
   if (notifEsRRHH()) filtros.push('para_rol.eq.rrhh');
+  // Alertas por rol y por área (supabase_pesv_autoevaluacion.sql)
+  const rol = SC.user.role;
+  if (rol === 'gerencia' || rol === 'superadmin') filtros.push(`para_rol.eq.${rol}`);
+  if (rol === 'lider_area' && SC.user.areaId != null && SC.user.areaId !== '') {
+    filtros.push(`para_rol.eq.area-${SC.user.areaId}`);
+    if (String(SC.user.areaId) === '14') filtros.push('para_rol.eq.hseq');
+  }
   if (!filtros.length) return;
   const q = `?select=*&or=(${filtros.join(',')})&order=created_at.desc&limit=40`;
   const rows = await sbFetch('notificaciones', 'GET', null, q);
@@ -144,6 +151,13 @@ async function abrirNotificacion(id) {
   const panel = document.getElementById('notif-panel');
   if (panel) panel.style.display = 'none';
   if (!n.leida) marcarLeida([n.id]);
+  if (n.ref_tabla === 'pesv' && typeof showView === 'function') { showView('pesv'); return; }
+  if ((n.ref_tabla === 'sig_kpis' || n.ref_tabla === 'sig_documentos') && typeof showView === 'function') {
+    showView('biblioteca');
+    if (n.ref_tabla === 'sig_kpis' && n.ref_id && typeof sigDetalleKPI === 'function') setTimeout(() => sigDetalleKPI(n.ref_id), 400);
+    else if (typeof renderBiblioteca === 'function') setTimeout(() => renderBiblioteca('alertas'), 400);
+    return;
+  }
   if (n.ref_tabla === 'permisos') {
     if (n.vista === 'portal-permisos') {
       if (typeof showView === 'function') showView('portal');
