@@ -41,7 +41,7 @@ function sigPuedeGestionar(key) {
   const r = sigRol();
   if (r === 'superadmin') return true;
   if (r === 'analista_rrhh' || r === 'lider_rrhh') return key === 'rrhh';
-  if (r === 'gerencia') return key === 'gerencia';
+  // Gerencia es de solo lectura: consulta todo y delega (gerencia.js)
   if (r === 'lider_area') return SC.user?.areaId != null && SC.user.areaId !== '' && key === 'area-' + SC.user.areaId;
   return false;
 }
@@ -74,6 +74,7 @@ function agregarNavSIG(nav) {
   addNavSep(nav, 'SISTEMA DE GESTIÓN');
   if (sigPuedeVer()) addNavItem(nav, '📚', 'Procesos y KPI por área', 'biblioteca');
   if (verPesv) addNavItem(nav, '🚦', 'PESV · Seguridad Vial', 'pesv');
+  if (typeof gdPuedeVerTareas === 'function' && gdPuedeVerTareas() && SC.user.role !== 'gerencia') addNavItem(nav, '📥', 'Tareas de Gerencia', 'delegaciones');
 }
 window.agregarNavSIG = agregarNavSIG;
 

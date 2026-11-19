@@ -303,6 +303,7 @@ async function pesvCargar() {
   const autos = await sbFetch('pesv_autoevaluaciones', 'GET', null, '?select=*&order=periodo.desc');
   PV.v2 = autos !== null;
   PV.autos = (autos || []).map(a => ({ ...a, resumen: typeof a.resumen === 'string' ? JSON.parse(a.resumen || '{}') : (a.resumen || {}) }));
+  if (typeof pvoCargar === 'function') await pvoCargar();   // capacitaciones, pruebas y equipos (pesv_operacion.js)
 }
 const pesvEval = () => PV.evals.find(e => e.id === PV.actual) || null;
 
@@ -350,7 +351,8 @@ async function renderPESV(tab) {
   }
   const alertasN = ev ? pesvAlertas(ev).filter(a => a.nivel !== 'info').length : 0;
   const tabs = [['pasos', '🧩 Los 24 pasos'], ['tablero', '📊 Tablero' + (alertasN ? ` · 🚨 ${alertasN}` : '')], ['evaluacion', '✅ Por criterio'],
-                ['kanban', '▦ Kanban'], ['acciones', '🛠 Plan de acción'], ['indicadores', '📈 Indicadores'],
+                ['kanban', '▦ Kanban'], ['acciones', '🛠 Plan de acción'], ['capacitacion', '🎓 Capacitaciones'],
+                ['alcohol', '🧪 Alcohol y drogas'], ['indicadores', '📈 Indicadores'],
                 ['autoeval', '📅 Autoevaluación mensual'], ['config', '⚙️ Nivel y datos']];
   root.innerHTML = `
     <div class="vz-head">
@@ -382,7 +384,9 @@ function pesvPintarTab() {
   const body = document.getElementById('pesv-body'), ev = pesvEval();
   if (!body || !ev) return;
   ({ pasos: pesvPasos, tablero: pesvTablero, evaluacion: pesvEvaluacion, kanban: pesvKanban, acciones: pesvAcciones,
-     indicadores: pesvIndicadores, autoeval: pesvAutoeval, config: pesvConfig })[PV.tab]?.(body, ev);
+     indicadores: pesvIndicadores, autoeval: pesvAutoeval, config: pesvConfig,
+     capacitacion: el => typeof pvoCapacitaciones === 'function' && pvoCapacitaciones(el),
+     alcohol: el => typeof pvoAlcohol === 'function' && pvoAlcohol(el) })[PV.tab]?.(body, ev);
 }
 
 // ─── Tablero ────────────────────────────────────────────────
@@ -989,6 +993,7 @@ function pesvPasos(el, ev) {
         <span class="vz-chip ${evid ? 'c-blue' : 'c-amber'}">📎 ${evid || 'Sin'} evidencia${evid === 1 ? '' : 's'}</span>
         ${c.no_cumple ? `<span class="vz-chip c-red">✗ ${c.no_cumple}</span>` : ''}
         ${venc ? `<span class="vz-chip c-red">⏰ ${VZ.esc(gs.fecha)}</span>` : gs.fecha ? `<span class="vz-chip">📅 ${VZ.esc(gs.fecha)}</span>` : ''}
+        ${typeof pvoChipsPaso === 'function' ? pvoChipsPaso(p.n) : ''}
       </div>
       <div class="text-xs text-muted" style="margin-top:6px">${gs.responsable ? '👤 ' + VZ.esc(gs.responsable) : (editar ? 'Sin responsable asignado' : '')} · ${c.total - c.pendiente}/${c.total} criterios</div>
     </div>`;
@@ -1085,6 +1090,7 @@ function pesvAlertas(ev) {
   });
   const sinCal = PESV_PASOS.filter(p => g.porPaso[p.n].aplica && g.porPaso[p.n].estado === 'sin_evaluar').length;
   if (sinCal) out.push({ nivel: 'media', icon: '📝', txt: `${sinCal} paso(s) sin calificar`, sub: 'No suman al cumplimiento hasta calificarlos', onclick: "renderPESV('pasos')" });
+  if (typeof pvoAlertas === 'function') out.push(...pvoAlertas());
   const d = new Date();
   if (d.getDate() < 5) out.push({ nivel: 'info', icon: '🗓', txt: `Faltan ${5 - d.getDate()} día(s) para la autoevaluación del 5`, sub: 'Actualiza calificaciones y evidencias antes del corte', onclick: "renderPESV('pasos')" });
   const orden = { alta: 0, media: 1, info: 2 };

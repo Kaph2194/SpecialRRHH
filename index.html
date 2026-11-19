@@ -386,7 +386,8 @@
         <span>Panel de Solo Lectura — Gerencia · Visualización de indicadores y reportes</span>
       </div>
       <div class="tabs mb-4" style="flex-wrap:wrap">
-        <div class="tab active" onclick="gerTab('resumen',this)">📊 Resumen</div>
+        <div class="tab active" onclick="gerTab('areas',this)">🧭 Áreas y delegación</div>
+        <div class="tab" onclick="gerTab('resumen',this)">📊 Resumen</div>
         <div class="tab" onclick="gerTab('emp-empresa',this)">🏢 Emp. por Empresa</div>
         <div class="tab" onclick="gerTab('empleados',this)">👥 Empleados</div>
         <div class="tab" onclick="gerTab('disciplinarios',this)">⚖️ Disciplinarios</div>
@@ -413,6 +414,9 @@
     <div id="view-hseq" class="view">
       <div id="hseq-root"></div>
     </div>
+
+    <!-- Tareas delegadas por Gerencia (gerencia.js) -->
+    <div id="view-delegaciones" class="view"><div id="delegaciones-root"></div></div>
 
     <!-- PESV · Plan Estratégico de Seguridad Vial (pesv.js) -->
     <div id="view-pesv" class="view">
@@ -3092,17 +3096,20 @@ function handlePermDrop(e) {
 }
 </script>
 
-<script src="app.js?v=44"></script>
+<script src="app.js?v=45"></script>
 <script src="hseq.js?v=1"></script>
 <script src="pendientes.js?v=2"></script>
 <script src="buzon.js?v=1"></script>
 <script src="password.js?v=2"></script>
 <script src="disciplinarios_adjuntos.js?v=2"></script>
-<script src="notificaciones.js?v=2"></script>
+<script src="notificaciones.js?v=3"></script>
 <script src="permisos_aclaraciones.js?v=1"></script>
 <script src="viz.js?v=1"></script>
 <script src="tablero.js?v=1"></script>
-<script src="pesv.js?v=3"></script>
-<script src="sig.js?v=2"></script>
+<script src="pesv.js?v=4"></script>
+<script src="pesv_operacion.js?v=2"></script>
+<script src="sig.js?v=3"></script>
+<script src="gerencia.js?v=1"></script>
+<script src="modulos.js?v=1"></script>
 </body>
 </html>
