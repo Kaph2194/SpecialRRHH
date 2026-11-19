@@ -152,6 +152,11 @@ async function abrirNotificacion(id) {
   if (panel) panel.style.display = 'none';
   if (!n.leida) marcarLeida([n.id]);
   if (n.ref_tabla === 'pesv' && typeof showView === 'function') { showView('pesv'); return; }
+  if (n.ref_tabla === 'delegaciones' && typeof showView === 'function') {
+    if (['gerencia', 'superadmin'].includes(SC.user?.role)) showView('gerencia'); else showView('delegaciones');
+    if (n.ref_id && typeof gdVerDelegacion === 'function') setTimeout(() => gdVerDelegacion(n.ref_id), 700);
+    return;
+  }
   if ((n.ref_tabla === 'sig_kpis' || n.ref_tabla === 'sig_documentos') && typeof showView === 'function') {
     showView('biblioteca');
     if (n.ref_tabla === 'sig_kpis' && n.ref_id && typeof sigDetalleKPI === 'function') setTimeout(() => sigDetalleKPI(n.ref_id), 400);

@@ -983,6 +983,13 @@ function doLogout() {
   authCerrarSesion();
   SC.user = null;
   SB_SESSION = null;
+  // Limpia datos en memoria de los módulos (otro usuario puede iniciar sesión en la misma pestaña)
+  try {
+    if (typeof PVO !== 'undefined') { PVO.pruebas = []; PVO.resumen = null; PVO.caps = []; PVO.equipos = []; }
+    if (typeof GD !== 'undefined') { GD.delegs = []; GD.ok = null; }
+    if (typeof PV !== 'undefined') PV.cargado = false;
+    if (typeof SG !== 'undefined') SG.cargado = false;
+  } catch (e) {}
   sessionStorage.removeItem('sc_user');
   try { localStorage.removeItem('sc_session'); } catch(e) {}
   document.getElementById('app').style.display        = 'none';
@@ -1166,7 +1173,7 @@ function empVisibleParaUsuario(empId) {
 // Vistas permitidas para líder de área (lista blanca de navegación)
 const VISTAS_LIDER_AREA = ['empleados','empleado-detail','novedades-area','malla-area',
   'permisos-admin','incapacidades-admin','vacaciones-admin','disciplinarios',
-  'portal','portal-retirado','comite-copasst','comite-cocolab','buzon','biblioteca'];
+  'portal','portal-retirado','comite-copasst','comite-cocolab','buzon','biblioteca','delegaciones'];
 
 // ─── SIDEBAR ──────────────────────────────────────────────
 function buildSidebar() {
@@ -1292,6 +1299,7 @@ function setActiveNav(view) {
 
 // ─── VIEW MANAGEMENT ──────────────────────────────────────
 const VIEW_TITLES = {
+  delegaciones: ['Tareas de Gerencia', 'Tareas delegadas a tu área · seguimiento y cumplimiento'],
   dashboard: ['Dashboard Principal', 'Resumen General · Special Car'],
   pesv: ['PESV · Seguridad Vial', 'Plan Estratégico de Seguridad Vial · Resolución 40595 de 2022'],
   biblioteca: ['Procesos y KPI por área', 'Sistema de gestión: documentos e indicadores de cada área'],
@@ -1330,7 +1338,7 @@ function showView(viewId) {
     if (String(SC.user?.areaId) === '5')  permitidas.push('nomina-formatos'); // solo líder Financiera
     // Líder HSEQ: su portal, la bodega y su propio módulo (HSEQ & SIG)
     if (String(SC.user?.areaId) === '14') permitidas = ['portal','portal-retirado','bodega',
-      'hseq','comite-copasst','comite-cocolab','buzon','pesv','biblioteca'];
+      'hseq','comite-copasst','comite-cocolab','buzon','pesv','biblioteca','delegaciones'];
     if (!permitidas.includes(viewId)) viewId = 'empleados';
   }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -1384,7 +1392,8 @@ function showView(viewId) {
   else if (viewId === 'permisos-admin') { renderPermisosAdmin(); setupPermActions(actions); }
   else if (viewId === 'incapacidades-admin') { renderIncapAdmin(); setupIncapActions(actions); }
   else if (viewId === 'portal') { renderPortal('perfil'); }
-  else if (viewId === 'gerencia') { renderGerencia('resumen'); }
+  else if (viewId === 'gerencia') { renderGerencia(typeof renderGerenciaAreas === 'function' ? 'areas' : 'resumen'); }
+  else if (viewId === 'delegaciones') { if (typeof renderDelegaciones === 'function') renderDelegaciones(); }
   else if (viewId === 'areas') { renderAreas(); }
   else if (viewId === 'perfiles-cargo')    { renderPerfilesCargo(); }
   else if (viewId === 'novedades-diarias') { renderNovedadesDiarias(); }
